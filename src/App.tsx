@@ -2003,7 +2003,13 @@ function RewardsView({ currentUser, redemptions }: { currentUser: User; redempti
   const notifMessage = `🎁 ${currentUser.name} vừa dùng ${r.cost} điểm đổi lấy: ${r.name}`
   await supabase.from('notifications').insert({ message: notifMessage })
 
-  supabase.functions.invoke('send-push', { body: { message: notifMessage } }).catch(() => {})
+  const { data: pushData, error: pushError } =
+  await supabase.functions.invoke('send-push', {
+    body: { message: notifMessage }
+  })
+
+console.log('Push result:', pushData)
+console.log('Push error:', pushError)
 
   setNotice(`🎉 Đổi thành công: ${r.name}!`)
   setTimeout(() => setNotice(''), 3500)
