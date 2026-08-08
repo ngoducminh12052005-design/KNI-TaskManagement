@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from './supabaseClient'
 import companyLogo from './assets/company-logo.png'
+import * as XLSX from 'xlsx'
 // ==================== TYPES ====================
 
 type Role = 'manager' | 'employee'
@@ -1976,8 +1977,90 @@ function LeaderboardView({ users, tasks }: { users: User[]; tasks: Task[] }) {
 }
 
 // ==================== REWARDS ====================
+function RedemptionHistoryPanel({ users }: { users: User[] }) {
+  const [allRedemptions, setAllRedemptions] = useState<{
+    id: string; userId: string; rewardName: string; cost: number; redeemedAt: string
+  }[]>([])
+  const [loading, setLoading] = useState(true)
 
-function RewardsView({ currentUser, redemptions }: { currentUser: User; redemptions: { id: string; userId: string; rewardId: string; cost: number }[] }) {
+  useEffect(() => {
+    supabase.from('redemptions').select('*').order('redeemed_at', { ascending: false })
+      .then(({ data }) => {
+        if (data) setAllRedemptions(data.map(r => ({
+          id: r.id, userId: r.user_id, rewardName: r.reward_name, cost: r.cost, redeemedAt: r.redeemed_at,
+        })))
+        setLoading(false)
+      })
+  }, [])
+
+  const exportExcel = () => {
+    const rows = allRedemptions.map(r => {
+      const u = users.find(x => x.id === r.userId)
+      const team = TEAMS.find(t => t.id === u?.teamId)
+      return {
+        'Nhân viên': u?.name ?? '(đã xoá)',
+        'Phòng ban': team?.name ?? '',
+        'Phần thưởng': r.rewardName,
+        'Điểm đã dùng': r.cost,
+        'Ngày đổi': new Date(r.redeemedAt).toLocaleString('vi-VN'),
+      }
+    })
+    const ws = XLSX.utils.json_to_sheet(rows)
+    ws['!cols'] = [{ wch: 22 }, { wch: 28 }, { wch: 25 }, { wch: 14 }, { wch: 20 }]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Lich su doi qua')
+    const filename = `lich-su-doi-qua_${new Date().toISOString().split('T')[0]}.xlsx`
+    XLSX.writeFile(wb, filename)
+  }
+
+  return (
+    <div className="mt-8 rounded-xl p-5" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-white font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+          📋 Lịch sử đổi quà toàn công ty
+        </h3>
+        <button onClick={exportExcel} disabled={allRedemptions.length === 0}
+          className="px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-40"
+          style={{ background: '#10b981', color: '#fff' }}>
+          ⬇ Xuất Excel
+        </button>
+      </div>
+      {loading ? (
+        <p className="text-gray-500 text-sm">Đang tải...</p>
+      ) : allRedemptions.length === 0 ? (
+        <p className="text-gray-500 text-sm">Chưa có ai đổi quà.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-gray-500 text-left" style={{ borderBottom: '1px solid #1e1e4a' }}>
+                <th className="py-2 pr-4">Nhân viên</th>
+                <th className="py-2 pr-4">Phần thưởng</th>
+                <th className="py-2 pr-4">Điểm</th>
+                <th className="py-2 pr-4">Ngày đổi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {allRedemptions.map(r => {
+                const u = users.find(x => x.id === r.userId)
+                return (
+                  <tr key={r.id} style={{ borderBottom: '1px solid #14142a' }}>
+                    <td className="py-2 pr-4 text-gray-300">{u?.name ?? '(đã xoá)'}</td>
+                    <td className="py-2 pr-4 text-gray-300">{r.rewardName}</td>
+                    <td className="py-2 pr-4 text-amber-400">{r.cost}</td>
+                    <td className="py-2 pr-4 text-gray-500">{new Date(r.redeemedAt).toLocaleDateString('vi-VN')}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RewardsView({ currentUser, redemptions, users }: { currentUser: User; redemptions: { id: string; userId: string; rewardId: string; cost: number }[]; users: User[] }) {
   const myRedemptions = redemptions.filter(r => r.userId === currentUser.id)
   const spentPoints = myRedemptions.reduce((s, r) => s + r.cost, 0)
   const availablePoints = currentUser.exp - spentPoints
@@ -1990,6 +2073,11 @@ function RewardsView({ currentUser, redemptions }: { currentUser: User; redempti
     user_id: currentUser.id, reward_id: r.id, reward_name: r.name, cost: r.cost,
   })
   if (error) { setNotice('❌ Lỗi: ' + error.message); setTimeout(() => setNotice(''), 3500); return }
+
+  await supabase.from('notifications').insert({
+    message: `🎁 ${currentUser.name} vừa dùng ${r.cost} điểm đổi lấy: ${r.name}`,
+  })
+
   setNotice(`🎉 Đổi thành công: ${r.name}!`)
   setTimeout(() => setNotice(''), 3500)
 }
@@ -2059,6 +2147,8 @@ function RewardsView({ currentUser, redemptions }: { currentUser: User; redempti
           )
         })}
       </div>
+
+      {currentUser.teamId === 't1c' && <RedemptionHistoryPanel users={users} />}
     </div>
   )
 }
@@ -2466,7 +2556,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
       case 'dashboard': return <DashboardView {...sharedProps} />
       case 'tasks': return <TasksView {...sharedProps} />
       case 'leaderboard': return <LeaderboardView users={users} tasks={tasks} />
-      case 'rewards': return <RewardsView currentUser={currentUser} redemptions={redemptions} />
+      case 'rewards': return <RewardsView currentUser={currentUser} redemptions={redemptions} users={users} />
       case 'social': return <SocialView currentUser={currentUser} users={users} messages={messages} setMessages={setMessages} />
       case 'profile': return <ProfileView currentUser={currentUser} setCurrentUser={setCurrentUser} tasks={tasks} />
     }
