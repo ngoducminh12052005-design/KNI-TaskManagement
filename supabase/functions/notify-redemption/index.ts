@@ -27,7 +27,7 @@ serve(async (req) => {
     }
 
     // TODO: khi domain đã xác thực trong Resend, đổi danh sách này thành email IT/HR thật
-    const recipients = ["minhnd6912@ut.edu.vn"]
+    const recipients = ["ngoducminh12052005@gmail.com"]
 
     const emailRes = await fetch("https://api.resend.com/emails", {
       method: "POST",

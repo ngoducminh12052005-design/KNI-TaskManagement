@@ -1998,18 +1998,8 @@ function RewardsView({ currentUser, redemptions }: { currentUser: User; redempti
   })
   if (error) { setNotice('❌ Lỗi: ' + error.message); setTimeout(() => setNotice(''), 3500); return }
 
-  // Gửi email báo cho IT/HR — không chặn giao diện nếu gửi lỗi
-  supabase.auth.getSession().then(({ data }) => {
-    const token = data.session?.access_token
-    fetch('https://legrsdmjstoxcoxvumgg.supabase.co/functions/v1/notify-redemption', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        apikey: 'sb_publishable_hd9EH0RxaXIdGXpfR-bcxg_2ZwlbLko',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ employeeName: currentUser.name, rewardName: r.name, cost: r.cost }),
-    }).catch(() => {}) // im lặng nếu lỗi, không ảnh hưởng trải nghiệm đổi quà
+  await supabase.from('notifications').insert({
+    message: `🎁 ${currentUser.name} vừa dùng ${r.cost} điểm đổi lấy: ${r.name}`,
   })
 
   setNotice(`🎉 Đổi thành công: ${r.name}!`)
@@ -2401,12 +2391,56 @@ const NAV = [
   { id: 'social', icon: '💬', label: 'Social' },
   { id: 'profile', icon: '👤', label: 'Hồ sơ' },
 ]
+function NotificationBell({ notifications }: { notifications: { id: string; message: string; createdAt: string }[] }) {
+  const [open, setOpen] = useState(false)
+  const [lastSeen, setLastSeen] = useState(() => localStorage.getItem('lastSeenNotif') || '')
+  const unread = notifications.filter(n => n.createdAt > lastSeen).length
 
-function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, messages, setMessages, redemptions }: {
+  const toggle = () => {
+    setOpen(o => !o)
+    if (!open) {
+      const now = new Date().toISOString()
+      localStorage.setItem('lastSeenNotif', now)
+      setLastSeen(now)
+    }
+  }
+
+  return (
+    <div className="relative">
+      <button onClick={toggle} className="relative w-9 h-9 rounded-lg flex items-center justify-center hover:bg-[#1a1a40]">
+        <span className="text-lg">🔔</span>
+        {unread > 0 && (
+          <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center font-bold">
+            {unread > 9 ? '9+' : unread}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-2 w-80 max-h-96 overflow-y-auto rounded-xl z-50"
+          style={{ background: '#0e0e24', border: '1px solid #1e1e4a', boxShadow: '0 8px 24px #00000060' }}>
+          <div className="px-4 py-3 text-white font-bold text-sm" style={{ borderBottom: '1px solid #1e1e4a' }}>Thông báo</div>
+          {notifications.length === 0 ? (
+            <p className="text-gray-600 text-sm text-center py-6">Chưa có thông báo nào</p>
+          ) : (
+            notifications.map(n => (
+              <div key={n.id} className="px-4 py-3 text-sm text-gray-300" style={{ borderBottom: '1px solid #14142a' }}>
+                <p>{n.message}</p>
+                <p className="text-gray-600 text-[10px] mt-1">{fmtTime(n.createdAt)}</p>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, messages, setMessages, redemptions, notifications }: {
   currentUser: User; setCurrentUser: (u: User) => void; allUsers: User[]
   tasks: Task[]; setTasks: (t: Task[]) => void
   messages: Message[]; setMessages: (m: Message[]) => void
   redemptions: { id: string; userId: string; rewardId: string; cost: number }[]
+  notifications: { id: string; message: string; createdAt: string }[]
 }) {
   const [view, setView] = useState<View>('dashboard')
   const { level } = getExpProgress(currentUser.exp)
@@ -2484,6 +2518,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
               <div className="w-28"><ExpBarMini exp={currentUser.exp} /></div>
               <span className="text-gray-600 text-xs" style={{ fontFamily: 'JetBrains Mono, monospace' }}>{currentUser.exp}</span>
             </div>
+            {currentUser.teamId === 't1c' && <NotificationBell notifications={notifications} />}
             <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('profile')}>
               <CharAvatar user={currentUser} size={36} />
               <div>
@@ -2541,6 +2576,7 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [checkingSession, setCheckingSession] = useState(true)
   const [redemptions, setRedemptions] = useState<{ id: string; userId: string; rewardId: string; cost: number }[]>([])
+  const [notifications, setNotifications] = useState<{ id: string; message: string; createdAt: string }[]>([])
 
   function mapProfileToUser(p: any): User {
     return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department }
@@ -2571,12 +2607,32 @@ export default function App() {
   supabase.from('redemptions').select('*').then(({ data }) => data && setRedemptions(
     data.map(r => ({ id: r.id, userId: r.user_id, rewardId: r.reward_id, cost: r.cost }))
   ))
+//   const channel = supabase.channel('redemptions-changes')
+//     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'redemptions' }, payload => {
+//       const r = payload.new
+//       setRedemptions(prev => [...prev, { id: r.id, userId: r.user_id, rewardId: r.reward_id, cost: r.cost }])
+//     }).subscribe()
+//   return () => { supabase.removeChannel(channel) }
+// }, [session])
   const channel = supabase.channel('redemptions-changes')
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'redemptions' }, payload => {
       const r = payload.new
       setRedemptions(prev => [...prev, { id: r.id, userId: r.user_id, rewardId: r.reward_id, cost: r.cost }])
     }).subscribe()
   return () => { supabase.removeChannel(channel) }
+}, [session])
+
+useEffect(() => {
+  if (!session) return
+  supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(20)
+    .then(({ data }) => data && setNotifications(data.map(n => ({ id: n.id, message: n.message, createdAt: n.created_at }))))
+
+  const notifChannel = supabase.channel('notifications-changes')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, payload => {
+      const n = payload.new
+      setNotifications(prev => [{ id: n.id, message: n.message, createdAt: n.created_at }, ...prev])
+    }).subscribe()
+  return () => { supabase.removeChannel(notifChannel) }
 }, [session])
   
   // Kiểm tra xem đã đăng nhập từ trước chưa (giữ session khi refresh trang)
@@ -2668,6 +2724,7 @@ useEffect(() => {
       messages={messages}
       setMessages={setMessages}
       redemptions={redemptions}
+      notifications={notifications}
     />
   )
 }
