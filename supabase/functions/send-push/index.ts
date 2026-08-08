@@ -30,11 +30,17 @@ serve(async (req) => {
         "Authorization": `Basic ${Deno.env.get("ONESIGNAL_REST_API_KEY")}`,
       },
       body: JSON.stringify({
-        app_id: Deno.env.get("ONESIGNAL_APP_ID"),
-        filters: [{ field: "tag", key: "team", relation: "=", value: "t1c" }],
-        headings: { en: "🎁 Thông báo đổi quà" },
-        contents: { en: message },
-      }),
+      app_id: Deno.env.get("ONESIGNAL_APP_ID"),
+      include_subscription_ids: [
+        "43377dc8-b9ad-4f82-b2e1-111543f73d8d"
+      ],
+      headings: {
+        en: "🎁 Thông báo đổi quà"
+      },
+      contents: {
+        en: message
+      }
+    }),
     })
     const result = await res.json()
 
