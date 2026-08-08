@@ -1306,8 +1306,10 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser }: {
   })
 
   const isManager = currentUser.role === 'manager'
-  const employees = users.filter(u => u.role === 'employee' && u.teamId === currentUser.teamId)
-  const teamUsers = users.filter(u => u.teamId === currentUser.teamId)
+  // const employees = users.filter(u => u.role === 'employee' && u.teamId === currentUser.teamId)
+  // const teamUsers = users.filter(u => u.teamId === currentUser.teamId)
+  const employees = users.filter(u => u.role === 'employee')
+  const teamUsers = users
 
   const visible = tasks.filter(t => {
     const isMyTask = t.assignedTo.includes(currentUser.id) || (t.selfCreated && t.createdBy === currentUser.id) || t.supporters.includes(currentUser.id)
