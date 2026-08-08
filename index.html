@@ -9,6 +9,14 @@
     <meta name="theme-color" content="#0a0a1a" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+    <script>
+      window.OneSignalDeferred = window.OneSignalDeferred || [];
+      OneSignalDeferred.push(async function(OneSignal) {
+        await OneSignal.init({
+          appId: "bac9b3ee-f874-4e62-bce5-69334f88dda7",
+        });
+      });
+    </script>
     <!-- figma:head-end -->
   </head>
   <body>
