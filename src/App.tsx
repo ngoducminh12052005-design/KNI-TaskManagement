@@ -1982,16 +1982,39 @@ function RewardsView({ currentUser, redemptions }: { currentUser: User; redempti
   const redeemed = myRedemptions.map(r => r.rewardId)
   const [notice, setNotice] = useState('')
 
+//   const handleRedeem = async (r: Reward) => {
+//   if (availablePoints < r.cost || redeemed.includes(r.id)) return
+//   const { error } = await supabase.from('redemptions').insert({
+//     user_id: currentUser.id, reward_id: r.id, reward_name: r.name, cost: r.cost,
+//   })
+//   if (error) { setNotice('❌ Lỗi: ' + error.message); setTimeout(() => setNotice(''), 3500); return }
+//   setNotice(`🎉 Đổi thành công: ${r.name}!`)
+//   setTimeout(() => setNotice(''), 3500)
+// }
   const handleRedeem = async (r: Reward) => {
   if (availablePoints < r.cost || redeemed.includes(r.id)) return
   const { error } = await supabase.from('redemptions').insert({
     user_id: currentUser.id, reward_id: r.id, reward_name: r.name, cost: r.cost,
   })
   if (error) { setNotice('❌ Lỗi: ' + error.message); setTimeout(() => setNotice(''), 3500); return }
+
+  // Gửi email báo cho IT/HR — không chặn giao diện nếu gửi lỗi
+  supabase.auth.getSession().then(({ data }) => {
+    const token = data.session?.access_token
+    fetch('https://legrsdmjstoxcoxvumgg.supabase.co/functions/v1/notify-redemption', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        apikey: 'sb_publishable_hd9EH0RxaXIdGXpfR-bcxg_2ZwlbLko',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ employeeName: currentUser.name, rewardName: r.name, cost: r.cost }),
+    }).catch(() => {}) // im lặng nếu lỗi, không ảnh hưởng trải nghiệm đổi quà
+  })
+
   setNotice(`🎉 Đổi thành công: ${r.name}!`)
   setTimeout(() => setNotice(''), 3500)
 }
-
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-start justify-between mb-6">
