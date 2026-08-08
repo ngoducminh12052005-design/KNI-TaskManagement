@@ -1998,9 +1998,10 @@ function RewardsView({ currentUser, redemptions }: { currentUser: User; redempti
   })
   if (error) { setNotice('❌ Lỗi: ' + error.message); setTimeout(() => setNotice(''), 3500); return }
 
-  await supabase.from('notifications').insert({
-    message: `🎁 ${currentUser.name} vừa dùng ${r.cost} điểm đổi lấy: ${r.name}`,
-  })
+  const notifMessage = `🎁 ${currentUser.name} vừa dùng ${r.cost} điểm đổi lấy: ${r.name}`
+  await supabase.from('notifications').insert({ message: notifMessage })
+
+  supabase.functions.invoke('send-push', { body: { message: notifMessage } }).catch(() => {})
 
   setNotice(`🎉 Đổi thành công: ${r.name}!`)
   setTimeout(() => setNotice(''), 3500)
@@ -2710,6 +2711,16 @@ useEffect(() => {
   }
 }, [allUsers])
 
+useEffect(() => {
+  if (!currentProfile) return
+  const w = window as any
+  if (!w.OneSignalDeferred) return
+  w.OneSignalDeferred.push(async (OneSignal: any) => {
+    await OneSignal.login(currentProfile.id)
+    await OneSignal.User.addTag('team', currentProfile.teamId)
+    await OneSignal.Notifications.requestPermission()
+  })
+}, [currentProfile])
 
   if (checkingSession) return <div style={{ background: '#060610', minHeight: '100vh' }} />
   if (!session || !currentProfile) return <LoginScreen onLoggedIn={() => {}} />
