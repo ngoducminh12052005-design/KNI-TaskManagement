@@ -4,11 +4,23 @@ import App from './App'
 import './index.css'
 
 declare global {
-  interface Window { OneSignalDeferred: any[] }
+  interface Window {
+    OneSignalDeferred: any[]
+  }
 }
+
 window.OneSignalDeferred = window.OneSignalDeferred || []
+
 window.OneSignalDeferred.push(async (OneSignal: any) => {
-  await OneSignal.init({ appId: 'bac9b3ee-f874-4e62-bce5-69334f88dda7' })
+  try {
+    await OneSignal.init({
+      appId: 'bac9b3ee-f874-4e62-bce5-69334f88dda7',
+    })
+
+    console.log('OneSignal init thành công')
+  } catch (error) {
+    console.error('OneSignal init lỗi:', error)
+  }
 })
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -16,8 +28,3 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <App />
   </React.StrictMode>,
 )
-// if ('serviceWorker' in navigator) {
-//   window.addEventListener('load', () => {
-//     navigator.serviceWorker.register('/sw.js')
-//   })
-// }

@@ -2728,29 +2728,47 @@ useEffect(() => {
   if (!currentProfile) return
 
   const w = window as any
-  if (!w.OneSignalDeferred) return
+
+  if (!w.OneSignalDeferred) {
+    console.error('OneSignalDeferred chưa được load')
+    return
+  }
 
   w.OneSignalDeferred.push(async (OneSignal: any) => {
     try {
-      // Gắn tài khoản Supabase hiện tại vào OneSignal
+      // Đăng nhập user hiện tại vào OneSignal
       await OneSignal.login(currentProfile.id)
 
-      // Gắn team của nhân viên
-      await OneSignal.User.addTag('team', currentProfile.teamId)
+      // Gắn team của user
+      await OneSignal.User.addTag(
+        'team',
+        currentProfile.teamId
+      )
 
-      // Xin quyền nhận notification
-      const permission =
-        await OneSignal.Notifications.requestPermission()
-
-      console.log('OneSignal notification permission:', permission)
-
-      // Kiểm tra subscription
+      // Kiểm tra Push Subscription
       const optedIn =
         await OneSignal.User.PushSubscription.optedIn
 
-      console.log('OneSignal push subscribed:', optedIn)
+      console.log(
+        'OneSignal push subscribed:',
+        optedIn
+      )
+
+      console.log(
+        'OneSignal user:',
+        currentProfile.id
+      )
+
+      console.log(
+        'OneSignal team:',
+        currentProfile.teamId
+      )
+
     } catch (error) {
-      console.error('OneSignal error:', error)
+      console.error(
+        'OneSignal error:',
+        error
+      )
     }
   })
 }, [currentProfile])
