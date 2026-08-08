@@ -28,6 +28,7 @@ interface User {
   exp: number
   teamId: string
   department: string
+  email?: string
 }
 
 interface Task {
@@ -2015,21 +2016,21 @@ function RedemptionHistoryPanel({ users }: { users: User[] }) {
     }
     return true // 'all'
   })
-
   const exportExcel = () => {
-    const rows = filtered.map(r => {
-      const u = users.find(x => x.id === r.userId)
-      const team = TEAMS.find(t => t.id === u?.teamId)
-      return {
-        'Nhân viên': u?.name ?? '(đã xoá)',
-        'Phòng ban': team?.name ?? '',
-        'Phần thưởng': r.rewardName,
-        'Điểm đã dùng': r.cost,
-        'Ngày đổi': new Date(r.redeemedAt).toLocaleString('vi-VN'),
-      }
-    })
-    const ws = XLSX.utils.json_to_sheet(rows)
-    ws['!cols'] = [{ wch: 22 }, { wch: 28 }, { wch: 25 }, { wch: 14 }, { wch: 20 }]
+  const rows = filtered.map(r => {
+  const u = users.find(x => x.id === r.userId)
+  const team = TEAMS.find(t => t.id === u?.teamId)
+  return {
+    'Nhân viên': u?.name ?? '(đã xoá)',
+    'Email': u?.email ?? '',
+    'Phòng ban': team?.name ?? '',
+    'Phần thưởng': r.rewardName,
+    'Điểm đã dùng': r.cost,
+    'Ngày đổi': new Date(r.redeemedAt).toLocaleString('vi-VN'),
+  }
+})
+const ws = XLSX.utils.json_to_sheet(rows)
+ws['!cols'] = [{ wch: 22 }, { wch: 26 }, { wch: 28 }, { wch: 25 }, { wch: 14 }, { wch: 20 }]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Lich su doi qua')
     const label = range === 'week' ? 'tuan-nay' : range === 'month' ? 'thang-nay' : range === 'custom' ? `${customFrom || 'batdau'}_${customTo || 'ketthuc'}` : 'tatca'
@@ -2087,6 +2088,7 @@ function RedemptionHistoryPanel({ users }: { users: User[] }) {
             <thead>
               <tr className="text-gray-500 text-left" style={{ borderBottom: '1px solid #1e1e4a' }}>
                 <th className="py-2 pr-4">Nhân viên</th>
+                <th className="py-2 pr-4">Email</th>
                 <th className="py-2 pr-4">Phần thưởng</th>
                 <th className="py-2 pr-4">Điểm</th>
                 <th className="py-2 pr-4">Ngày đổi</th>
@@ -2098,6 +2100,7 @@ function RedemptionHistoryPanel({ users }: { users: User[] }) {
                 return (
                   <tr key={r.id} style={{ borderBottom: '1px solid #14142a' }}>
                     <td className="py-2 pr-4 text-gray-300">{u?.name ?? '(đã xoá)'}</td>
+                    <td className="py-2 pr-4 text-gray-500 text-xs">{u?.email ?? ''}</td>
                     <td className="py-2 pr-4 text-gray-300">{r.rewardName}</td>
                     <td className="py-2 pr-4 text-amber-400">{r.cost}</td>
                     <td className="py-2 pr-4 text-gray-500">{new Date(r.redeemedAt).toLocaleDateString('vi-VN')}</td>
@@ -2730,8 +2733,8 @@ export default function App() {
   const [notifications, setNotifications] = useState<{ id: string; message: string; createdAt: string }[]>([])
 
   function mapProfileToUser(p: any): User {
-    return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department }
-  }
+    return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email }
+}
 
   function mapDbMessage(m: any): Message {
     return { id: m.id, userId: m.user_id, toUserId: m.to_user_id ?? undefined, content: m.content, channel: m.channel, timestamp: m.created_at }
