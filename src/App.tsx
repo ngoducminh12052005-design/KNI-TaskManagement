@@ -2713,16 +2713,48 @@ useEffect(() => {
   }
 }, [allUsers])
 
+// useEffect(() => {
+//   if (!currentProfile) return
+//   const w = window as any
+//   if (!w.OneSignalDeferred) return
+//   w.OneSignalDeferred.push(async (OneSignal: any) => {
+//     await OneSignal.login(currentProfile.id)
+//     await OneSignal.User.addTag('team', currentProfile.teamId)
+//     await OneSignal.Notifications.requestPermission()
+//   })
+// }, [currentProfile])
+
 useEffect(() => {
   if (!currentProfile) return
+
   const w = window as any
   if (!w.OneSignalDeferred) return
+
   w.OneSignalDeferred.push(async (OneSignal: any) => {
-    await OneSignal.login(currentProfile.id)
-    await OneSignal.User.addTag('team', currentProfile.teamId)
-    await OneSignal.Notifications.requestPermission()
+    try {
+      // Gắn tài khoản Supabase hiện tại vào OneSignal
+      await OneSignal.login(currentProfile.id)
+
+      // Gắn team của nhân viên
+      await OneSignal.User.addTag('team', currentProfile.teamId)
+
+      // Xin quyền nhận notification
+      const permission =
+        await OneSignal.Notifications.requestPermission()
+
+      console.log('OneSignal notification permission:', permission)
+
+      // Kiểm tra subscription
+      const optedIn =
+        await OneSignal.User.PushSubscription.optedIn
+
+      console.log('OneSignal push subscribed:', optedIn)
+    } catch (error) {
+      console.error('OneSignal error:', error)
+    }
   })
 }, [currentProfile])
+
 
   if (checkingSession) return <div style={{ background: '#060610', minHeight: '100vh' }} />
   if (!session || !currentProfile) return <LoginScreen onLoggedIn={() => {}} />
