@@ -1982,6 +1982,9 @@ function RedemptionHistoryPanel({ users }: { users: User[] }) {
     id: string; userId: string; rewardName: string; cost: number; redeemedAt: string
   }[]>([])
   const [loading, setLoading] = useState(true)
+  const [range, setRange] = useState<'week' | 'month' | 'all' | 'custom'>('month')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
 
   useEffect(() => {
     supabase.from('redemptions').select('*').order('redeemed_at', { ascending: false })
@@ -1993,8 +1996,28 @@ function RedemptionHistoryPanel({ users }: { users: User[] }) {
       })
   }, [])
 
+  const filtered = allRedemptions.filter(r => {
+    const d = new Date(r.redeemedAt)
+    const now = new Date()
+    if (range === 'week') {
+      const startOfWeek = new Date(now)
+      startOfWeek.setDate(now.getDate() - now.getDay())
+      startOfWeek.setHours(0, 0, 0, 0)
+      return d >= startOfWeek
+    }
+    if (range === 'month') {
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
+    }
+    if (range === 'custom') {
+      if (customFrom && d < new Date(customFrom)) return false
+      if (customTo && d > new Date(customTo + 'T23:59:59')) return false
+      return true
+    }
+    return true // 'all'
+  })
+
   const exportExcel = () => {
-    const rows = allRedemptions.map(r => {
+    const rows = filtered.map(r => {
       const u = users.find(x => x.id === r.userId)
       const team = TEAMS.find(t => t.id === u?.teamId)
       return {
@@ -2009,26 +2032,55 @@ function RedemptionHistoryPanel({ users }: { users: User[] }) {
     ws['!cols'] = [{ wch: 22 }, { wch: 28 }, { wch: 25 }, { wch: 14 }, { wch: 20 }]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Lich su doi qua')
-    const filename = `lich-su-doi-qua_${new Date().toISOString().split('T')[0]}.xlsx`
-    XLSX.writeFile(wb, filename)
+    const label = range === 'week' ? 'tuan-nay' : range === 'month' ? 'thang-nay' : range === 'custom' ? `${customFrom || 'batdau'}_${customTo || 'ketthuc'}` : 'tatca'
+    XLSX.writeFile(wb, `lich-su-doi-qua_${label}.xlsx`)
   }
+
+  const RANGE_OPTIONS: { id: typeof range; label: string }[] = [
+    { id: 'week', label: 'Tuần này' },
+    { id: 'month', label: 'Tháng này' },
+    { id: 'all', label: 'Tất cả' },
+    { id: 'custom', label: 'Tự chọn' },
+  ]
 
   return (
     <div className="mt-8 rounded-xl p-5" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <h3 className="text-white font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
           📋 Lịch sử đổi quà toàn công ty
         </h3>
-        <button onClick={exportExcel} disabled={allRedemptions.length === 0}
+        <button onClick={exportExcel} disabled={filtered.length === 0}
           className="px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-40"
           style={{ background: '#10b981', color: '#fff' }}>
-          ⬇ Xuất Excel
+          ⬇ Xuất Excel ({filtered.length})
         </button>
       </div>
+
+      <div className="flex gap-2 mb-4 flex-wrap items-center">
+        {RANGE_OPTIONS.map(opt => (
+          <button key={opt.id} onClick={() => setRange(opt.id)}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold"
+            style={{ background: range === opt.id ? '#7c3aed' : '#14143a', color: range === opt.id ? '#fff' : '#6b7280' }}>
+            {opt.label}
+          </button>
+        ))}
+        {range === 'custom' && (
+          <>
+            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+              className="px-2 py-1.5 rounded-lg text-xs text-white outline-none"
+              style={{ background: '#14143a', border: '1px solid #2a2a5a', colorScheme: 'dark' }} />
+            <span className="text-gray-600 text-xs">đến</span>
+            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
+              className="px-2 py-1.5 rounded-lg text-xs text-white outline-none"
+              style={{ background: '#14143a', border: '1px solid #2a2a5a', colorScheme: 'dark' }} />
+          </>
+        )}
+      </div>
+
       {loading ? (
         <p className="text-gray-500 text-sm">Đang tải...</p>
-      ) : allRedemptions.length === 0 ? (
-        <p className="text-gray-500 text-sm">Chưa có ai đổi quà.</p>
+      ) : filtered.length === 0 ? (
+        <p className="text-gray-500 text-sm">Không có dữ liệu trong khoảng thời gian này.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -2041,7 +2093,7 @@ function RedemptionHistoryPanel({ users }: { users: User[] }) {
               </tr>
             </thead>
             <tbody>
-              {allRedemptions.map(r => {
+              {filtered.map(r => {
                 const u = users.find(x => x.id === r.userId)
                 return (
                   <tr key={r.id} style={{ borderBottom: '1px solid #14142a' }}>
