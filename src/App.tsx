@@ -1984,36 +1984,36 @@ function RewardsView({ currentUser, redemptions }: { currentUser: User; redempti
   const redeemed = myRedemptions.map(r => r.rewardId)
   const [notice, setNotice] = useState('')
 
-//   const handleRedeem = async (r: Reward) => {
-//   if (availablePoints < r.cost || redeemed.includes(r.id)) return
-//   const { error } = await supabase.from('redemptions').insert({
-//     user_id: currentUser.id, reward_id: r.id, reward_name: r.name, cost: r.cost,
-//   })
-//   if (error) { setNotice('❌ Lỗi: ' + error.message); setTimeout(() => setNotice(''), 3500); return }
-//   setNotice(`🎉 Đổi thành công: ${r.name}!`)
-//   setTimeout(() => setNotice(''), 3500)
-// }
   const handleRedeem = async (r: Reward) => {
   if (availablePoints < r.cost || redeemed.includes(r.id)) return
   const { error } = await supabase.from('redemptions').insert({
     user_id: currentUser.id, reward_id: r.id, reward_name: r.name, cost: r.cost,
   })
   if (error) { setNotice('❌ Lỗi: ' + error.message); setTimeout(() => setNotice(''), 3500); return }
-
-  const notifMessage = `🎁 ${currentUser.name} vừa dùng ${r.cost} điểm đổi lấy: ${r.name}`
-  await supabase.from('notifications').insert({ message: notifMessage })
-
-  const { data: pushData, error: pushError } =
-  await supabase.functions.invoke('send-push', {
-    body: { message: notifMessage }
-  })
-
-console.log('Push result:', pushData)
-console.log('Push error:', pushError)
-
   setNotice(`🎉 Đổi thành công: ${r.name}!`)
   setTimeout(() => setNotice(''), 3500)
 }
+//   const handleRedeem = async (r: Reward) => {
+//   if (availablePoints < r.cost || redeemed.includes(r.id)) return
+//   const { error } = await supabase.from('redemptions').insert({
+//     user_id: currentUser.id, reward_id: r.id, reward_name: r.name, cost: r.cost,
+//   })
+//   if (error) { setNotice('❌ Lỗi: ' + error.message); setTimeout(() => setNotice(''), 3500); return }
+
+//   const notifMessage = `🎁 ${currentUser.name} vừa dùng ${r.cost} điểm đổi lấy: ${r.name}`
+//   await supabase.from('notifications').insert({ message: notifMessage })
+
+//   const { data: pushData, error: pushError } =
+//   await supabase.functions.invoke('send-push', {
+//     body: { message: notifMessage }
+//   })
+
+// console.log('Push result:', pushData)
+// console.log('Push error:', pushError)
+
+//   setNotice(`🎉 Đổi thành công: ${r.name}!`)
+//   setTimeout(() => setNotice(''), 3500)
+// }
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-start justify-between mb-6">
