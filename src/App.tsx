@@ -29,6 +29,7 @@ interface User {
   teamId: string
   department: string
   email?: string
+  isDirector?: boolean
 }
 
 interface Task {
@@ -54,6 +55,8 @@ interface Task {
   startDate?: string
   important: boolean
   urgent: boolean
+  crossDeptPending?: boolean
+  targetTeamId?: string
 }
 
 interface Message {
@@ -1310,8 +1313,12 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser }: {
   const isManager = currentUser.role === 'manager'
   // const employees = users.filter(u => u.role === 'employee' && u.teamId === currentUser.teamId)
   // const teamUsers = users.filter(u => u.teamId === currentUser.teamId)
-  const employees = users.filter(u => u.role === 'employee')
-  const teamUsers = users
+  const employees = currentUser.isDirector
+    ? users.filter(u => u.role === 'employee')
+    : users.filter(u => u.role === 'employee' && u.teamId === currentUser.teamId)
+  const teamUsers = currentUser.isDirector
+    ? users
+    : users.filter(u => u.teamId === currentUser.teamId)
 
   const visible = tasks.filter(t => {
     const isMyTask = t.assignedTo.includes(currentUser.id) || (t.selfCreated && t.createdBy === currentUser.id) || t.supporters.includes(currentUser.id)
@@ -1393,6 +1400,15 @@ const handleReject = async (task: Task) => {
   }).eq('id', task.id)
 }
 
+const handleApproveCrossDept = async (task: Task) => {
+  await supabase.from('tasks').update({ cross_dept_pending: false }).eq('id', task.id)
+}
+
+const handleRejectCrossDept = async (task: Task) => {
+  if (!window.confirm('Từ chối task này? Task sẽ bị xoá hoàn toàn.')) return
+  await supabase.from('tasks').delete().eq('id', task.id)
+}
+
 // const viewSubmissionFile = async (key: string) => {
 //   const { data: sessionData } = await supabase.auth.getSession()
 //   const token = sessionData.session?.access_token
@@ -1408,14 +1424,18 @@ const handleReject = async (task: Task) => {
 
 
 const handleCreate = async () => {
-
-
   if (!form.title.trim()) return
   const { min, max } = getExpRange(form.priority, form.important, form.urgent)
   if (form.expReward < min || form.expReward > max) {
     alert(`Điểm EXP phải nằm trong khoảng ${min}–${max} cho mức độ "${PRIORITY_CONFIG[form.priority].label}" với lựa chọn Quan trọng/Gấp hiện tại`)
     return
   }
+
+  const assignedUsers = form.assignedTo.map(uid => users.find(u => u.id === uid)).filter(Boolean) as User[]
+  const outsideAssignees = assignedUsers.filter(u => u.teamId !== currentUser.teamId)
+  const isCrossDept = !currentUser.isDirector && outsideAssignees.length > 0
+  const targetTeamId = isCrossDept ? outsideAssignees[0].teamId : null
+
   await supabase.from('tasks').insert({
     title: form.title, description: form.description, exp_reward: form.expReward,
     status: 'open', assigned_to: isManager ? form.assignedTo : [currentUser.id],
@@ -1425,6 +1445,8 @@ const handleCreate = async () => {
     due_date: form.dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
     category: form.category, priority: form.priority, self_created: !isManager,
     important: form.important, urgent: form.urgent,
+    cross_dept_pending: isCrossDept,
+    target_team_id: targetTeamId,
   })
   setShowModal(false)
   setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'development', priority: 'medium', important: false, urgent: false, assignedTo: [], projectManager: [], supporters: [] })
@@ -1611,7 +1633,24 @@ const handleCreate = async () => {
               </div> */}
               {/* Actions */}
             <div className="flex items-center justify-end mt-auto">
-              {task.status === 'completed' ? (
+              {task.crossDeptPending && currentUser.role === 'manager' && currentUser.teamId === task.targetTeamId ? (
+                  <div className="flex gap-1.5">
+                    <button onClick={() => handleRejectCrossDept(task)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#2a1010', color: '#f87171' }}>
+                      Từ chối
+                    </button>
+                    <button onClick={() => handleApproveCrossDept(task)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#0f2a1a', color: '#34d399' }}>
+                      ✓ Duyệt nhận task
+                    </button>
+                  </div>
+
+                ) : task.crossDeptPending ? (
+                  <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#2a1a00', color: '#fbbf24' }}>
+                    ⏳ Chờ quản lý phòng ban duyệt
+                  </span>
+
+                ) : task.status === 'completed' ? (
                 <span className="text-green-400 text-xs">✓ Hoàn thành</span>
 
               // ) : task.status === 'submitted' && currentUser.role === 'manager' ? (
@@ -1651,7 +1690,7 @@ const handleCreate = async () => {
               ) : isMyTask ? (
                 <div className="flex flex-col gap-1 items-end">
                   <div className="flex gap-1.5">
-                    {task.status === 'open' && (
+                    {task.status === 'open' && !task.crossDeptPending && (
                       <button onClick={() => handleStart(task.id)}
                         className="px-4 py-2 rounded-xl text-sm font-bold" style={{ background: '#1e293b', color: '#60a5fa' }}>
                         Bắt đầu
@@ -2733,7 +2772,7 @@ export default function App() {
   const [notifications, setNotifications] = useState<{ id: string; message: string; createdAt: string }[]>([])
 
   function mapProfileToUser(p: any): User {
-    return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email }
+  return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email, isDirector: p.is_director ?? false }
 }
 
   function mapDbMessage(m: any): Message {
@@ -2752,6 +2791,8 @@ export default function App() {
     submittedAt: t.submitted_at ?? undefined,
     rejectedReason: t.rejected_reason ?? undefined,
     startDate: t.start_date,
+    crossDeptPending: t.cross_dept_pending ?? false,
+    targetTeamId: t.target_team_id ?? undefined,
   }
 }
 
