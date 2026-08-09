@@ -1631,7 +1631,9 @@ const handleCreate = async () => {
               </div> */}
               {/* Actions */}
             <div className="flex items-center justify-end mt-auto">
-              {task.crossDeptPending && currentUser.role === 'manager' && currentUser.teamId === task.targetTeamId ? (
+              {task.crossDeptPending &&
+                currentUser.role === 'manager' &&
+                (currentUser.teamId === task.targetTeamId || currentUser.isDirector) ? (
                   <div className="flex gap-1.5">
                     <button onClick={() => handleRejectCrossDept(task)}
                       className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#2a1010', color: '#f87171' }}>
