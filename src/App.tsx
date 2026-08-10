@@ -1319,7 +1319,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser }: {
     : users.filter(u => u.teamId === currentUser.teamId)
 
   const visible = tasks.filter(t => {
-    const isMyTask = t.assignedTo.includes(currentUser.id) || (t.selfCreated && t.createdBy === currentUser.id) || t.supporters.includes(currentUser.id)
+    const isMyTask = t.assignedTo.includes(currentUser.id) || (t.selfCreated && t.createdBy === currentUser.id) || t.supporters.includes(currentUser.id) || t.projectManager.includes(currentUser.id)
     const assignees = users.filter(u => t.assignedTo.includes(u.id))
     const deptPrefix = (id?: string) => id?.match(/^t\d+/)?.[0] ?? ''
     const isCrossDeptForMyDept = !!t.targetTeamId && (
