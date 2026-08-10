@@ -1321,9 +1321,14 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser }: {
   const visible = tasks.filter(t => {
     const isMyTask = t.assignedTo.includes(currentUser.id) || (t.selfCreated && t.createdBy === currentUser.id) || t.supporters.includes(currentUser.id)
     const assignees = users.filter(u => t.assignedTo.includes(u.id))
-    const canReviewCrossDept = t.crossDeptPending && (t.targetTeamId === currentUser.teamId || currentUser.isDirector)
+    const deptPrefix = (id?: string) => id?.match(/^t\d+/)?.[0] ?? ''
+    const isCrossDeptForMyDept = !!t.targetTeamId && (
+      currentUser.isDirector
+        ? deptPrefix(currentUser.teamId) === deptPrefix(t.targetTeamId)
+        : t.targetTeamId === currentUser.teamId
+    )
     const inScope = isManager
-      ? (t.createdBy === currentUser.id || assignees.some(a => a.teamId === currentUser.teamId) || canReviewCrossDept)
+      ? (t.createdBy === currentUser.id || assignees.some(a => a.teamId === currentUser.teamId) || isCrossDeptForMyDept)
       : isMyTask
     if (!inScope) return false
     if (filter === 'mine') return isMyTask
