@@ -1459,6 +1459,14 @@ const handleCreate = async () => {
 
   const getUserById = (id?: string) => users.find(u => u.id === id)
 
+  const canApproveCrossDept = (task: Task) => {
+    if (!task.targetTeamId) return false
+    const deptPrefix = (id?: string) => id?.match(/^t\d+/)?.[0] ?? ''
+    return currentUser.isDirector
+      ? deptPrefix(currentUser.teamId) === deptPrefix(task.targetTeamId)
+      : currentUser.teamId === task.targetTeamId
+  }
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
@@ -1634,15 +1642,20 @@ const handleCreate = async () => {
               {task.crossDeptPending &&
                 currentUser.role === 'manager' &&
                 (currentUser.teamId === task.targetTeamId || currentUser.isDirector) ? (
-                  <div className="flex gap-1.5">
-                    <button onClick={() => handleRejectCrossDept(task)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#2a1010', color: '#f87171' }}>
-                      Từ chối
-                    </button>
-                    <button onClick={() => handleApproveCrossDept(task)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#0f2a1a', color: '#34d399' }}>
-                      ✓ Duyệt nhận task
-                    </button>
+                  <div className="flex flex-col gap-1.5 items-end">
+                    <p className="text-amber-400 text-[10px] text-right max-w-[220px] leading-relaxed">
+                      📨 {getUserById(task.createdBy)?.name} ({TEAMS.find(t => t.id === getUserById(task.createdBy)?.teamId)?.name}) muốn giao cho team {TEAMS.find(t => t.id === task.targetTeamId)?.name}
+                    </p>
+                    <div className="flex gap-1.5">
+                      <button onClick={() => handleRejectCrossDept(task)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#2a1010', color: '#f87171' }}>
+                        Từ chối
+                      </button>
+                      <button onClick={() => handleApproveCrossDept(task)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#0f2a1a', color: '#34d399' }}>
+                        ✓ Duyệt nhận task
+                      </button>
+                    </div>
                   </div>
 
                 ) : task.crossDeptPending ? (
