@@ -2617,6 +2617,16 @@ function NotificationBell({ notifications }: { notifications: { id: string; mess
     }
   }
 
+  const deleteOne = async (id: string) => {
+    await supabase.from('notifications').delete().eq('id', id)
+  }
+
+  const deleteAll = async () => {
+    if (!window.confirm('Xoá toàn bộ thông báo?')) return
+    const ids = notifications.map(n => n.id)
+    if (ids.length > 0) await supabase.from('notifications').delete().in('id', ids)
+  }
+
   return (
     <div className="relative">
       <button onClick={toggle} className="relative w-9 h-9 rounded-lg flex items-center justify-center hover:bg-[#1a1a40]">
@@ -2630,14 +2640,25 @@ function NotificationBell({ notifications }: { notifications: { id: string; mess
       {open && (
         <div className="absolute right-0 top-full mt-2 w-80 max-h-96 overflow-y-auto rounded-xl z-50"
           style={{ background: '#0e0e24', border: '1px solid #1e1e4a', boxShadow: '0 8px 24px #00000060' }}>
-          <div className="px-4 py-3 text-white font-bold text-sm" style={{ borderBottom: '1px solid #1e1e4a' }}>Thông báo</div>
+          <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid #1e1e4a' }}>
+            <span className="text-white font-bold text-sm">Thông báo</span>
+            {notifications.length > 0 && (
+              <button onClick={deleteAll} className="text-[10px] text-red-400 hover:underline">Xoá tất cả</button>
+            )}
+          </div>
           {notifications.length === 0 ? (
             <p className="text-gray-600 text-sm text-center py-6">Chưa có thông báo nào</p>
           ) : (
             notifications.map(n => (
-              <div key={n.id} className="px-4 py-3 text-sm text-gray-300" style={{ borderBottom: '1px solid #14142a' }}>
-                <p>{n.message}</p>
-                <p className="text-gray-600 text-[10px] mt-1">{fmtTime(n.createdAt)}</p>
+              <div key={n.id} className="px-4 py-3 flex items-start justify-between gap-2 group" style={{ borderBottom: '1px solid #14142a' }}>
+                <div className="flex-1">
+                  <p className="text-sm text-gray-300">{n.message}</p>
+                  <p className="text-gray-600 text-[10px] mt-1">{fmtTime(n.createdAt)}</p>
+                </div>
+                <button onClick={() => deleteOne(n.id)}
+                  className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400 text-xs flex-shrink-0">
+                  ✕
+                </button>
               </div>
             ))
           )}
@@ -2845,7 +2866,11 @@ useEffect(() => {
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, payload => {
       const n = payload.new
       setNotifications(prev => [{ id: n.id, message: n.message, createdAt: n.created_at }, ...prev])
-    }).subscribe()
+    })
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'notifications' }, payload => {
+      setNotifications(prev => prev.filter(n => n.id !== payload.old.id))
+    })
+    .subscribe()
   return () => { supabase.removeChannel(notifChannel) }
 }, [session])
   
