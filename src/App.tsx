@@ -1301,6 +1301,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser }: {
 }) {
   const [filter, setFilter] = useState<'all' | 'mine' | 'open' | 'done'>('all')
   const [showModal, setShowModal] = useState(false)
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [submittingTask, setSubmittingTask] = useState<Task | null>(null)
   const todayStr = new Date().toISOString().split('T')[0]
   const [form, setForm] = useState({
@@ -1427,7 +1428,19 @@ const handleRejectCrossDept = async (task: Task) => {
 // }
 
 
-const handleCreate = async () => {
+const openEditModal = (task: Task) => {
+  setEditingTask(task)
+  setForm({
+    title: task.title, description: task.description, expReward: task.expReward,
+    startDate: task.startDate || todayStr, dueDate: task.dueDate,
+    category: task.category, priority: task.priority,
+    important: task.important, urgent: task.urgent,
+    assignedTo: task.assignedTo, projectManager: task.projectManager, supporters: task.supporters,
+  })
+  setShowModal(true)
+}
+
+const handleSaveTask = async () => {
   if (!form.title.trim()) return
   const { min, max } = getExpRange(form.priority, form.important, form.urgent)
   if (form.expReward < min || form.expReward > max) {
@@ -1435,26 +1448,39 @@ const handleCreate = async () => {
     return
   }
 
-  const assignedUsers = form.assignedTo.map(uid => users.find(u => u.id === uid)).filter(Boolean) as User[]
-  const outsideAssignees = assignedUsers.filter(u => u.teamId !== currentUser.teamId)
-  const isCrossDept = !currentUser.isDirector && outsideAssignees.length > 0
-  const targetTeamId = isCrossDept ? outsideAssignees[0].teamId : null
+  if (editingTask) {
+    await supabase.from('tasks').update({
+      title: form.title, description: form.description, exp_reward: form.expReward,
+      assigned_to: form.assignedTo, project_manager: form.projectManager, supporters: form.supporters,
+      start_date: form.startDate, due_date: form.dueDate,
+      category: form.category, priority: form.priority,
+      important: form.important, urgent: form.urgent,
+    }).eq('id', editingTask.id)
+  } else {
+    const assignedUsers = form.assignedTo.map(uid => users.find(u => u.id === uid)).filter(Boolean) as User[]
+    const outsideAssignees = assignedUsers.filter(u => u.teamId !== currentUser.teamId)
+    const isCrossDept = !currentUser.isDirector && outsideAssignees.length > 0
+    const targetTeamId = isCrossDept ? outsideAssignees[0].teamId : null
 
-  await supabase.from('tasks').insert({
-    title: form.title, description: form.description, exp_reward: form.expReward,
-    status: 'open', assigned_to: isManager ? form.assignedTo : [currentUser.id],
-    project_manager: form.projectManager, supporters: form.supporters,
-    created_by: currentUser.id,
-    start_date: form.startDate,
-    due_date: form.dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
-    category: form.category, priority: form.priority, self_created: !isManager,
-    important: form.important, urgent: form.urgent,
-    cross_dept_pending: isCrossDept,
-    target_team_id: targetTeamId,
-  })
+    await supabase.from('tasks').insert({
+      title: form.title, description: form.description, exp_reward: form.expReward,
+      status: 'open', assigned_to: isManager ? form.assignedTo : [currentUser.id],
+      project_manager: form.projectManager, supporters: form.supporters,
+      created_by: currentUser.id,
+      start_date: form.startDate,
+      due_date: form.dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+      category: form.category, priority: form.priority, self_created: !isManager,
+      important: form.important, urgent: form.urgent,
+      cross_dept_pending: isCrossDept,
+      target_team_id: targetTeamId,
+    })
+  }
+
   setShowModal(false)
+  setEditingTask(null)
   setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'development', priority: 'medium', important: false, urgent: false, assignedTo: [], projectManager: [], supporters: [] })
 }
+
   const toggleFormArray = (field: 'assignedTo' | 'projectManager' | 'supporters', uid: string) => {
     setForm(f => ({
       ...f, [field]: f[field].includes(uid)
@@ -1505,6 +1531,7 @@ const handleCreate = async () => {
           const pri = PRIORITY_CONFIG[task.priority]
           const isMyTask = task.assignedTo.includes(currentUser.id) || task.supporters.includes(currentUser.id)
           const catColor = CATEGORY_COLORS[task.category] ?? '#6b7280'
+          const canEdit = isManager && (task.createdBy === currentUser.id || assignees.some(a => a.teamId === currentUser.teamId))
 
           return (
             <div key={task.id} className="rounded-xl p-4 flex flex-col transition-all hover:-translate-y-0.5"
@@ -1522,6 +1549,12 @@ const handleCreate = async () => {
                   <h3 className="text-white font-semibold text-sm">{task.title}</h3>
                 </div>
                 <div className="text-right flex-shrink-0">
+                  {canEdit && (
+                    <button onClick={() => openEditModal(task)}
+                      className="text-gray-500 hover:text-violet-400 text-[10px] mb-1 block ml-auto">
+                      ✏️ Sửa
+                    </button>
+                  )}
                   <div className="text-amber-400 font-black text-lg leading-none" style={{ fontFamily: 'Rajdhani, sans-serif' }}>+{task.expReward}</div>
                   <div className="text-amber-700 text-[10px]">EXP</div>
                 </div>
@@ -1915,12 +1948,12 @@ const handleCreate = async () => {
               )}
 
               <div className="flex gap-3 pt-1">
-                <button onClick={() => setShowModal(false)}
+                <button onClick={() => { setShowModal(false); setEditingTask(null) }}
                   className="flex-1 py-2.5 rounded-xl text-gray-400 text-sm"
                   style={{ background: '#14143a', border: '1px solid #2a2a5a' }}>Hủy</button>
-                <button onClick={handleCreate} disabled={!form.title.trim()}
+                <button onClick={handleSaveTask} disabled={!form.title.trim()}
                   className="flex-1 py-2.5 rounded-xl font-bold text-white text-sm disabled:opacity-40"
-                  style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>Tạo Task</button>
+                  style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>{editingTask ? 'Lưu thay đổi' : 'Tạo Task'}</button>
               </div>
             </div>
           </div>
