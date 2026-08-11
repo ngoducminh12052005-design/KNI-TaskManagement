@@ -1785,9 +1785,9 @@ const handleSaveTask = async () => {
             style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
             <div className="flex justify-between items-center mb-5">
               <h3 className="text-white font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
-                {isManager ? '📋 Giao Task Mới' : '🎯 Tạo Task Cá Nhân'}
+                {editingTask ? '✏️ Chỉnh sửa Task' : isManager ? '📋 Giao Task Mới' : '🎯 Tạo Task Cá Nhân'}
               </h3>
-              <button onClick={() => setShowModal(false)} className="text-gray-500 hover:text-gray-300 text-2xl leading-none">×</button>
+              <button onClick={() => { setShowModal(false); setEditingTask(null) }} className="text-gray-500 hover:text-gray-300 text-2xl leading-none">×</button>
             </div>
 
             <div className="space-y-3.5">
