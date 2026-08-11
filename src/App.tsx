@@ -1427,10 +1427,6 @@ const handleRejectCrossDept = async (task: Task) => {
 //   else alert('Không mở được file: ' + (json.error || 'lỗi không xác định'))
 // }
 
-const handleDeleteTask = async (task: Task) => {
-  if (!window.confirm(`Xóa hẳn task "${task.title}"? Hành động này không thể hoàn tác.`)) return
-  await supabase.from('tasks').delete().eq('id', task.id)
-}
 
 const openEditModal = (task: Task) => {
   setEditingTask(task)
@@ -1554,16 +1550,10 @@ const handleSaveTask = async () => {
                 </div>
                 <div className="text-right flex-shrink-0">
                   {canEdit && (
-                    <div className="flex items-center gap-2 justify-end mb-1">
-                      <button onClick={() => openEditModal(task)}
-                        className="text-gray-500 hover:text-violet-400 text-[10px]">
-                        ✏️ Sửa
-                      </button>
-                      <button onClick={() => handleDeleteTask(task)}
-                        className="text-gray-500 hover:text-red-400 text-[10px]">
-                        🗑️ Xoá
-                      </button>
-                    </div>
+                    <button onClick={() => openEditModal(task)}
+                      className="text-gray-500 hover:text-violet-400 text-[10px] mb-1 block ml-auto">
+                      ✏️ Sửa
+                    </button>
                   )}
                   <div className="text-amber-400 font-black text-lg leading-none" style={{ fontFamily: 'Rajdhani, sans-serif' }}>+{task.expReward}</div>
                   <div className="text-amber-700 text-[10px]">EXP</div>
