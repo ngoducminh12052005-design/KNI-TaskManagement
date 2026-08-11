@@ -1530,6 +1530,7 @@ const handleSaveTask = async () => {
           const pms = task.projectManager.map(getUserById).filter((u): u is User => !!u)
           const pri = PRIORITY_CONFIG[task.priority]
           const isMyTask = task.assignedTo.includes(currentUser.id) || task.supporters.includes(currentUser.id)
+          const isBeforeStartDate = !!task.startDate && task.startDate > new Date().toISOString().split('T')[0]
           const catColor = CATEGORY_COLORS[task.category] ?? '#6b7280'
           const canEdit = isManager && (task.createdBy === currentUser.id || assignees.some(a => a.teamId === currentUser.teamId))
 
@@ -1742,7 +1743,12 @@ const handleSaveTask = async () => {
               ) : isMyTask ? (
                 <div className="flex flex-col gap-1 items-end">
                   <div className="flex gap-1.5">
-                    {task.status === 'open' && !task.crossDeptPending && (
+                    {task.status === 'open' && !task.crossDeptPending && isBeforeStartDate && (
+                      <span className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: '#1a1a40', color: '#6b7280' }}>
+                        🔒 Chưa tới ngày bắt đầu ({fmtDate(task.startDate!)})
+                      </span>
+                    )}
+                    {task.status === 'open' && !task.crossDeptPending && !isBeforeStartDate && (
                       <button onClick={() => handleStart(task.id)}
                         className="px-4 py-2 rounded-xl text-sm font-bold" style={{ background: '#1e293b', color: '#60a5fa' }}>
                         Bắt đầu
