@@ -1312,6 +1312,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser }: {
   setTasks: (t: Task[]) => void; setCurrentUser: (u: User) => void
 }) {
   const [filter, setFilter] = useState<'all' | 'mine' | 'open' | 'done'>('all')
+  const [search, setSearch] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [submittingTask, setSubmittingTask] = useState<Task | null>(null)
@@ -1345,6 +1346,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser }: {
       ? (t.createdBy === currentUser.id || assignees.some(a => a.teamId === currentUser.teamId) || isCrossDeptForMyDept)
       : isMyTask
     if (!inScope) return false
+    if (search.trim() && !t.title.toLowerCase().includes(search.trim().toLowerCase()) && !t.description.toLowerCase().includes(search.trim().toLowerCase())) return false
     if (filter === 'mine') return isMyTask
     if (filter === 'open') return t.status === 'open'
     if (filter === 'done') return t.status === 'completed'
@@ -1536,6 +1538,20 @@ const handleSaveTask = async () => {
           <span className="text-lg leading-none">+</span>
           <span>{isManager ? 'Giao Task' : 'Tự tạo Task'}</span>
         </button>
+      </div>
+
+      <div className="relative mb-3">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600 text-sm">🔍</span>
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Tìm task theo tên hoặc mô tả..."
+          className="w-full pl-9 pr-9 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
+          style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }} />
+        {search && (
+          <button onClick={() => setSearch('')}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-300 text-sm">
+            ✕
+          </button>
+        )}
       </div>
 
       <div className="flex gap-2 mb-5">
