@@ -1154,17 +1154,31 @@ function SubmitTaskModal({ task, onClose }: { task: Task; onClose: () => void })
     const { data: urlData } = supabase.storage.from('task-submissions').getPublicUrl(path)
 
     const { error: updateError } = await supabase.from('tasks').update({
-      status: 'submitted',
-      submission_file_url: urlData.publicUrl,
-      submission_note: note.trim() || null,
-      submitted_at: new Date().toISOString(),
-      rejected_reason: null,
-    }).eq('id', task.id)
+    status: 'submitted',
+    submission_file_url: urlData.publicUrl,
+    submission_note: note.trim() || null,
+    submitted_at: new Date().toISOString(),
+    rejected_reason: null,
+  }).eq('id', task.id)
 
-    setUploading(false)
-    if (updateError) { setError(updateError.message); return }
-    onClose()
+  setUploading(false)
+  if (updateError) { setError(updateError.message); return }
+
+  // Báo cho người tạo task + các QL dự án (bỏ trùng, bỏ qua nếu chính người nộp)
+  const { data: { user } } = await supabase.auth.getUser()
+  const submitterId = user?.id
+  const recipientIds = Array.from(new Set([task.createdBy, ...task.projectManager]))
+    .filter(uid => uid && uid !== submitterId)
+
+  for (const uid of recipientIds) {
+    await supabase.from('notifications').insert({
+      message: `📥 Có người vừa nộp kết quả task: ${task.title}`,
+      target_user_id: uid,
+    })
   }
+
+  onClose()
+}
   // const handleSubmit = async () => {
   //   if (!file) { setError('Vui lòng chọn ảnh hoặc file kết quả trước khi nộp.'); return }
   //   setError('')
@@ -1475,6 +1489,17 @@ const handleSaveTask = async () => {
       cross_dept_pending: isCrossDept,
       target_team_id: targetTeamId,
     })
+
+    // Báo cho từng nhân viên được giao (bỏ qua nếu tự giao cho chính mình)
+    if (isManager) {
+      for (const uid of form.assignedTo) {
+        if (uid === currentUser.id) continue
+        await supabase.from('notifications').insert({
+          message: `📋 ${currentUser.name} vừa giao cho bạn task: ${form.title}`,
+          target_user_id: uid,
+        })
+      }
+    }
   }
 
   setShowModal(false)
@@ -2791,7 +2816,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
               <div className="w-28"><ExpBarMini exp={currentUser.exp} /></div>
               <span className="text-gray-600 text-xs" style={{ fontFamily: 'JetBrains Mono, monospace' }}>{currentUser.exp}</span>
             </div>
-            {currentUser.teamId === 't1c' && <NotificationBell notifications={notifications} />}
+            <NotificationBell notifications={notifications} />
             <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('profile')}>
               <CharAvatar user={currentUser} size={36} />
               <div>
@@ -2849,7 +2874,7 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [checkingSession, setCheckingSession] = useState(true)
   const [redemptions, setRedemptions] = useState<{ id: string; userId: string; rewardId: string; cost: number }[]>([])
-  const [notifications, setNotifications] = useState<{ id: string; message: string; createdAt: string }[]>([])
+  const [notifications, setNotifications] = useState<{ id: string; message: string; createdAt: string; targetUserId?: string }[]>([])
 
   function mapProfileToUser(p: any): User {
   return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email, isDirector: p.is_director ?? false }
@@ -2900,12 +2925,18 @@ export default function App() {
 useEffect(() => {
   if (!session) return
   supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(20)
-    .then(({ data }) => data && setNotifications(data.map(n => ({ id: n.id, message: n.message, createdAt: n.created_at }))))
+    .then(({ data }) => data && setNotifications(data.map(n => ({
+      id: n.id, message: n.message, createdAt: n.created_at,
+      targetUserId: n.target_user_id ?? undefined,
+    }))))
 
   const notifChannel = supabase.channel('notifications-changes')
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, payload => {
       const n = payload.new
-      setNotifications(prev => [{ id: n.id, message: n.message, createdAt: n.created_at }, ...prev])
+      setNotifications(prev => [{
+        id: n.id, message: n.message, createdAt: n.created_at,
+        targetUserId: n.target_user_id ?? undefined,
+      }, ...prev])
     })
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'notifications' }, payload => {
       setNotifications(prev => prev.filter(n => n.id !== payload.old.id))
