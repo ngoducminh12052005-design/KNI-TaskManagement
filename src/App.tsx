@@ -1303,7 +1303,8 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser }: {
   const [showModal, setShowModal] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [submittingTask, setSubmittingTask] = useState<Task | null>(null)
-  const todayStr = new Date().toISOString().split('T')[0]
+  const now = new Date()
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   const [form, setForm] = useState({
     title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '',
     category: 'development', priority: 'medium' as TaskPriority,
