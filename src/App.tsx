@@ -1105,7 +1105,7 @@ function DashboardView({ currentUser, tasks, users, setTasks, setCurrentUser, se
 }
 
 // ===========================================================================
-function SubmitTaskModal({ task, onClose }: { task: Task; onClose: () => void }) {
+function SubmitTaskModal({ task, currentUser, onClose }: { task: Task; currentUser: User; onClose: () => void }) {
   const [file, setFile] = useState<File | null>(null)
   const [note, setNote] = useState('')
   const [uploading, setUploading] = useState(false)
@@ -1165,14 +1165,12 @@ function SubmitTaskModal({ task, onClose }: { task: Task; onClose: () => void })
   if (updateError) { setError(updateError.message); return }
 
   // Báo cho người tạo task + các QL dự án (bỏ trùng, bỏ qua nếu chính người nộp)
-  const { data: { user } } = await supabase.auth.getUser()
-  const submitterId = user?.id
   const recipientIds = Array.from(new Set([task.createdBy, ...task.projectManager]))
-    .filter(uid => uid && uid !== submitterId)
+    .filter(uid => uid && uid !== currentUser.id)
 
   for (const uid of recipientIds) {
     await supabase.from('notifications').insert({
-      message: `📥 Có người vừa nộp kết quả task: ${task.title}`,
+      message: `📥 ${currentUser.name} vừa nộp kết quả task: ${task.title}`,
       target_user_id: uid,
     })
   }
@@ -1992,7 +1990,7 @@ const handleSaveTask = async () => {
         </div>
       )}
       {submittingTask && (
-        <SubmitTaskModal task={submittingTask} onClose={() => setSubmittingTask(null)} />
+        <SubmitTaskModal task={submittingTask} currentUser={currentUser} onClose={() => setSubmittingTask(null)} />
       )}
     </div>
   )
