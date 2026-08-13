@@ -1520,6 +1520,18 @@ const handleSaveTask = async () => {
           target_user_id: uid,
         })
       }
+
+      // Báo cho quản lý phòng ban đích nếu đây là task liên phòng ban
+      if (isCrossDept && targetTeamId) {
+        const targetManagers = users.filter(u => u.role === 'manager' && u.teamId === targetTeamId)
+        const assigneeNames = outsideAssignees.map(u => u.name).join(', ')
+        for (const mgr of targetManagers) {
+          await supabase.from('notifications').insert({
+            message: `📨 ${currentUser.name} (${TEAMS.find(t => t.id === currentUser.teamId)?.name ?? ''}) muốn giao task "${form.title}" cho ${assigneeNames} trong phòng ban của bạn`,
+            target_user_id: mgr.id,
+          })
+        }
+      }
     }
   }
 
