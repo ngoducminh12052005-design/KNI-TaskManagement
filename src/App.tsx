@@ -1821,6 +1821,8 @@ const handleSaveTask = async () => {
                     </span>
                 }
               </div> */}
+              
+              {/* Actions */}
               <button onClick={() => setOpenCommentsFor(openCommentsFor === task.id ? null : task.id)}
                 className="text-gray-500 hover:text-violet-400 text-xs flex items-center gap-1 mb-2">
                 💬 Thảo luận {openCommentsFor === task.id ? '▲' : '▼'}
@@ -1828,7 +1830,6 @@ const handleSaveTask = async () => {
               {openCommentsFor === task.id && (
                 <TaskCommentsPanel taskId={task.id} currentUser={currentUser} users={users} />
               )}
-              {/* Actions */}
             <div className="flex items-center justify-end mt-auto">
               {task.crossDeptPending &&
                 currentUser.role === 'manager' &&
