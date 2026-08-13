@@ -1316,6 +1316,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser }: {
   const [showModal, setShowModal] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [submittingTask, setSubmittingTask] = useState<Task | null>(null)
+  const [selfMode, setSelfMode] = useState(false)
   const now = new Date()
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   const [form, setForm] = useState({
@@ -1445,6 +1446,7 @@ const handleRejectCrossDept = async (task: Task) => {
 
 const openEditModal = (task: Task) => {
   setEditingTask(task)
+  setSelfMode(task.selfCreated)
   setForm({
     title: task.title, description: task.description, expReward: task.expReward,
     startDate: task.startDate || todayStr, dueDate: task.dueDate,
@@ -1472,26 +1474,27 @@ const handleSaveTask = async () => {
       important: form.important, urgent: form.urgent,
     }).eq('id', editingTask.id)
   } else {
+    const creatingForSelf = !isManager || selfMode
     const assignedUsers = form.assignedTo.map(uid => users.find(u => u.id === uid)).filter(Boolean) as User[]
     const outsideAssignees = assignedUsers.filter(u => u.teamId !== currentUser.teamId)
-    const isCrossDept = !currentUser.isDirector && outsideAssignees.length > 0
+    const isCrossDept = !creatingForSelf && !currentUser.isDirector && outsideAssignees.length > 0
     const targetTeamId = isCrossDept ? outsideAssignees[0].teamId : null
 
     await supabase.from('tasks').insert({
       title: form.title, description: form.description, exp_reward: form.expReward,
-      status: 'open', assigned_to: isManager ? form.assignedTo : [currentUser.id],
+      status: 'open', assigned_to: creatingForSelf ? [currentUser.id] : form.assignedTo,
       project_manager: form.projectManager, supporters: form.supporters,
       created_by: currentUser.id,
       start_date: form.startDate,
       due_date: form.dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
-      category: form.category, priority: form.priority, self_created: !isManager,
+      category: form.category, priority: form.priority, self_created: creatingForSelf,
       important: form.important, urgent: form.urgent,
       cross_dept_pending: isCrossDept,
       target_team_id: targetTeamId,
     })
 
-    // Báo cho từng nhân viên được giao (bỏ qua nếu tự giao cho chính mình)
-    if (isManager) {
+    // Báo cho từng nhân viên được giao (chỉ khi thật sự giao cho người khác)
+    if (isManager && !selfMode) {
       for (const uid of form.assignedTo) {
         if (uid === currentUser.id) continue
         await supabase.from('notifications').insert({
@@ -1504,6 +1507,7 @@ const handleSaveTask = async () => {
 
   setShowModal(false)
   setEditingTask(null)
+  setSelfMode(false)
   setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'development', priority: 'medium', important: false, urgent: false, assignedTo: [], projectManager: [], supporters: [] })
 }
 
@@ -1831,10 +1835,25 @@ const handleSaveTask = async () => {
             style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
             <div className="flex justify-between items-center mb-5">
               <h3 className="text-white font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
-                {editingTask ? '✏️ Chỉnh sửa Task' : isManager ? '📋 Giao Task Mới' : '🎯 Tạo Task Cá Nhân'}
+                {editingTask ? '✏️ Chỉnh sửa Task' : isManager && !selfMode ? '📋 Giao Task Mới' : '🎯 Tạo Task Cá Nhân'}
               </h3>
-              <button onClick={() => { setShowModal(false); setEditingTask(null) }} className="text-gray-500 hover:text-gray-300 text-2xl leading-none">×</button>
+              <button onClick={() => { setShowModal(false); setEditingTask(null); setSelfMode(false) }} className="text-gray-500 hover:text-gray-300 text-2xl leading-none">×</button>
             </div>
+
+            {isManager && !editingTask && (
+              <div className="flex gap-1 p-1 rounded-xl mb-4" style={{ background: '#0a0a1a', border: '1px solid #1e1e3a' }}>
+                <button onClick={() => setSelfMode(false)}
+                  className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
+                  style={{ background: !selfMode ? '#7c3aed' : 'transparent', color: !selfMode ? '#fff' : '#6b7280' }}>
+                  📋 Giao cho người khác
+                </button>
+                <button onClick={() => setSelfMode(true)}
+                  className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
+                  style={{ background: selfMode ? '#7c3aed' : 'transparent', color: selfMode ? '#fff' : '#6b7280' }}>
+                  🎯 Tự tạo cho tôi
+                </button>
+              </div>
+            )}
 
             <div className="space-y-3.5">
               <div>
@@ -1967,7 +1986,7 @@ const handleSaveTask = async () => {
                 </div>
               </div>
 
-              {isManager && (
+              {isManager && !selfMode && (
                 <>
                   <MultiUserSelect
                     label="Giao cho (Phụ trách) — mỗi người nhận đủ 100% EXP"
@@ -1994,7 +2013,7 @@ const handleSaveTask = async () => {
               )}
 
               <div className="flex gap-3 pt-1">
-                <button onClick={() => { setShowModal(false); setEditingTask(null) }}
+                <button onClick={() => { setShowModal(false); setEditingTask(null); setSelfMode(false) }}
                   className="flex-1 py-2.5 rounded-xl text-gray-400 text-sm"
                   style={{ background: '#14143a', border: '1px solid #2a2a5a' }}>Hủy</button>
                 <button onClick={handleSaveTask} disabled={!form.title.trim()}
