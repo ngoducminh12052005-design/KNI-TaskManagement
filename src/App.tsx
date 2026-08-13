@@ -57,6 +57,8 @@ interface Task {
   urgent: boolean
   crossDeptPending?: boolean
   crossDeptRejected?: boolean
+  crossDeptRejectedReason?: string
+  crossDeptRejectedBy?: string
   targetTeamId?: string
 }
 
@@ -1427,8 +1429,14 @@ const handleApproveCrossDept = async (task: Task) => {
 }
 
 const handleRejectCrossDept = async (task: Task) => {
-  if (!window.confirm('Từ chối nhận task này? Quản lý đã giao sẽ thấy trạng thái bị từ chối.')) return
-  await supabase.from('tasks').update({ cross_dept_pending: false, cross_dept_rejected: true }).eq('id', task.id)
+  const reason = window.prompt('Lý do từ chối (quản lý đã giao sẽ thấy lý do này):') ?? ''
+  if (reason.trim() === '' && !window.confirm('Bạn chưa nhập lý do, vẫn muốn từ chối?')) return
+  await supabase.from('tasks').update({
+    cross_dept_pending: false,
+    cross_dept_rejected: true,
+    cross_dept_rejected_reason: reason.trim() || null,
+    cross_dept_rejected_by: currentUser.id,
+  }).eq('id', task.id)
 }
 
 // const viewSubmissionFile = async (key: string) => {
@@ -1749,9 +1757,14 @@ const handleSaveTask = async () => {
                   </span>
 
                 ) : task.crossDeptRejected ? (
-                  <span className="px-3 py-1.5 rounded-xl text-xs font-semibold text-right" style={{ background: '#2a1010', color: '#f87171' }}>
-                    ❌ Bị từ chối bởi {TEAMS.find(t => t.id === task.targetTeamId)?.name ?? 'phòng ban đích'}
-                  </span>
+                  <div className="flex flex-col gap-1 items-end max-w-[240px]">
+                    <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#2a1010', color: '#f87171' }}>
+                      ❌ Bị từ chối bởi {getUserById(task.crossDeptRejectedBy)?.name ?? 'quản lý phòng đích'}
+                    </span>
+                    {task.crossDeptRejectedReason && (
+                      <p className="text-gray-500 text-xs text-right">Lý do: {task.crossDeptRejectedReason}</p>
+                    )}
+                  </div>
 
                 ) : task.status === 'completed' ? (
                 <span className="text-green-400 text-xs">✓ Hoàn thành</span>
@@ -2937,6 +2950,8 @@ export default function App() {
     startDate: t.start_date,
     crossDeptPending: t.cross_dept_pending ?? false,
     crossDeptRejected: t.cross_dept_rejected ?? false,
+    crossDeptRejectedReason: t.cross_dept_rejected_reason ?? undefined,
+    crossDeptRejectedBy: t.cross_dept_rejected_by ?? undefined,
     targetTeamId: t.target_team_id ?? undefined,
   }
 }
