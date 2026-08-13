@@ -1511,6 +1511,15 @@ const handleSaveTask = async () => {
           target_user_id: uid,
         })
       }
+
+      // Báo cho từng người hỗ trợ được thêm vào task
+      for (const uid of form.supporters) {
+        if (uid === currentUser.id) continue
+        await supabase.from('notifications').insert({
+          message: `🤝 ${currentUser.name} vừa thêm bạn làm người hỗ trợ task: ${form.title}`,
+          target_user_id: uid,
+        })
+      }
     }
   }
 
