@@ -1308,6 +1308,75 @@ function MultiUserSelect({ label, options, selected, onToggle, placeholder = 'Ch
   )
 }
 
+
+//==================== TASKS COMMENTS =====================
+function TaskCommentsPanel({ taskId, currentUser, users }: { taskId: string; currentUser: User; users: User[] }) {
+  const [comments, setComments] = useState<{ id: string; userId: string; content: string; createdAt: string }[]>([])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    supabase.from('task_comments').select('*').eq('task_id', taskId).order('created_at')
+      .then(({ data }) => {
+        if (data) setComments(data.map(c => ({ id: c.id, userId: c.user_id, content: c.content, createdAt: c.created_at })))
+        setLoading(false)
+      })
+
+    const channel = supabase.channel(`task-comments-${taskId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'task_comments', filter: `task_id=eq.${taskId}` }, payload => {
+        const c = payload.new
+        setComments(prev => [...prev, { id: c.id, userId: c.user_id, content: c.content, createdAt: c.created_at }])
+      }).subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [taskId])
+
+  const send = async () => {
+    if (!input.trim()) return
+    const content = input.trim()
+    setInput('')
+    await supabase.from('task_comments').insert({ task_id: taskId, user_id: currentUser.id, content })
+  }
+
+  return (
+    <div className="mt-3 pt-3" style={{ borderTop: '1px solid #1e1e4a' }} onClick={e => e.stopPropagation()}>
+      {loading ? (
+        <p className="text-gray-600 text-xs">Đang tải...</p>
+      ) : (
+        <div className="space-y-2 max-h-52 overflow-y-auto mb-2">
+          {comments.length === 0 && <p className="text-gray-600 text-xs italic">Chưa có bình luận nào.</p>}
+          {comments.map(c => {
+            const u = users.find(x => x.id === c.userId)
+            return (
+              <div key={c.id} className="flex items-start gap-2">
+                {u && <CharAvatar user={u} size={22} />}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-gray-300 text-xs font-semibold">{u?.name ?? 'Ẩn danh'}</span>
+                    <span className="text-gray-700 text-[10px]">{fmtTime(c.createdAt)}</span>
+                  </div>
+                  <p className="text-gray-400 text-xs break-words">{c.content}</p>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      <div className="flex gap-1.5">
+        <input value={input} onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && send()}
+          placeholder="Viết bình luận..."
+          className="flex-1 min-w-0 px-3 py-1.5 rounded-lg text-white placeholder-gray-600 text-xs outline-none"
+          style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+        <button onClick={send} disabled={!input.trim()}
+          className="px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-40 flex-shrink-0"
+          style={{ background: '#7c3aed', color: '#fff' }}>
+          Gửi
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ==================== TASKS VIEW ====================
 
 function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser }: {
@@ -1318,6 +1387,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser }: {
   const [search, setSearch] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
+  const [openCommentsFor, setOpenCommentsFor] = useState<string | null>(null)
   const [submittingTask, setSubmittingTask] = useState<Task | null>(null)
   const [selfMode, setSelfMode] = useState(false)
   const now = new Date()
@@ -1751,6 +1821,13 @@ const handleSaveTask = async () => {
                     </span>
                 }
               </div> */}
+              <button onClick={() => setOpenCommentsFor(openCommentsFor === task.id ? null : task.id)}
+                className="text-gray-500 hover:text-violet-400 text-xs flex items-center gap-1 mb-2">
+                💬 Thảo luận {openCommentsFor === task.id ? '▲' : '▼'}
+              </button>
+              {openCommentsFor === task.id && (
+                <TaskCommentsPanel taskId={task.id} currentUser={currentUser} users={users} />
+              )}
               {/* Actions */}
             <div className="flex items-center justify-end mt-auto">
               {task.crossDeptPending &&
