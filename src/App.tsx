@@ -1347,7 +1347,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser }: {
         : t.targetTeamId === currentUser.teamId
     )
     const inScope = isManager
-      ? (t.createdBy === currentUser.id || assignees.some(a => a.teamId === currentUser.teamId) || isCrossDeptForMyDept)
+      ? (isMyTask || t.createdBy === currentUser.id || assignees.some(a => a.teamId === currentUser.teamId) || isCrossDeptForMyDept)
       : (isMyTask && !t.crossDeptRejected)
     if (!inScope) return false
     if (search.trim() && !t.title.toLowerCase().includes(search.trim().toLowerCase()) && !t.description.toLowerCase().includes(search.trim().toLowerCase())) return false
