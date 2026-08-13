@@ -1330,9 +1330,9 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser }: {
   })
 
   const isManager = currentUser.role === 'manager'
-  // const employees = users.filter(u => u.role === 'employee' && u.teamId === currentUser.teamId)
-  // const teamUsers = users.filter(u => u.teamId === currentUser.teamId)
-  const employees = users.filter(u => u.role === 'employee')
+// const employees = users.filter(u => u.role === 'employee' && u.teamId === currentUser.teamId)
+// const teamUsers = users.filter(u => u.teamId === currentUser.teamId)
+  const employees = currentUser.isDirector ? users : users.filter(u => u.role === 'employee')
   const teamUsers = currentUser.isDirector
     ? users
     : users.filter(u => u.teamId === currentUser.teamId)
