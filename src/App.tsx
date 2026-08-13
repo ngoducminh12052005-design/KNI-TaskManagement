@@ -1674,6 +1674,7 @@ const handleSaveTask = async () => {
           const pms = task.projectManager.map(getUserById).filter((u): u is User => !!u)
           const pri = PRIORITY_CONFIG[task.priority]
           const isMyTask = task.assignedTo.includes(currentUser.id) || task.supporters.includes(currentUser.id)
+          const isTaskParticipant = task.assignedTo.includes(currentUser.id) || task.projectManager.includes(currentUser.id) || task.supporters.includes(currentUser.id) || task.createdBy === currentUser.id
           const isBeforeStartDate = !!task.startDate && task.startDate > new Date().toISOString().split('T')[0]
           const catColor = CATEGORY_COLORS[task.category] ?? '#6b7280'
           const canEdit = isManager && (task.createdBy === currentUser.id || assignees.some(a => a.teamId === currentUser.teamId))
@@ -1821,16 +1822,8 @@ const handleSaveTask = async () => {
                     </span>
                 }
               </div> */}
-              
               {/* Actions */}
-              <button onClick={() => setOpenCommentsFor(openCommentsFor === task.id ? null : task.id)}
-                className="text-gray-500 hover:text-violet-400 text-xs flex items-center gap-1 mb-2">
-                💬 Thảo luận {openCommentsFor === task.id ? '▲' : '▼'}
-              </button>
-              {openCommentsFor === task.id && (
-                <TaskCommentsPanel taskId={task.id} currentUser={currentUser} users={users} />
-              )}
-            <div className="flex items-center justify-end mt-auto">
+            <div className="flex items-center justify-end mt-3">
               {task.crossDeptPending &&
                 currentUser.role === 'manager' &&
                 (currentUser.teamId === task.targetTeamId || currentUser.isDirector) ? (
@@ -1934,6 +1927,18 @@ const handleSaveTask = async () => {
                 </span>
               )}
             </div>
+
+              {isTaskParticipant && (
+                <>
+                  <button onClick={() => setOpenCommentsFor(openCommentsFor === task.id ? null : task.id)}
+                    className="text-gray-500 hover:text-violet-400 text-xs flex items-center gap-1 mt-3">
+                    💬 Thảo luận {openCommentsFor === task.id ? '▲' : '▼'}
+                  </button>
+                  {openCommentsFor === task.id && (
+                    <TaskCommentsPanel taskId={task.id} currentUser={currentUser} users={users} />
+                  )}
+                </>
+              )}
             </div>
           )
         })}
