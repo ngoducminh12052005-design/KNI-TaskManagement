@@ -56,6 +56,7 @@ interface Task {
   important: boolean
   urgent: boolean
   crossDeptPending?: boolean
+  crossDeptRejected?: boolean
   targetTeamId?: string
 }
 
@@ -1345,7 +1346,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser }: {
     )
     const inScope = isManager
       ? (t.createdBy === currentUser.id || assignees.some(a => a.teamId === currentUser.teamId) || isCrossDeptForMyDept)
-      : isMyTask
+      : (isMyTask && !t.crossDeptRejected)
     if (!inScope) return false
     if (search.trim() && !t.title.toLowerCase().includes(search.trim().toLowerCase()) && !t.description.toLowerCase().includes(search.trim().toLowerCase())) return false
     if (filter === 'mine') return isMyTask
@@ -1426,8 +1427,8 @@ const handleApproveCrossDept = async (task: Task) => {
 }
 
 const handleRejectCrossDept = async (task: Task) => {
-  if (!window.confirm('Từ chối task này? Task sẽ bị xoá hoàn toàn.')) return
-  await supabase.from('tasks').delete().eq('id', task.id)
+  if (!window.confirm('Từ chối nhận task này? Quản lý đã giao sẽ thấy trạng thái bị từ chối.')) return
+  await supabase.from('tasks').update({ cross_dept_pending: false, cross_dept_rejected: true }).eq('id', task.id)
 }
 
 // const viewSubmissionFile = async (key: string) => {
@@ -1745,6 +1746,11 @@ const handleSaveTask = async () => {
                 ) : task.crossDeptPending ? (
                   <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#2a1a00', color: '#fbbf24' }}>
                     ⏳ Chờ quản lý phòng ban duyệt
+                  </span>
+
+                ) : task.crossDeptRejected ? (
+                  <span className="px-3 py-1.5 rounded-xl text-xs font-semibold text-right" style={{ background: '#2a1010', color: '#f87171' }}>
+                    ❌ Bị từ chối bởi {TEAMS.find(t => t.id === task.targetTeamId)?.name ?? 'phòng ban đích'}
                   </span>
 
                 ) : task.status === 'completed' ? (
@@ -2930,6 +2936,7 @@ export default function App() {
     rejectedReason: t.rejected_reason ?? undefined,
     startDate: t.start_date,
     crossDeptPending: t.cross_dept_pending ?? false,
+    crossDeptRejected: t.cross_dept_rejected ?? false,
     targetTeamId: t.target_team_id ?? undefined,
   }
 }
