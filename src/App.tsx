@@ -496,6 +496,42 @@ const getExpProgress = (exp: number) => {
 const fmtDate = (s: string) => new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })
 const fmtTime = (s: string) => new Date(s).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
 
+// Tìm các vị trí "@Tên đầy đủ" khớp với danh sách user trong nội dung tin nhắn
+function parseMentions(content: string, users: User[]): { start: number; end: number; user: User }[] {
+  const candidates = [...users].sort((a, b) => b.name.length - a.name.length)
+  const matches: { start: number; end: number; user: User }[] = []
+  let i = 0
+  while (i < content.length) {
+    if (content[i] === '@') {
+      const rest = content.slice(i + 1)
+      const match = candidates.find(u => rest.startsWith(u.name))
+      if (match) {
+        const end = i + 1 + match.name.length
+        matches.push({ start: i, end, user: match })
+        i = end
+        continue
+      }
+    }
+    i++
+  }
+  return matches
+}
+
+// Render nội dung tin nhắn, tô màu các đoạn @tag
+function renderMessageContent(content: string, users: User[]) {
+  const matches = parseMentions(content, users)
+  if (matches.length === 0) return content
+  const nodes: React.ReactNode[] = []
+  let cursor = 0
+  matches.forEach((m, idx) => {
+    if (m.start > cursor) nodes.push(content.slice(cursor, m.start))
+    nodes.push(<span key={idx} style={{ color: '#facc15', fontWeight: 600 }}>{content.slice(m.start, m.end)}</span>)
+    cursor = m.end
+  })
+  if (cursor < content.length) nodes.push(content.slice(cursor))
+  return nodes
+}
+
 function LevelBadge({ exp }: { exp: number }) {
   return (
     <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold text-white"
@@ -2413,7 +2449,9 @@ function SocialView({ currentUser, users, messages, setMessages }: {
   const [channel, setChannel] = useState<ChatChannel>('general')
   const [dmUserId, setDmUserId] = useState<string | null>(null)
   const [input, setInput] = useState('')
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const isDm = channel === 'dm' && dmUserId !== null
   const dmPartner = isDm ? users.find(u => u.id === dmUserId) : undefined
@@ -2445,17 +2483,60 @@ function SocialView({ currentUser, users, messages, setMessages }: {
   //   }])
   //   setInput('')
   // }
+  const mentionCandidates = mentionQuery === null ? [] : users
+    .filter(u => u.id !== currentUser.id)
+    .filter(u => u.name.toLowerCase().includes(mentionQuery.toLowerCase()))
+    .slice(0, 6)
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value
+    setInput(value)
+    const cursor = e.target.selectionStart ?? value.length
+    const beforeCursor = value.slice(0, cursor)
+    const atIndex = beforeCursor.lastIndexOf('@')
+    if (atIndex === -1) { setMentionQuery(null); return }
+    const afterAt = beforeCursor.slice(atIndex + 1)
+    if (/\s/.test(afterAt)) { setMentionQuery(null); return }
+    setMentionQuery(afterAt)
+  }
+
+  const selectMention = (user: User) => {
+    const cursor = inputRef.current?.selectionStart ?? input.length
+    const beforeCursor = input.slice(0, cursor)
+    const atIndex = beforeCursor.lastIndexOf('@')
+    if (atIndex === -1) return
+    const before = input.slice(0, atIndex)
+    const after = input.slice(cursor)
+    setInput(`${before}@${user.name} ${after}`)
+    setMentionQuery(null)
+    requestAnimationFrame(() => inputRef.current?.focus())
+  }
+
   const send = async () => {
-  if (!input.trim()) return
-  const { error } = await supabase.from('messages').insert({
-    user_id: currentUser.id,
-    to_user_id: isDm ? dmUserId : null,
-    content: input.trim(),
-    channel: isDm ? 'dm' : channel,
-  })
-  if (error) console.error(error)
-  setInput('')
-}
+    if (!input.trim()) return
+    const content = input.trim()
+    const { error } = await supabase.from('messages').insert({
+      user_id: currentUser.id,
+      to_user_id: isDm ? dmUserId : null,
+      content,
+      channel: isDm ? 'dm' : channel,
+    })
+    if (error) { console.error(error); return }
+    setInput('')
+    setMentionQuery(null)
+
+    // Báo cho những người bị @tag trong tin nhắn
+    const mentioned = parseMentions(content, users)
+    const notifiedIds = new Set<string>()
+    for (const m of mentioned) {
+      if (m.user.id === currentUser.id || notifiedIds.has(m.user.id)) continue
+      notifiedIds.add(m.user.id)
+      await supabase.from('notifications').insert({
+        message: `💬 ${currentUser.name} đã nhắc đến bạn trong tin nhắn: "${content.length > 60 ? content.slice(0, 60) + '…' : content}"`,
+        target_user_id: m.user.id,
+      })
+    }
+  }
 
   const canPost = isDm || channel !== 'announcements' || currentUser.role === 'manager'
 
@@ -2555,7 +2636,7 @@ function SocialView({ currentUser, users, messages, setMessages }: {
                       borderRadius: isMe ? '18px 4px 18px 18px' : '4px 18px 18px 18px',
                       border: isMe ? 'none' : '1px solid #1e1e4a',
                     }}>
-                    {msg.content}
+                    {renderMessageContent(msg.content, users)}
                   </div>
                 </div>
               </div>
@@ -2576,11 +2657,35 @@ function SocialView({ currentUser, users, messages, setMessages }: {
           {canPost ? (
             <div className="flex gap-3 items-center">
               <CharAvatar user={currentUser} size={36} />
-              <input value={input} onChange={e => setInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
-                placeholder={isDm ? `Nhắn riêng cho ${dmPartner?.name}... (Enter để gửi)` : `Nhắn vào ${CHANNELS.find(c => c.id === channel)?.label}... (Enter để gửi)`}
-                className="flex-1 min-w-0 px-4 py-2.5 rounded-xl text-white placeholder-gray-600 text-sm outline-none"
-                style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }} />
+              <div className="relative flex-1 min-w-0">
+                {mentionQuery !== null && mentionCandidates.length > 0 && (
+                  <div className="absolute bottom-full left-0 mb-2 w-64 rounded-xl overflow-hidden z-20"
+                    style={{ background: '#14143a', border: '1px solid #2a2a5a', boxShadow: '0 8px 24px #00000060' }}>
+                    {mentionCandidates.map(u => (
+                      <button key={u.id} onClick={() => selectMention(u)}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-[#1e1e4a] transition-colors">
+                        <CharAvatar user={u} size={22} />
+                        <span className="text-white text-sm">{u.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <input ref={inputRef} value={input} onChange={handleInputChange}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      if (mentionQuery !== null && mentionCandidates.length > 0) {
+                        e.preventDefault()
+                        selectMention(mentionCandidates[0])
+                      } else {
+                        send()
+                      }
+                    }
+                    if (e.key === 'Escape') setMentionQuery(null)
+                  }}
+                  placeholder={isDm ? `Nhắn riêng cho ${dmPartner?.name}... (gõ @ để tag, Enter để gửi)` : `Nhắn vào ${CHANNELS.find(c => c.id === channel)?.label}... (gõ @ để tag, Enter để gửi)`}
+                  className="w-full px-4 py-2.5 rounded-xl text-white placeholder-gray-600 text-sm outline-none"
+                  style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }} />
+              </div>
               <button onClick={send} disabled={!input.trim()}
                 className="flex-shrink-0 px-4 py-2.5 rounded-xl font-bold text-sm disabled:opacity-40 transition-all hover:scale-105"
                 style={{ background: 'linear-gradient(135deg,#7c3aed,#5b21b6)', color: '#fff' }}>
