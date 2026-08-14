@@ -517,15 +517,21 @@ function parseMentions(content: string, users: User[]): { start: number; end: nu
   return matches
 }
 
-// Render nội dung tin nhắn, tô màu các đoạn @tag
-function renderMessageContent(content: string, users: User[]) {
+// Render nội dung tin nhắn, tô màu các đoạn @tag và cho bấm vào xem hồ sơ
+function renderMessageContent(content: string, users: User[], onMentionClick?: (u: User) => void) {
   const matches = parseMentions(content, users)
   if (matches.length === 0) return content
   const nodes: React.ReactNode[] = []
   let cursor = 0
   matches.forEach((m, idx) => {
     if (m.start > cursor) nodes.push(content.slice(cursor, m.start))
-    nodes.push(<span key={idx} style={{ color: '#facc15', fontWeight: 600 }}>{content.slice(m.start, m.end)}</span>)
+    nodes.push(
+      <span key={idx}
+        onClick={e => { e.stopPropagation(); onMentionClick?.(m.user) }}
+        style={{ color: '#facc15', fontWeight: 600, cursor: onMentionClick ? 'pointer' : 'default', textDecoration: 'underline', textUnderlineOffset: '2px' }}>
+        {content.slice(m.start, m.end)}
+      </span>
+    )
     cursor = m.end
   })
   if (cursor < content.length) nodes.push(content.slice(cursor))
@@ -2523,6 +2529,43 @@ function RewardsView({ currentUser, redemptions, users }: { currentUser: User; r
   )
 }
 
+
+
+
+function UserProfileCard({ user, onClose, onMessage }: { user: User; onClose: () => void; onMessage?: () => void }) {
+  const { progress, needed, level } = getExpProgress(user.exp)
+  return (
+    <div className="fixed inset-0 flex items-center justify-center z-50 px-4" style={{ background: '#000000a0' }} onClick={onClose}>
+      <div className="relative w-full max-w-xs rounded-2xl p-6 text-center animate-slide-up"
+        onClick={e => e.stopPropagation()}
+        style={{ background: `linear-gradient(135deg, ${user.avatar.outfitColor}18, #0e0e24)`, border: `1px solid ${user.avatar.outfitColor}35` }}>
+        <button onClick={onClose} className="absolute top-3 right-3 text-gray-500 hover:text-gray-300 text-xl leading-none">×</button>
+        <div className="w-24 h-32 mx-auto mb-3 rounded-2xl overflow-hidden flex items-end justify-center"
+          style={{ background: `${user.avatar.outfitColor}20`, border: `2px solid ${user.avatar.outfitColor}40`, boxShadow: `0 0 24px ${user.avatar.outfitColor}40` }}>
+          <FullAvatar avatar={user.avatar} size={86} />
+        </div>
+        <h3 className="text-white font-bold text-lg mb-0.5" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{user.name}</h3>
+        <p className="text-gray-500 text-xs mb-3">{TEAMS.find(t => t.id === user.teamId)?.name ?? user.department}</p>
+        <div className="flex justify-center mb-3"><LevelBadge exp={user.exp} /></div>
+        <div className="text-amber-400 text-xl font-black mb-1" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{user.exp.toLocaleString()} EXP</div>
+        <div className="text-gray-600 text-[11px] mb-3">Cần {needed} EXP → Lv.{level + 1}</div>
+        <div className="h-1.5 rounded-full overflow-hidden mb-4" style={{ background: '#1a1a3a' }}>
+          <div className="h-full rounded-full" style={{ width: `${progress}%`, background: 'linear-gradient(90deg,#7c3aed,#f59e0b)' }} />
+        </div>
+        <span className="inline-block px-3 py-1 rounded-lg text-xs font-medium" style={{ background: '#1a0a3a', color: '#a78bfa', border: '1px solid #3a1a6a' }}>
+          {user.role === 'manager' ? '👑 Quản Lý' : '⚔️ Nhân Viên'}
+        </span>
+        {onMessage && (
+          <button onClick={onMessage}
+            className="w-full mt-4 py-2.5 rounded-lg font-bold text-white text-sm"
+            style={{ background: 'linear-gradient(135deg,#7c3aed,#5b21b6)' }}>
+            💬 Nhắn tin riêng
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
 // ==================== SOCIAL ====================
 
 function SocialView({ currentUser, users, messages, setMessages }: {
@@ -2533,6 +2576,7 @@ function SocialView({ currentUser, users, messages, setMessages }: {
   const [dmUserId, setDmUserId] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const [profileUser, setProfileUser] = useState<User | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -2719,7 +2763,7 @@ function SocialView({ currentUser, users, messages, setMessages }: {
                       borderRadius: isMe ? '18px 4px 18px 18px' : '4px 18px 18px 18px',
                       border: isMe ? 'none' : '1px solid #1e1e4a',
                     }}>
-                    {renderMessageContent(msg.content, users)}
+                    {renderMessageContent(msg.content, users, setProfileUser)}
                   </div>
                 </div>
               </div>
@@ -2782,6 +2826,10 @@ function SocialView({ currentUser, users, messages, setMessages }: {
           )}
         </div>
       </div>
+      {profileUser && (
+        <UserProfileCard user={profileUser} onClose={() => setProfileUser(null)}
+          onMessage={() => { openDm(profileUser.id); setProfileUser(null) }} />
+      )}
     </div>
   )
 }
