@@ -3926,7 +3926,11 @@ useEffect(() => {
     const channel = supabase.channel('messages-changes')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
         setMessages(prev => [...prev, mapDbMessage(payload.new)])
-      }).subscribe()
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, payload => {
+        setMessages(prev => prev.filter(m => m.id !== payload.old.id))
+      })
+      .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [session])
 
