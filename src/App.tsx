@@ -3163,6 +3163,14 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
   const headerLabel = showMentions ? '🔔 Nhắc đến tôi' : isDm ? `@ ${dmPartner?.name ?? ''}` : CHANNELS.find(c => c.id === channel)?.label
   const headerDesc = showMentions ? 'Tất cả tin nhắn có tag bạn' : isDm ? 'Nhắn tin riêng' : CHANNELS.find(c => c.id === channel)?.desc
 
+  // Tối đa 3 thông báo mới nhất của Ban Giám đốc (BOD), được ghim ở đầu kênh "thông báo"
+  const pinnedAnnouncements = (channel === 'announcements' && !isDm && !showMentions)
+    ? [...messages]
+        .filter(m => m.channel === 'announcements' && users.find(u => u.id === m.userId)?.isDirector)
+        .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+        .slice(0, 3)
+    : []
+
   return (
     <div className="flex" style={{ height: 'calc(100vh - 64px)' }}>
     {/* Sidebar */}
@@ -3215,20 +3223,48 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
           <span className="ml-auto text-gray-600 text-xs">{filtered.length} tin nhắn</span>
         </div>
 
+        {pinnedAnnouncements.length > 0 && (
+          <div className="px-4 pt-3 pb-1 flex-shrink-0 space-y-2" style={{ background: '#120d00', borderBottom: '1px solid #3a2e00' }}>
+            <p className="text-amber-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+              📌 Thông báo mới nhất
+            </p>
+            {pinnedAnnouncements.map(msg => {
+              const sender = users.find(u => u.id === msg.userId)
+              if (!sender) return null
+              return (
+                <div key={msg.id} className="flex items-start gap-2 p-2.5 rounded-lg mb-2"
+                  style={{ background: '#1e1600', border: '1px solid #4a3a00' }}>
+                  <CharAvatar user={sender} size={26} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-amber-300 text-xs font-bold">👑 BOD · {sender.name}</span>
+                      <span className="text-gray-600 text-[10px]">{fmtTime(msg.timestamp)}</span>
+                    </div>
+                    <p className="text-amber-100/90 text-xs mt-0.5 leading-relaxed break-words">
+                      {renderMessageContent(msg.content, users, setProfileUser)}
+                    </p>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {filtered.map(msg => {
             const sender = users.find(u => u.id === msg.userId)
             if (!sender) return null
             const isMe = msg.userId === currentUser.id
             const mentionsMe = !isMe && parseMentions(msg.content, users).some(m => m.user.id === currentUser.id)
+            const isManagerMsg = !isMe && !!sender.isDirector
             return (
               <div key={msg.id} className={`flex gap-3 ${isMe ? 'flex-row-reverse' : ''}`}>
                 <CharAvatar user={sender} size={36} />
                 <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[75%]`}>
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
                     {!isMe && (
-                      <span className="text-xs font-semibold" style={{ color: sender.avatar.outfitColor }}>
-                        {sender.name}
+                      <span className="text-xs font-semibold flex items-center gap-1" style={{ color: isManagerMsg ? '#fbbf24' : sender.avatar.outfitColor }}>
+                        {isManagerMsg && '👑'} {sender.name}
                       </span>
                     )}
                     <span className="text-gray-700 text-[10px]">{fmtTime(msg.timestamp)}</span>
@@ -3247,10 +3283,10 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
                   </div>
                   <div className="px-4 py-2.5 text-sm leading-relaxed"
                     style={{
-                      background: isMe ? 'linear-gradient(135deg,#7c3aed,#5b21b6)' : mentionsMe ? '#241d05' : '#0e0e24',
+                      background: isMe ? 'linear-gradient(135deg,#7c3aed,#5b21b6)' : mentionsMe ? '#241d05' : isManagerMsg ? '#1e1600' : '#0e0e24',
                       color: isMe ? '#fff' : '#d1d5db',
                       borderRadius: isMe ? '18px 4px 18px 18px' : '4px 18px 18px 18px',
-                      border: isMe ? 'none' : mentionsMe ? '1px solid #facc15' : '1px solid #1e1e4a',
+                      border: isMe ? 'none' : mentionsMe ? '1px solid #facc15' : isManagerMsg ? '1px solid #4a3a00' : '1px solid #1e1e4a',
                       boxShadow: mentionsMe ? '0 0 12px #facc1530' : 'none',
                     }}>
                     {renderMessageContent(msg.content, users, setProfileUser)}
