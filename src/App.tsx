@@ -567,6 +567,13 @@ function LevelBadge({ exp }: { exp: number }) {
   )
 }
 
+// Kiểm tra 1 tin nhắn có nằm trong phạm vi user này được xem không (dùng để đếm mention chính xác)
+function isMessageVisibleTo(m: Message, user: User, users: User[]): boolean {
+  if (m.channel === 'dm') return m.userId === user.id || m.toUserId === user.id
+  if (m.channel === 'team') return users.find(u => u.id === m.userId)?.teamId === user.teamId
+  return true
+}
+
 function ExpBarMini({ exp }: { exp: number }) {
   const { progress } = getExpProgress(exp)
   return (
@@ -2929,37 +2936,76 @@ function UserProfileCard({ user, onClose, onMessage }: { user: User; onClose: ()
 }
 // ==================== SOCIAL ====================
 
-function SocialView({ currentUser, users, messages, setMessages }: {
+function SocialView({ currentUser, users, messages, setMessages, showMentions, setShowMentions, markMentionsSeen }: {
   currentUser: User; users: User[]; messages: Message[]; setMessages: (m: Message[]) => void
+  showMentions: boolean; setShowMentions: (v: boolean) => void; markMentionsSeen: () => void
 }) {
-  // selection: hoặc 1 channel nhóm, hoặc 1 user cụ thể để nhắn riêng (DM)
   const [channel, setChannel] = useState<ChatChannel>('general')
   const [dmUserId, setDmUserId] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
   const [profileUser, setProfileUser] = useState<User | null>(null)
+  const [lastSeenMap, setLastSeenMap] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(localStorage.getItem('chatLastSeen') || '{}') } catch { return {} }
+  })
   const endRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  const markSeen = (key: string) => {
+    const now = new Date().toISOString()
+    setLastSeenMap(prev => {
+      const next = { ...prev, [key]: now }
+      localStorage.setItem('chatLastSeen', JSON.stringify(next))
+      return next
+    })
+  }
+
+  useEffect(() => { markSeen('channel:general') }, [])
+
+  useEffect(() => {
+    if (showMentions) markMentionsSeen()
+  }, [showMentions])
 
   const isDm = channel === 'dm' && dmUserId !== null
   const dmPartner = isDm ? users.find(u => u.id === dmUserId) : undefined
 
-  // const filtered = isDm
-  //   ? messages.filter(m => m.channel === 'dm' &&
-  //       ((m.userId === currentUser.id && m.toUserId === dmUserId) ||
-  //        (m.userId === dmUserId && m.toUserId === currentUser.id)))
-  //   : messages.filter(m => m.channel === channel)
+  const mentionMessages = messages.filter(m =>
+    isMessageVisibleTo(m, currentUser, users) &&
+    parseMentions(m.content, users).some(x => x.user.id === currentUser.id)
+  )
 
-  const filtered = isDm
-  ? messages.filter(m => m.channel === 'dm' &&
-      ((m.userId === currentUser.id && m.toUserId === dmUserId) ||
-       (m.userId === dmUserId && m.toUserId === currentUser.id)))
-  : channel === 'team'
-    ? messages.filter(m => m.channel === 'team' &&
-        users.find(u => u.id === m.userId)?.teamId === currentUser.teamId)
-    : messages.filter(m => m.channel === channel)
+  const filtered = showMentions
+    ? mentionMessages
+    : isDm
+    ? messages.filter(m => m.channel === 'dm' &&
+        ((m.userId === currentUser.id && m.toUserId === dmUserId) ||
+         (m.userId === dmUserId && m.toUserId === currentUser.id)))
+    : channel === 'team'
+      ? messages.filter(m => m.channel === 'team' &&
+          users.find(u => u.id === m.userId)?.teamId === currentUser.teamId)
+      : messages.filter(m => m.channel === channel)
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [filtered.length, channel, dmUserId])
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [filtered.length, channel, dmUserId, showMentions])
+
+  useEffect(() => {
+    if (showMentions) return
+    if (isDm && dmUserId) markSeen(`dm:${dmUserId}`)
+    else if (!isDm) markSeen(`channel:${channel}`)
+  }, [filtered.length, channel, dmUserId, showMentions])
+
+  const channelUnread = (chId: ChatChannel) => {
+    const seen = lastSeenMap[`channel:${chId}`] || ''
+    return messages.some(m => {
+      if (m.channel !== chId || m.userId === currentUser.id) return false
+      if (chId === 'team' && users.find(u => u.id === m.userId)?.teamId !== currentUser.teamId) return false
+      return m.timestamp > seen
+    })
+  }
+
+  const dmUnread = (partnerId: string) => {
+    const seen = lastSeenMap[`dm:${partnerId}`] || ''
+    return messages.some(m => m.channel === 'dm' && m.userId === partnerId && m.toUserId === currentUser.id && m.timestamp > seen)
+  }
 
   // const send = () => {
   //   if (!input.trim()) return
@@ -3045,15 +3091,19 @@ function SocialView({ currentUser, users, messages, setMessages }: {
   const openChannel = (id: ChatChannel) => {
     setChannel(id)
     setDmUserId(null)
+    setShowMentions(false)
+    markSeen(`channel:${id}`)
   }
 
   const openDm = (userId: string) => {
     setChannel('dm')
     setDmUserId(userId)
+    setShowMentions(false)
+    markSeen(`dm:${userId}`)
   }
 
-  const headerLabel = isDm ? `@ ${dmPartner?.name ?? ''}` : CHANNELS.find(c => c.id === channel)?.label
-  const headerDesc = isDm ? 'Nhắn tin riêng' : CHANNELS.find(c => c.id === channel)?.desc
+  const headerLabel = showMentions ? '🔔 Nhắc đến tôi' : isDm ? `@ ${dmPartner?.name ?? ''}` : CHANNELS.find(c => c.id === channel)?.label
+  const headerDesc = showMentions ? 'Tất cả tin nhắn có tag bạn' : isDm ? 'Nhắn tin riêng' : CHANNELS.find(c => c.id === channel)?.desc
 
   return (
     <div className="flex" style={{ height: 'calc(100vh - 64px)' }}>
@@ -3063,10 +3113,16 @@ function SocialView({ currentUser, users, messages, setMessages }: {
         <p className="text-gray-700 text-[10px] uppercase tracking-widest px-2 mb-2">Kênh</p>
         {CHANNELS.map(ch => (
           <button key={ch.id} onClick={() => openChannel(ch.id)} title={ch.label}
-            className="w-full text-left px-2 py-2 rounded-lg mb-0.5 transition-all flex md:block items-center justify-center md:justify-start"
-            style={{ background: !isDm && channel === ch.id ? '#1a1a40' : 'transparent', color: !isDm && channel === ch.id ? '#e2e8f0' : '#6b7280' }}>
-            <span className="text-lg md:hidden">{ch.icon}</span>
-            <div className="text-sm hidden md:block truncate">{ch.label}</div>
+            className="relative w-full text-left px-2 py-2 rounded-lg mb-0.5 transition-all flex md:block items-center justify-center md:justify-start"
+            style={{ background: !isDm && !showMentions && channel === ch.id ? '#1a1a40' : 'transparent', color: !isDm && !showMentions && channel === ch.id ? '#e2e8f0' : '#6b7280' }}>
+            <span className="text-lg md:hidden relative">
+              {ch.icon}
+              {channelUnread(ch.id) && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500" />}
+            </span>
+            <div className="text-sm hidden md:flex items-center gap-1.5 truncate">
+              {ch.label}
+              {channelUnread(ch.id) && <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />}
+            </div>
             <div className="text-[10px] opacity-50 hidden md:block">{ch.desc}</div>
           </button>
         ))}
@@ -3076,7 +3132,7 @@ function SocialView({ currentUser, users, messages, setMessages }: {
           {users.filter(u => u.id !== currentUser.id).map(u => (
             <button key={u.id} onClick={() => openDm(u.id)}
               className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all"
-              style={{ background: isDm && dmUserId === u.id ? '#1a1a40' : 'transparent' }}>
+              style={{ background: isDm && !showMentions && dmUserId === u.id ? '#1a1a40' : 'transparent' }}>
               <div className="relative flex-shrink-0">
                 <CharAvatar user={u} size={20} />
                 <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-400"
@@ -3084,6 +3140,7 @@ function SocialView({ currentUser, users, messages, setMessages }: {
               </div>
               <span className="text-gray-300 text-[11px] truncate flex-1 text-left">{u.name.split(' ').slice(-1)[0]}</span>
               {u.role === 'manager' && <span className="text-[9px] text-purple-400">QL</span>}
+              {dmUnread(u.id) && <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />}
             </button>
           ))}
         </div>
@@ -3105,24 +3162,38 @@ function SocialView({ currentUser, users, messages, setMessages }: {
             const sender = users.find(u => u.id === msg.userId)
             if (!sender) return null
             const isMe = msg.userId === currentUser.id
+            const mentionsMe = !isMe && parseMentions(msg.content, users).some(m => m.user.id === currentUser.id)
             return (
               <div key={msg.id} className={`flex gap-3 ${isMe ? 'flex-row-reverse' : ''}`}>
                 <CharAvatar user={sender} size={36} />
                 <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[75%]`}>
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
                     {!isMe && (
                       <span className="text-xs font-semibold" style={{ color: sender.avatar.outfitColor }}>
                         {sender.name}
                       </span>
                     )}
                     <span className="text-gray-700 text-[10px]">{fmtTime(msg.timestamp)}</span>
+                    {mentionsMe && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: '#3a2e00', color: '#facc15' }}>
+                        Bạn được tag
+                      </span>
+                    )}
+                    {showMentions && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#1e1e4a', color: '#9ca3af' }}>
+                        {msg.channel === 'dm'
+                          ? `DM với ${(msg.userId === currentUser.id ? users.find(u => u.id === msg.toUserId) : users.find(u => u.id === msg.userId))?.name ?? '?'}`
+                          : msg.channel === 'team' ? '# team' : msg.channel === 'announcements' ? '📣 thông báo' : '# chung'}
+                      </span>
+                    )}
                   </div>
                   <div className="px-4 py-2.5 text-sm leading-relaxed"
                     style={{
-                      background: isMe ? 'linear-gradient(135deg,#7c3aed,#5b21b6)' : '#0e0e24',
+                      background: isMe ? 'linear-gradient(135deg,#7c3aed,#5b21b6)' : mentionsMe ? '#241d05' : '#0e0e24',
                       color: isMe ? '#fff' : '#d1d5db',
                       borderRadius: isMe ? '18px 4px 18px 18px' : '4px 18px 18px 18px',
-                      border: isMe ? 'none' : '1px solid #1e1e4a',
+                      border: isMe ? 'none' : mentionsMe ? '1px solid #facc15' : '1px solid #1e1e4a',
+                      boxShadow: mentionsMe ? '0 0 12px #facc1530' : 'none',
                     }}>
                     {renderMessageContent(msg.content, users, setProfileUser)}
                   </div>
@@ -3142,7 +3213,11 @@ function SocialView({ currentUser, users, messages, setMessages }: {
         </div>
 
         <div className="p-4 flex-shrink-0" style={{ borderTop: '1px solid #1a1a3a' }}>
-          {canPost ? (
+          {showMentions ? (
+            <div className="text-center text-gray-600 text-sm py-2">
+              💬 Bấm vào kênh tương ứng bên trên tin nhắn để trả lời
+            </div>
+          ) : canPost ? (
             <div className="flex gap-3 items-center">
               <CharAvatar user={currentUser} size={36} />
               <div className="relative flex-1 min-w-0">
@@ -3413,11 +3488,26 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
 }) {
   const [view, setView] = useState<View>('dashboard')
   const { level } = getExpProgress(currentUser.exp)
+  const [showMentions, setShowMentions] = useState(false)
+  const [lastSeenMention, setLastSeenMention] = useState(() => localStorage.getItem('lastSeenMention') || '')
+
+  const markMentionsSeen = () => {
+    const now = new Date().toISOString()
+    localStorage.setItem('lastSeenMention', now)
+    setLastSeenMention(now)
+  }
 
   // Merge current user into users list (keeps their live exp/avatar updated)
   const users = allUsers.some(u => u.id === currentUser.id)
     ? allUsers.map(u => u.id === currentUser.id ? currentUser : u)
     : [...allUsers, currentUser]
+
+  const mentionCount = messages.filter(m =>
+    m.userId !== currentUser.id &&
+    isMessageVisibleTo(m, currentUser, users) &&
+    parseMentions(m.content, users).some(x => x.user.id === currentUser.id) &&
+    m.timestamp > lastSeenMention
+  ).length  
 
   const sharedProps = { currentUser, tasks, users, setTasks, setCurrentUser, redemptions, setView }
 
@@ -3427,7 +3517,10 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
       case 'tasks': return <TasksView {...sharedProps} collaborations={collaborations} />
       case 'leaderboard': return <LeaderboardView users={users} tasks={tasks} />
       case 'rewards': return <RewardsView currentUser={currentUser} redemptions={redemptions} users={users} />
-      case 'social': return <SocialView currentUser={currentUser} users={users} messages={messages} setMessages={setMessages} />
+      case 'social': return (
+        <SocialView currentUser={currentUser} users={users} messages={messages} setMessages={setMessages}
+          showMentions={showMentions} setShowMentions={setShowMentions} markMentionsSeen={markMentionsSeen} />
+      )
       case 'profile': return <ProfileView currentUser={currentUser} setCurrentUser={setCurrentUser} tasks={tasks} />
     }
   }
@@ -3441,14 +3534,24 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
           <img src={companyLogo} alt="KNI" className="w-10 h-10 rounded-lg object-contain" />
         </div>
         {NAV.map(item => (
-          <button key={item.id} onClick={() => setView(item.id as View)} title={item.label}
-            className="w-14 h-14 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all duration-150"
+          <button key={item.id}
+            onClick={() => {
+              setView(item.id as View)
+              if (item.id === 'social' && mentionCount > 0) setShowMentions(true)
+            }}
+            title={item.label}
+            className="relative w-14 h-14 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all duration-150"
             style={{
               background: view === item.id ? '#1a1a40' : 'transparent',
               boxShadow: view === item.id ? 'inset 0 0 15px #7c3aed18, 0 0 0 1px #2a2a6a' : 'none',
             }}>
             <span className="text-xl">{item.icon}</span>
             <span className="text-[8px] tracking-wide" style={{ color: view === item.id ? '#a78bfa' : '#374151' }}>{item.label}</span>
+            {item.id === 'social' && mentionCount > 0 && (
+              <span className="absolute top-1 right-1.5 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center font-bold">
+                {mentionCount > 9 ? '9+' : mentionCount}
+              </span>
+            )}
           </button>
         ))}
         <div className="flex-1" />
@@ -3463,11 +3566,20 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
       <div className="flex md:hidden items-center justify-around py-2 flex-shrink-0"
         style={{ background: '#06060f', borderTop: '1px solid #1a1a3a' }}>
         {NAV.map(item => (
-          <button key={item.id} onClick={() => setView(item.id as View)}
-            className="flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-lg"
+          <button key={item.id}
+            onClick={() => {
+              setView(item.id as View)
+              if (item.id === 'social' && mentionCount > 0) setShowMentions(true)
+            }}
+            className="relative flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-lg"
             style={{ color: view === item.id ? '#a78bfa' : '#4b5563' }}>
             <span className="text-lg">{item.icon}</span>
             <span className="text-[9px]">{item.label}</span>
+            {item.id === 'social' && mentionCount > 0 && (
+              <span className="absolute top-0 right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center font-bold">
+                {mentionCount > 9 ? '9+' : mentionCount}
+              </span>
+            )}
           </button>
         ))}
       </div>
