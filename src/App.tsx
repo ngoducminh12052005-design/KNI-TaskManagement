@@ -71,6 +71,24 @@ interface Message {
   toUserId?: string // chỉ dùng khi channel === 'dm': id của người nhận
 }
 
+type CollaborationStatus = 'pending' | 'assigned' | 'rejected'
+
+interface Collaboration {
+  id: string
+  title: string
+  description: string
+  startDate: string
+  endDate: string
+  requestedBy: string
+  requestingTeamId: string
+  targetTeamId: string
+  status: CollaborationStatus
+  assignedEmployeeId?: string
+  assignedBy?: string
+  rejectedReason?: string
+  createdAt: string
+}
+
 interface Reward {
   id: string
   name: string
@@ -1310,7 +1328,274 @@ function SubmitTaskModal({ task, currentUser, onClose }: { task: Task; currentUs
   )
 }
 
-//====================MultiUserSelect======================
+
+//====================CollaborationRequestModal======================
+function CollaborationRequestModal({ currentUser, users, onClose }: {
+  currentUser: User; users: User[]; onClose: () => void
+}) {
+  const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [targetTeamId, setTargetTeamId] = useState('')
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const otherTeams = TEAMS.filter(t => t.id !== currentUser.teamId)
+
+  const handleSubmit = async () => {
+    if (!title.trim() || !description.trim() || !startDate || !endDate || !targetTeamId) {
+      setError('Vui lòng điền đầy đủ tất cả các trường bắt buộc.')
+      return
+    }
+    if (endDate < startDate) { setError('Ngày kết thúc phải sau ngày bắt đầu.'); return }
+    setError('')
+    setSaving(true)
+    const { error: insertError } = await supabase.from('collaborations').insert({
+      title: title.trim(), description: description.trim(),
+      start_date: startDate, end_date: endDate,
+      requested_by: currentUser.id,
+      requesting_team_id: currentUser.teamId,
+      target_team_id: targetTeamId,
+      status: 'pending',
+    })
+    setSaving(false)
+    if (insertError) { setError(insertError.message); return }
+
+    const targetManagers = users.filter(u => u.role === 'manager' && u.teamId === targetTeamId)
+    for (const mgr of targetManagers) {
+      await supabase.from('notifications').insert({
+        message: `🤝 ${currentUser.name} (${TEAMS.find(t => t.id === currentUser.teamId)?.name ?? ''}) muốn nhờ phòng ban bạn hỗ trợ: "${title.trim()}"`,
+        target_user_id: mgr.id,
+      })
+    }
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.8)' }}>
+      <div className="w-full max-w-md rounded-2xl p-6 animate-slide-up max-h-[90vh] overflow-y-auto"
+        style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
+        <div className="flex justify-between items-center mb-5">
+          <h3 className="text-white font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif' }}>🤝 Yêu cầu phối hợp phòng ban</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-2xl leading-none">×</button>
+        </div>
+
+        <div className="space-y-3.5">
+          <div>
+            <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Tên dự án / công việc phối hợp *</label>
+            <input value={title} onChange={e => setTitle(e.target.value)}
+              placeholder="VD: Chiến dịch truyền thông Q4"
+              className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
+              style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+          </div>
+
+          <div>
+            <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Nhiệm vụ cần phối hợp *</label>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3}
+              placeholder="Mô tả cụ thể công việc cần bên hỗ trợ thực hiện..."
+              className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none resize-none"
+              style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Ngày bắt đầu *</label>
+              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-lg text-white text-sm outline-none"
+                style={{ background: '#14143a', border: '1px solid #2a2a5a', colorScheme: 'dark' }} />
+            </div>
+            <div>
+              <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Ngày kết thúc *</label>
+              <input type="date" value={endDate} min={startDate || undefined} onChange={e => setEndDate(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-lg text-white text-sm outline-none"
+                style={{ background: '#14143a', border: '1px solid #2a2a5a', colorScheme: 'dark' }} />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Muốn nhờ phòng ban nào hỗ trợ *</label>
+            <select value={targetTeamId} onChange={e => setTargetTeamId(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-lg text-white text-sm outline-none"
+              style={{ background: '#14143a', border: '1px solid #2a2a5a' }}>
+              <option value="">-- Chọn phòng ban --</option>
+              {otherTeams.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
+            </select>
+          </div>
+
+          {error && <p className="text-red-400 text-xs">{error}</p>}
+
+          <div className="flex gap-3 pt-1">
+            <button onClick={onClose}
+              className="flex-1 py-2.5 rounded-xl text-gray-400 text-sm"
+              style={{ background: '#14143a', border: '1px solid #2a2a5a' }}>Hủy</button>
+            <button onClick={handleSubmit} disabled={saving}
+              className="flex-1 py-2.5 rounded-xl font-bold text-white text-sm disabled:opacity-40"
+              style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
+              {saving ? 'Đang gửi...' : 'Gửi yêu cầu'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CollaborationsPanel({ currentUser, users, collaborations }: {
+  currentUser: User; users: User[]; collaborations: Collaboration[]
+}) {
+  const [assigningId, setAssigningId] = useState<string | null>(null)
+  const [pickedEmployee, setPickedEmployee] = useState('')
+  const [expReward, setExpReward] = useState(80)
+
+  const sent = collaborations.filter(c => c.requestedBy === currentUser.id)
+  const received = collaborations.filter(c => c.targetTeamId === currentUser.teamId && c.status === 'pending')
+  const myTeamEmployees = users.filter(u => u.role === 'employee' && u.teamId === currentUser.teamId)
+  const getUserById = (id?: string) => users.find(u => u.id === id)
+
+  const handleReject = async (c: Collaboration) => {
+    const reason = window.prompt('Lý do từ chối:') ?? ''
+    await supabase.from('collaborations').update({ status: 'rejected', rejected_reason: reason }).eq('id', c.id)
+    await supabase.from('notifications').insert({
+      message: `❌ ${currentUser.name} đã từ chối yêu cầu phối hợp "${c.title}"${reason ? `: ${reason}` : ''}`,
+      target_user_id: c.requestedBy,
+    })
+  }
+
+  const openAssign = (c: Collaboration) => {
+    setAssigningId(c.id)
+    setPickedEmployee('')
+    setExpReward(suggestExp('medium', c.startDate, c.endDate, false, false))
+  }
+
+  const handleConfirmAssign = async (c: Collaboration) => {
+    if (!pickedEmployee) return
+    await supabase.from('collaborations').update({
+      status: 'assigned', assigned_employee_id: pickedEmployee, assigned_by: currentUser.id,
+    }).eq('id', c.id)
+
+    await supabase.from('tasks').insert({
+      title: c.title,
+      description: `[Phối hợp phòng ban] ${c.description}`,
+      exp_reward: expReward,
+      status: 'open',
+      assigned_to: [pickedEmployee],
+      project_manager: [c.requestedBy, currentUser.id],
+      supporters: [],
+      created_by: currentUser.id,
+      start_date: c.startDate,
+      due_date: c.endDate,
+      category: 'operations',
+      priority: 'medium',
+      self_created: false,
+      important: false,
+      urgent: false,
+    })
+
+    const employeeName = getUserById(pickedEmployee)?.name ?? ''
+    await supabase.from('notifications').insert({
+      message: `🤝 ${currentUser.name} đã phân công ${employeeName} hợp tác trong dự án "${c.title}"`,
+      target_user_id: c.requestedBy,
+    })
+    await supabase.from('notifications').insert({
+      message: `🤝 Bạn vừa được phân công hợp tác trong dự án "${c.title}" (phối hợp với ${TEAMS.find(t => t.id === c.requestingTeamId)?.name ?? ''})`,
+      target_user_id: pickedEmployee,
+    })
+
+    setAssigningId(null)
+  }
+
+  const statusBadge = (c: Collaboration) => {
+    if (c.status === 'pending') return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#2a1a00', color: '#fbbf24' }}>⏳ Chờ duyệt</span>
+    if (c.status === 'rejected') return (
+      <div className="flex flex-col items-end gap-0.5">
+        <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#2a1010', color: '#f87171' }}>❌ Bị từ chối</span>
+        {c.rejectedReason && <span className="text-gray-500 text-[10px] max-w-[200px] text-right">{c.rejectedReason}</span>}
+      </div>
+    )
+    return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#0f2a1a', color: '#34d399' }}>✅ Đã phân công: {getUserById(c.assignedEmployeeId)?.name}</span>
+  }
+
+  if (sent.length === 0 && received.length === 0) return null
+
+  return (
+    <div className="mb-6 space-y-4">
+      {received.length > 0 && (
+        <div className="rounded-xl p-4" style={{ background: '#0e0e24', border: '1px solid #f59e0b30' }}>
+          <h3 className="text-white font-bold mb-3 text-sm flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+            🤝 Yêu cầu phối hợp cần bạn duyệt
+            <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: '#2a1a00', color: '#fbbf24' }}>{received.length}</span>
+          </h3>
+          <div className="space-y-3">
+            {received.map(c => (
+              <div key={c.id} className="p-3 rounded-lg" style={{ background: '#12122a', border: '1px solid #1a1a3a' }}>
+                <div className="mb-2">
+                  <div className="text-white text-sm font-semibold">{c.title}</div>
+                  <div className="text-gray-500 text-xs mt-0.5">
+                    Từ: {getUserById(c.requestedBy)?.name} ({TEAMS.find(t => t.id === c.requestingTeamId)?.name})
+                  </div>
+                  <div className="text-gray-600 text-xs mt-1">📅 {fmtDate(c.startDate)} → {fmtDate(c.endDate)}</div>
+                </div>
+                <p className="text-gray-400 text-xs mb-3 leading-relaxed">{c.description}</p>
+
+                {assigningId === c.id ? (
+                  <div className="space-y-2 p-2.5 rounded-lg" style={{ background: '#0a0a1a' }}>
+                    <label className="text-gray-500 text-[10px] uppercase tracking-wider block">Phân công nhân viên phòng bạn</label>
+                    <select value={pickedEmployee} onChange={e => setPickedEmployee(e.target.value)}
+                      className="w-full px-2.5 py-2 rounded-lg text-white text-xs outline-none"
+                      style={{ background: '#14143a', border: '1px solid #2a2a5a' }}>
+                      <option value="">-- Chọn nhân viên --</option>
+                      {myTeamEmployees.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    </select>
+                    <label className="text-gray-500 text-[10px] uppercase tracking-wider block">EXP thưởng</label>
+                    <input type="number" value={expReward} onChange={e => setExpReward(parseInt(e.target.value) || 0)}
+                      className="w-full px-2.5 py-2 rounded-lg text-amber-400 text-xs outline-none font-bold"
+                      style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+                    <div className="flex gap-2 pt-1">
+                      <button onClick={() => setAssigningId(null)} className="flex-1 py-1.5 rounded-lg text-xs text-gray-400" style={{ background: '#14143a' }}>Hủy</button>
+                      <button onClick={() => handleConfirmAssign(c)} disabled={!pickedEmployee}
+                        className="flex-1 py-1.5 rounded-lg text-xs font-bold disabled:opacity-40" style={{ background: '#0f2a1a', color: '#34d399' }}>
+                        Xác nhận phân công
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex gap-2 justify-end">
+                    <button onClick={() => handleReject(c)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#2a1010', color: '#f87171' }}>
+                      Từ chối
+                    </button>
+                    <button onClick={() => openAssign(c)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#0f2a1a', color: '#34d399' }}>
+                      ✓ Duyệt
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {sent.length > 0 && (
+        <div className="rounded-xl p-4" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
+          <h3 className="text-white font-bold mb-3 text-sm" style={{ fontFamily: 'Rajdhani, sans-serif' }}>📨 Yêu cầu phối hợp đã gửi</h3>
+          <div className="space-y-2">
+            {sent.map(c => (
+              <div key={c.id} className="p-3 rounded-lg flex items-center justify-between gap-3" style={{ background: '#12122a', border: '1px solid #1a1a3a' }}>
+                <div>
+                  <div className="text-white text-sm font-medium">{c.title}</div>
+                  <div className="text-gray-500 text-xs">Nhờ: {TEAMS.find(t => t.id === c.targetTeamId)?.name}</div>
+                </div>
+                {statusBadge(c)}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 // Dropdown chọn nhiều người dùng chung (Phụ trách / PM / Hỗ trợ)
 function MultiUserSelect({ label, options, selected, onToggle, placeholder = 'Chọn...', badge }: {
   label: string; options: User[]; selected: string[]; onToggle: (id: string) => void
@@ -1434,12 +1719,14 @@ function TaskCommentsPanel({ taskId, currentUser, users }: { taskId: string; cur
 
 // ==================== TASKS VIEW ====================
 
-function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser }: {
+function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collaborations }: {
   currentUser: User; tasks: Task[]; users: User[]
   setTasks: (t: Task[]) => void; setCurrentUser: (u: User) => void
+  collaborations: Collaboration[]
 }) {
   const [filter, setFilter] = useState<'all' | 'mine' | 'open' | 'done'>('all')
   const [search, setSearch] = useState('')
+  const [showCollabModal, setShowCollabModal] = useState(false)
   const [showModal, setShowModal] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [openCommentsFor, setOpenCommentsFor] = useState<string | null>(null)
@@ -1457,7 +1744,9 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser }: {
   const isManager = currentUser.role === 'manager'
 // const employees = users.filter(u => u.role === 'employee' && u.teamId === currentUser.teamId)
 // const teamUsers = users.filter(u => u.teamId === currentUser.teamId)
-  const employees = currentUser.isDirector ? users : users.filter(u => u.role === 'employee')
+  const employees = currentUser.isDirector
+  ? users
+  : users.filter(u => u.role === 'employee' && u.teamId === currentUser.teamId)
   const teamUsers = currentUser.isDirector
     ? users
     : users.filter(u => u.teamId === currentUser.teamId)
@@ -1691,12 +1980,21 @@ const handleSaveTask = async () => {
           <h2 className="text-white text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif' }}>Quản lý Task</h2>
           <p className="text-gray-500 text-sm">{visible.length} task</p>
         </div>
-        <button onClick={() => setShowModal(true)}
-          className="px-4 py-2.5 rounded-xl font-bold text-white text-sm flex items-center gap-2 transition-all hover:scale-105"
-          style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', boxShadow: '0 0 20px #7c3aed40' }}>
-          <span className="text-lg leading-none">+</span>
-          <span>{isManager ? 'Giao Task' : 'Tự tạo Task'}</span>
-        </button>
+        <div className="flex gap-2">
+          {isManager && (
+            <button onClick={() => setShowCollabModal(true)}
+              className="px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition-all hover:scale-105"
+              style={{ background: '#14143a', border: '1px solid #2a2a5a', color: '#a78bfa' }}>
+              🤝 Phối hợp phòng ban
+            </button>
+          )}
+          <button onClick={() => setShowModal(true)}
+            className="px-4 py-2.5 rounded-xl font-bold text-white text-sm flex items-center gap-2 transition-all hover:scale-105"
+            style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', boxShadow: '0 0 20px #7c3aed40' }}>
+            <span className="text-lg leading-none">+</span>
+            <span>{isManager ? 'Giao Task' : 'Tự tạo Task'}</span>
+          </button>
+        </div>
       </div>
 
       <div className="relative mb-3">
@@ -1712,7 +2010,8 @@ const handleSaveTask = async () => {
           </button>
         )}
       </div>
-
+      
+      <CollaborationsPanel currentUser={currentUser} users={users} collaborations={collaborations} />
       <div className="flex gap-2 mb-5">
         {[{ id: 'all', label: 'Tất cả' }, { id: 'mine', label: 'Của tôi' }, { id: 'open', label: 'Chưa làm' }, { id: 'done', label: 'Xong' }].map(f => (
           <button key={f.id} onClick={() => setFilter(f.id as typeof filter)}
@@ -2204,6 +2503,9 @@ const handleSaveTask = async () => {
       )}
       {submittingTask && (
         <SubmitTaskModal task={submittingTask} currentUser={currentUser} onClose={() => setSubmittingTask(null)} />
+      )}
+      {showCollabModal && (
+        <CollaborationRequestModal currentUser={currentUser} users={users} onClose={() => setShowCollabModal(false)} />
       )}
     </div>
   )
@@ -3055,12 +3357,13 @@ function NotificationBell({ notifications }: { notifications: { id: string; mess
   )
 }
 
-function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, messages, setMessages, redemptions, notifications }: {
+function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, messages, setMessages, redemptions, notifications, collaborations }: {
   currentUser: User; setCurrentUser: (u: User) => void; allUsers: User[]
   tasks: Task[]; setTasks: (t: Task[]) => void
   messages: Message[]; setMessages: (m: Message[]) => void
   redemptions: { id: string; userId: string; rewardId: string; cost: number }[]
   notifications: { id: string; message: string; createdAt: string }[]
+  collaborations: Collaboration[]
 }) {
   const [view, setView] = useState<View>('dashboard')
   const { level } = getExpProgress(currentUser.exp)
@@ -3075,7 +3378,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   const renderView = () => {
     switch (view) {
       case 'dashboard': return <DashboardView {...sharedProps} />
-      case 'tasks': return <TasksView {...sharedProps} />
+      case 'tasks': return <TasksView {...sharedProps} collaborations={collaborations} />
       case 'leaderboard': return <LeaderboardView users={users} tasks={tasks} />
       case 'rewards': return <RewardsView currentUser={currentUser} redemptions={redemptions} users={users} />
       case 'social': return <SocialView currentUser={currentUser} users={users} messages={messages} setMessages={setMessages} />
@@ -3197,6 +3500,7 @@ export default function App() {
   const [checkingSession, setCheckingSession] = useState(true)
   const [redemptions, setRedemptions] = useState<{ id: string; userId: string; rewardId: string; cost: number }[]>([])
   const [notifications, setNotifications] = useState<{ id: string; message: string; createdAt: string; targetUserId?: string }[]>([])
+  const [collaborations, setCollaborations] = useState<Collaboration[]>([])
 
   function mapProfileToUser(p: any): User {
   return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email, isDirector: p.is_director ?? false }
@@ -3223,6 +3527,16 @@ export default function App() {
     crossDeptRejectedReason: t.cross_dept_rejected_reason ?? undefined,
     crossDeptRejectedBy: t.cross_dept_rejected_by ?? undefined,
     targetTeamId: t.target_team_id ?? undefined,
+  }
+}
+function mapDbCollaboration(c: any): Collaboration {
+  return {
+    id: c.id, title: c.title, description: c.description,
+    startDate: c.start_date, endDate: c.end_date,
+    requestedBy: c.requested_by, requestingTeamId: c.requesting_team_id, targetTeamId: c.target_team_id,
+    status: c.status, assignedEmployeeId: c.assigned_employee_id ?? undefined,
+    assignedBy: c.assigned_by ?? undefined, rejectedReason: c.rejected_reason ?? undefined,
+    createdAt: c.created_at,
   }
 }
 
@@ -3335,7 +3649,16 @@ useEffect(() => {
   return () => { supabase.removeChannel(channel) }
 }, [session])
 
+useEffect(() => {
+  if (!session) return
+  supabase.from('collaborations').select('*').then(({ data }) => data && setCollaborations(data.map(mapDbCollaboration)))
 
+  const channel = supabase.channel('collaborations-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'collaborations' }, () => {
+      supabase.from('collaborations').select('*').then(({ data }) => data && setCollaborations(data.map(mapDbCollaboration)))
+    }).subscribe()
+  return () => { supabase.removeChannel(channel) }
+}, [session])
   // Khi allUsers cập nhật (real-time), đồng bộ luôn currentProfile nếu có thay đổi
 useEffect(() => {
   if (!currentProfile) return
@@ -3420,6 +3743,7 @@ useEffect(() => {
       setMessages={setMessages}
       redemptions={redemptions}
       notifications={notifications}
+      collaborations={collaborations}
     />
   )
 }
