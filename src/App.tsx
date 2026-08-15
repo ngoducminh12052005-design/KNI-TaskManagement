@@ -82,6 +82,8 @@ interface Collaboration {
   requestedBy: string
   requestingTeamId: string
   targetTeamId: string
+  targetManagerId?: string
+  expReward?: number
   status: CollaborationStatus
   assignedEmployeeId?: string
   assignedBy?: string
@@ -1338,14 +1340,17 @@ function CollaborationRequestModal({ currentUser, users, onClose }: {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [targetTeamId, setTargetTeamId] = useState('')
+  const [targetManagerId, setTargetManagerId] = useState('')
+  const [expReward, setExpReward] = useState(80)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
   const otherTeams = TEAMS.filter(t => t.id !== currentUser.teamId)
+  const managersInTargetTeam = users.filter(u => u.role === 'manager' && u.teamId === targetTeamId)
 
   const handleSubmit = async () => {
-    if (!title.trim() || !description.trim() || !startDate || !endDate || !targetTeamId) {
-      setError('Vui lòng điền đầy đủ tất cả các trường bắt buộc.')
+    if (!title.trim() || !description.trim() || !startDate || !endDate || !targetTeamId || !targetManagerId || !expReward) {
+      setError('Vui lòng điền đầy đủ tất cả các trường bắt buộc, bao gồm chọn quản lý cụ thể.')
       return
     }
     if (endDate < startDate) { setError('Ngày kết thúc phải sau ngày bắt đầu.'); return }
@@ -1357,18 +1362,18 @@ function CollaborationRequestModal({ currentUser, users, onClose }: {
       requested_by: currentUser.id,
       requesting_team_id: currentUser.teamId,
       target_team_id: targetTeamId,
+      target_manager_id: targetManagerId,
+      exp_reward: expReward,
       status: 'pending',
     })
     setSaving(false)
     if (insertError) { setError(insertError.message); return }
 
-    const targetManagers = users.filter(u => u.role === 'manager' && u.teamId === targetTeamId)
-    for (const mgr of targetManagers) {
-      await supabase.from('notifications').insert({
-        message: `🤝 ${currentUser.name} (${TEAMS.find(t => t.id === currentUser.teamId)?.name ?? ''}) muốn nhờ phòng ban bạn hỗ trợ: "${title.trim()}"`,
-        target_user_id: mgr.id,
-      })
-    }
+    const targetManager = users.find(u => u.id === targetManagerId)
+    await supabase.from('notifications').insert({
+      message: `🤝 ${currentUser.name} (${TEAMS.find(t => t.id === currentUser.teamId)?.name ?? ''}) muốn nhờ bạn hỗ trợ: "${title.trim()}"`,
+      target_user_id: targetManagerId,
+    })
     onClose()
   }
 
@@ -1414,14 +1419,37 @@ function CollaborationRequestModal({ currentUser, users, onClose }: {
           </div>
 
           <div>
-            <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Muốn nhờ phòng ban nào hỗ trợ *</label>
-            <select value={targetTeamId} onChange={e => setTargetTeamId(e.target.value)}
+            <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Điểm EXP thưởng cho người nhận việc *</label>
+            <input type="number" value={expReward} onChange={e => setExpReward(parseInt(e.target.value) || 0)}
+              className="w-full px-3 py-2.5 rounded-lg text-amber-400 text-sm outline-none font-bold"
+              style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+          </div>
+
+          <div>
+            <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Chọn phòng ban muốn nhờ hỗ trợ *</label>
+            <select value={targetTeamId} onChange={e => { setTargetTeamId(e.target.value); setTargetManagerId('') }}
               className="w-full px-3 py-2.5 rounded-lg text-white text-sm outline-none"
               style={{ background: '#14143a', border: '1px solid #2a2a5a' }}>
               <option value="">-- Chọn phòng ban --</option>
               {otherTeams.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
             </select>
           </div>
+
+          {targetTeamId && (
+            <div>
+              <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Chọn quản lý muốn phối hợp *</label>
+              {managersInTargetTeam.length === 0 ? (
+                <p className="text-red-400 text-xs">Phòng ban này chưa có quản lý nào trong hệ thống.</p>
+              ) : (
+                <select value={targetManagerId} onChange={e => setTargetManagerId(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-lg text-white text-sm outline-none"
+                  style={{ background: '#14143a', border: '1px solid #2a2a5a' }}>
+                  <option value="">-- Chọn quản lý --</option>
+                  {managersInTargetTeam.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+              )}
+            </div>
+          )}
 
           {error && <p className="text-red-400 text-xs">{error}</p>}
 
@@ -1446,10 +1474,12 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
 }) {
   const [assigningId, setAssigningId] = useState<string | null>(null)
   const [pickedEmployee, setPickedEmployee] = useState('')
-  const [expReward, setExpReward] = useState(80)
+
+  if (currentUser.role !== 'manager') return null
 
   const sent = collaborations.filter(c => c.requestedBy === currentUser.id)
-  const received = collaborations.filter(c => c.targetTeamId === currentUser.teamId && c.status === 'pending')
+  const receivedPending = collaborations.filter(c => c.targetManagerId === currentUser.id && c.status === 'pending')
+  const receivedProcessed = collaborations.filter(c => c.targetManagerId === currentUser.id && c.status !== 'pending')
   const myTeamEmployees = users.filter(u => u.role === 'employee' && u.teamId === currentUser.teamId)
   const getUserById = (id?: string) => users.find(u => u.id === id)
 
@@ -1465,11 +1495,11 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
   const openAssign = (c: Collaboration) => {
     setAssigningId(c.id)
     setPickedEmployee('')
-    setExpReward(suggestExp('medium', c.startDate, c.endDate, false, false))
   }
 
   const handleConfirmAssign = async (c: Collaboration) => {
     if (!pickedEmployee) return
+    const exp = c.expReward ?? 80
     await supabase.from('collaborations').update({
       status: 'assigned', assigned_employee_id: pickedEmployee, assigned_by: currentUser.id,
     }).eq('id', c.id)
@@ -1477,7 +1507,7 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
     await supabase.from('tasks').insert({
       title: c.title,
       description: `[Phối hợp phòng ban] ${c.description}`,
-      exp_reward: expReward,
+      exp_reward: exp,
       status: 'open',
       assigned_to: [pickedEmployee],
       project_manager: [c.requestedBy, currentUser.id],
@@ -1516,18 +1546,18 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
     return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#0f2a1a', color: '#34d399' }}>✅ Đã phân công: {getUserById(c.assignedEmployeeId)?.name}</span>
   }
 
-  if (sent.length === 0 && received.length === 0) return null
+  if (sent.length === 0 && receivedPending.length === 0 && receivedProcessed.length === 0) return null
 
   return (
     <div className="mb-6 space-y-4">
-      {received.length > 0 && (
+      {receivedPending.length > 0 && (
         <div className="rounded-xl p-4" style={{ background: '#0e0e24', border: '1px solid #f59e0b30' }}>
           <h3 className="text-white font-bold mb-3 text-sm flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
             🤝 Yêu cầu phối hợp cần bạn duyệt
-            <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: '#2a1a00', color: '#fbbf24' }}>{received.length}</span>
+            <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: '#2a1a00', color: '#fbbf24' }}>{receivedPending.length}</span>
           </h3>
           <div className="space-y-3">
-            {received.map(c => (
+            {receivedPending.map(c => (
               <div key={c.id} className="p-3 rounded-lg" style={{ background: '#12122a', border: '1px solid #1a1a3a' }}>
                 <div className="mb-2">
                   <div className="text-white text-sm font-semibold">{c.title}</div>
@@ -1535,6 +1565,9 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
                     Từ: {getUserById(c.requestedBy)?.name} ({TEAMS.find(t => t.id === c.requestingTeamId)?.name})
                   </div>
                   <div className="text-gray-600 text-xs mt-1">📅 {fmtDate(c.startDate)} → {fmtDate(c.endDate)}</div>
+                  {c.expReward != null && (
+                    <div className="text-amber-400 text-xs mt-1 font-bold">+{c.expReward} EXP (do bên yêu cầu đề xuất)</div>
+                  )}
                 </div>
                 <p className="text-gray-400 text-xs mb-3 leading-relaxed">{c.description}</p>
 
@@ -1547,10 +1580,6 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
                       <option value="">-- Chọn nhân viên --</option>
                       {myTeamEmployees.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                     </select>
-                    <label className="text-gray-500 text-[10px] uppercase tracking-wider block">EXP thưởng</label>
-                    <input type="number" value={expReward} onChange={e => setExpReward(parseInt(e.target.value) || 0)}
-                      className="w-full px-2.5 py-2 rounded-lg text-amber-400 text-xs outline-none font-bold"
-                      style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
                     <div className="flex gap-2 pt-1">
                       <button onClick={() => setAssigningId(null)} className="flex-1 py-1.5 rounded-lg text-xs text-gray-400" style={{ background: '#14143a' }}>Hủy</button>
                       <button onClick={() => handleConfirmAssign(c)} disabled={!pickedEmployee}
@@ -1577,6 +1606,23 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
         </div>
       )}
 
+      {receivedProcessed.length > 0 && (
+        <div className="rounded-xl p-4" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
+          <h3 className="text-white font-bold mb-3 text-sm" style={{ fontFamily: 'Rajdhani, sans-serif' }}>📋 Yêu cầu phối hợp đã xử lý</h3>
+          <div className="space-y-2">
+            {receivedProcessed.map(c => (
+              <div key={c.id} className="p-3 rounded-lg flex items-center justify-between gap-3" style={{ background: '#12122a', border: '1px solid #1a1a3a' }}>
+                <div>
+                  <div className="text-white text-sm font-medium">{c.title}</div>
+                  <div className="text-gray-500 text-xs">Từ: {getUserById(c.requestedBy)?.name}</div>
+                </div>
+                {statusBadge(c)}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {sent.length > 0 && (
         <div className="rounded-xl p-4" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
           <h3 className="text-white font-bold mb-3 text-sm" style={{ fontFamily: 'Rajdhani, sans-serif' }}>📨 Yêu cầu phối hợp đã gửi</h3>
@@ -1585,7 +1631,7 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
               <div key={c.id} className="p-3 rounded-lg flex items-center justify-between gap-3" style={{ background: '#12122a', border: '1px solid #1a1a3a' }}>
                 <div>
                   <div className="text-white text-sm font-medium">{c.title}</div>
-                  <div className="text-gray-500 text-xs">Nhờ: {TEAMS.find(t => t.id === c.targetTeamId)?.name}</div>
+                  <div className="text-gray-500 text-xs">Nhờ: {getUserById(c.targetManagerId)?.name ?? TEAMS.find(t => t.id === c.targetTeamId)?.name}</div>
                 </div>
                 {statusBadge(c)}
               </div>
@@ -3534,6 +3580,8 @@ function mapDbCollaboration(c: any): Collaboration {
     id: c.id, title: c.title, description: c.description,
     startDate: c.start_date, endDate: c.end_date,
     requestedBy: c.requested_by, requestingTeamId: c.requesting_team_id, targetTeamId: c.target_team_id,
+    targetManagerId: c.target_manager_id ?? undefined,
+    expReward: c.exp_reward ?? undefined,
     status: c.status, assignedEmployeeId: c.assigned_employee_id ?? undefined,
     assignedBy: c.assigned_by ?? undefined, rejectedReason: c.rejected_reason ?? undefined,
     createdAt: c.created_at,
