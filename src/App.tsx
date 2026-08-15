@@ -2985,6 +2985,8 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
   })
   const endRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const messageRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const [highlightedId, setHighlightedId] = useState<string | null>(null)
 
   const markSeen = (key: string) => {
     const now = new Date().toISOString()
@@ -3180,6 +3182,15 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
     }
   }
 
+  const jumpToMessage = (messageId: string) => {
+    const el = messageRefs.current[messageId]
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setHighlightedId(messageId)
+      setTimeout(() => setHighlightedId(prev => (prev === messageId ? null : prev)), 2500)
+    }
+  }
+
   return (
     <div className="flex" style={{ height: 'calc(100vh - 64px)' }}>
     {/* Sidebar */}
@@ -3241,8 +3252,9 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
               const sender = users.find(u => u.id === msg.userId)
               if (!sender) return null
               return (
-                <div key={msg.id} className="flex items-start gap-2 p-2.5 rounded-lg mb-2 group"
-                  style={{ background: '#1e1600', border: '1px solid #4a3a00' }}>
+                <div key={msg.id} onClick={() => jumpToMessage(msg.id)}
+                  className="flex items-start gap-2 p-2.5 rounded-lg mb-2 group transition-all hover:brightness-110"
+                  style={{ background: '#1e1600', border: '1px solid #4a3a00', cursor: 'pointer' }}>
                   <CharAvatar user={sender} size={26} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
@@ -3254,7 +3266,7 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
                     </p>
                   </div>
                   {currentUser.isDirector && (
-                    <button onClick={() => handleUnpin(msg.id)}
+                    <button onClick={e => { e.stopPropagation(); handleUnpin(msg.id) }}
                       title="Gỡ khỏi ghim (đã hoàn thành / hết hạn)"
                       className="flex-shrink-0 opacity-0 group-hover:opacity-100 text-amber-400/70 hover:text-red-400 text-xs px-2 py-1 rounded-lg transition-all"
                       style={{ background: '#0000002a' }}>
@@ -3274,8 +3286,11 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
             const isMe = msg.userId === currentUser.id
             const mentionsMe = !isMe && parseMentions(msg.content, users).some(m => m.user.id === currentUser.id)
             const isManagerMsg = !isMe && !!sender.isDirector
+            const isHighlighted = highlightedId === msg.id
             return (
-              <div key={msg.id} className={`flex gap-3 ${isMe ? 'flex-row-reverse' : ''}`}>
+              <div key={msg.id} ref={el => { messageRefs.current[msg.id] = el }}
+                className={`flex gap-3 ${isMe ? 'flex-row-reverse' : ''}`}
+                style={{ transition: 'background 0.4s ease', borderRadius: 12, background: isHighlighted ? '#7c3aed22' : 'transparent' }}>
                 <CharAvatar user={sender} size={36} />
                 <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[75%]`}>
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
