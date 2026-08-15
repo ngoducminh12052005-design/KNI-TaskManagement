@@ -3171,6 +3171,11 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
         .slice(0, 3)
     : []
 
+  const handleUnpin = async (messageId: string) => {
+    if (!window.confirm('Gỡ thông báo này khỏi mục ghim? Thông báo sẽ bị xoá hoàn toàn khỏi kênh.')) return
+    await supabase.from('messages').delete().eq('id', messageId)
+  }
+
   return (
     <div className="flex" style={{ height: 'calc(100vh - 64px)' }}>
     {/* Sidebar */}
@@ -3232,7 +3237,7 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
               const sender = users.find(u => u.id === msg.userId)
               if (!sender) return null
               return (
-                <div key={msg.id} className="flex items-start gap-2 p-2.5 rounded-lg mb-2"
+                <div key={msg.id} className="flex items-start gap-2 p-2.5 rounded-lg mb-2 group"
                   style={{ background: '#1e1600', border: '1px solid #4a3a00' }}>
                   <CharAvatar user={sender} size={26} />
                   <div className="flex-1 min-w-0">
@@ -3244,6 +3249,14 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
                       {renderMessageContent(msg.content, users, setProfileUser)}
                     </p>
                   </div>
+                  {currentUser.isDirector && (
+                    <button onClick={() => handleUnpin(msg.id)}
+                      title="Gỡ khỏi ghim (đã hoàn thành / hết hạn)"
+                      className="flex-shrink-0 opacity-0 group-hover:opacity-100 text-amber-400/70 hover:text-red-400 text-xs px-2 py-1 rounded-lg transition-all"
+                      style={{ background: '#0000002a' }}>
+                      🗑 Gỡ
+                    </button>
+                  )}
                 </div>
               )
             })}
