@@ -537,22 +537,55 @@ function parseMentions(content: string, users: User[]): { start: number; end: nu
   return matches
 }
 
-// Render nội dung tin nhắn, tô màu các đoạn @tag và cho bấm vào xem hồ sơ
+// Tìm các đường link http(s):// hoặc www. trong nội dung tin nhắn
+function parseLinks(content: string): { start: number; end: number; url: string }[] {
+  const regex = /(https?:\/\/[^\s]+)|(www\.[^\s]+)/gi
+  const matches: { start: number; end: number; url: string }[] = []
+  let m: RegExpExecArray | null
+  while ((m = regex.exec(content)) !== null) {
+    let end = m.index + m[0].length
+    // Bỏ dấu câu thừa ở cuối link (dấu chấm, phẩy, ngoặc đóng...)
+    while (end > m.index && /[.,!?)\]]/.test(content[end - 1])) end--
+    if (end <= m.index) continue
+    const raw = content.slice(m.index, end)
+    const url = raw.startsWith('http') ? raw : `https://${raw}`
+    matches.push({ start: m.index, end, url })
+  }
+  return matches
+}
+
+// Render nội dung tin nhắn: tô màu @tag (bấm để xem hồ sơ) và biến link thành đường dẫn bấm được
 function renderMessageContent(content: string, users: User[], onMentionClick?: (u: User) => void) {
-  const matches = parseMentions(content, users)
-  if (matches.length === 0) return content
+  type Token = { start: number; end: number; type: 'mention'; user: User } | { start: number; end: number; type: 'link'; url: string }
+  const mentionTokens: Token[] = parseMentions(content, users).map(m => ({ ...m, type: 'mention' as const }))
+  const linkTokens: Token[] = parseLinks(content).map(l => ({ ...l, type: 'link' as const }))
+  const tokens = [...mentionTokens, ...linkTokens].sort((a, b) => a.start - b.start)
+
+  if (tokens.length === 0) return content
+
   const nodes: React.ReactNode[] = []
   let cursor = 0
-  matches.forEach((m, idx) => {
-    if (m.start > cursor) nodes.push(content.slice(cursor, m.start))
-    nodes.push(
-      <span key={idx}
-        onClick={e => { e.stopPropagation(); onMentionClick?.(m.user) }}
-        style={{ color: '#facc15', fontWeight: 600, cursor: onMentionClick ? 'pointer' : 'default', textDecoration: 'underline', textUnderlineOffset: '2px' }}>
-        {content.slice(m.start, m.end)}
-      </span>
-    )
-    cursor = m.end
+  tokens.forEach((t, idx) => {
+    if (t.start < cursor) return // bỏ qua nếu chồng lấn (hiếm khi xảy ra)
+    if (t.start > cursor) nodes.push(content.slice(cursor, t.start))
+    if (t.type === 'mention') {
+      nodes.push(
+        <span key={idx}
+          onClick={e => { e.stopPropagation(); onMentionClick?.(t.user) }}
+          style={{ color: '#facc15', fontWeight: 600, cursor: onMentionClick ? 'pointer' : 'default', textDecoration: 'underline', textUnderlineOffset: '2px' }}>
+          {content.slice(t.start, t.end)}
+        </span>
+      )
+    } else {
+      nodes.push(
+        <a key={idx} href={t.url} target="_blank" rel="noopener noreferrer"
+          onClick={e => e.stopPropagation()}
+          style={{ color: '#60a5fa', textDecoration: 'underline', textUnderlineOffset: '2px', wordBreak: 'break-all' }}>
+          {content.slice(t.start, t.end)}
+        </a>
+      )
+    }
+    cursor = t.end
   })
   if (cursor < content.length) nodes.push(content.slice(cursor))
   return nodes
