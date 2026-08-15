@@ -803,9 +803,11 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [signupCode, setSignupCode] = useState('')
+  const [agreedTerms, setAgreedTerms] = useState(false)
 
   const handleSignUp = async () => {
   if (!email.trim() || !password.trim()) return
+  if (!agreedTerms) { setError('Vui lòng đọc và đồng ý với điều khoản bảo mật mã xác nhận trước khi tạo tài khoản.'); return }
   setError('')
   setLoading(true)
 
@@ -967,13 +969,16 @@ onLoggedIn()
               </div>
             </div>
             
-            <div className="mb-4">
+            <div className="mb-2">
               <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Mã xác nhận (do công ty cấp)</label>
               <input type="text" value={signupCode} onChange={e => setSignupCode(e.target.value)}
                 placeholder="VD: A3F9K2"
                 className="w-full px-4 py-3 rounded-xl text-white placeholder-gray-600 outline-none uppercase"
                 style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
             </div>
+            <p className="text-amber-400/80 text-[11px] mb-4 leading-relaxed">
+              ⚠️ Mã xác nhận này là thông tin riêng tư, chỉ dành cho bạn. Vui lòng không cung cấp mã cho bất kỳ ai khác dưới mọi hình thức.
+            </p>
 
             <div className="mb-4">
               <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Mật khẩu</label>
@@ -986,14 +991,22 @@ onLoggedIn()
 
             <AvatarCreator value={avatar} onChange={setAvatar} />
 
+            <label className="flex items-start gap-2.5 mt-5 cursor-pointer select-none">
+              <input type="checkbox" checked={agreedTerms} onChange={e => setAgreedTerms(e.target.checked)}
+                className="w-4 h-4 mt-0.5 rounded accent-violet-500 flex-shrink-0" />
+              <span className="text-gray-400 text-xs leading-relaxed">
+                Tôi đã đọc và đồng ý rằng mã xác nhận là thông tin bảo mật riêng của tôi, tôi sẽ không chia sẻ cho bất kỳ ai khác.
+              </span>
+            </label>
+
             {error && <p className="text-red-400 text-xs mt-3">{error}</p>}
 
-            <button onClick={handleSignUp} disabled={loading || !name.trim() || !email.trim() || !password.trim()}
+            <button onClick={handleSignUp} disabled={loading || !name.trim() || !email.trim() || !password.trim() || !agreedTerms}
               className="w-full mt-5 py-3.5 rounded-xl font-bold text-white text-lg tracking-wide transition-all hover:scale-[1.02] disabled:opacity-40 disabled:cursor-not-allowed"
               style={{
                 fontFamily: 'Rajdhani, sans-serif',
-                background: (name.trim() && email.trim() && password.trim()) ? 'linear-gradient(135deg, #7c3aed, #f59e0b)' : '#1e1e3a',
-                boxShadow: (name.trim() && email.trim() && password.trim()) ? '0 0 30px #7c3aed50' : 'none',
+                background: (name.trim() && email.trim() && password.trim() && agreedTerms) ? 'linear-gradient(135deg, #7c3aed, #f59e0b)' : '#1e1e3a',
+                boxShadow: (name.trim() && email.trim() && password.trim() && agreedTerms) ? '0 0 30px #7c3aed50' : 'none',
               }}>
               {loading ? 'ĐANG XỬ LÝ...' : 'BẮT ĐẦU HÀNH TRÌNH ⚡'}
             </button>
