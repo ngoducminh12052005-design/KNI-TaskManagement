@@ -3173,7 +3173,11 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
 
   const handleUnpin = async (messageId: string) => {
     if (!window.confirm('Gỡ thông báo này khỏi mục ghim? Thông báo sẽ bị xoá hoàn toàn khỏi kênh.')) return
-    await supabase.from('messages').delete().eq('id', messageId)
+    const { error } = await supabase.from('messages').delete().eq('id', messageId)
+    if (error) {
+      alert('Không xoá được: ' + error.message)
+      console.error(error)
+    }
   }
 
   return (
