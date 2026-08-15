@@ -2936,9 +2936,11 @@ function UserProfileCard({ user, onClose, onMessage }: { user: User; onClose: ()
 }
 // ==================== SOCIAL ====================
 
-function SocialView({ currentUser, users, messages, setMessages, showMentions, setShowMentions, markMentionsSeen }: {
+function SocialView({ currentUser, users, messages, setMessages, showMentions, setShowMentions, markMentionsSeen, navigateTarget, clearNavigateTarget }: {
   currentUser: User; users: User[]; messages: Message[]; setMessages: (m: Message[]) => void
   showMentions: boolean; setShowMentions: (v: boolean) => void; markMentionsSeen: () => void
+  navigateTarget?: { channel: ChatChannel; dmUserId?: string } | null
+  clearNavigateTarget?: () => void
 }) {
   const [channel, setChannel] = useState<ChatChannel>('general')
   const [dmUserId, setDmUserId] = useState<string | null>(null)
@@ -2961,6 +2963,21 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
   }
 
   useEffect(() => { markSeen('channel:general') }, [])
+
+  useEffect(() => {
+    if (!navigateTarget) return
+    setShowMentions(false)
+    if (navigateTarget.channel === 'dm' && navigateTarget.dmUserId) {
+      setChannel('dm')
+      setDmUserId(navigateTarget.dmUserId)
+      markSeen(`dm:${navigateTarget.dmUserId}`)
+    } else {
+      setChannel(navigateTarget.channel)
+      setDmUserId(null)
+      markSeen(`channel:${navigateTarget.channel}`)
+    }
+    clearNavigateTarget?.()
+  }, [navigateTarget])
 
   useEffect(() => {
     if (showMentions) markMentionsSeen()
@@ -3062,12 +3079,20 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
     // Báo cho những người bị @tag trong tin nhắn
     const mentioned = parseMentions(content, users)
     const notifiedIds = new Set<string>()
+    const currentChannel = isDm ? 'dm' : channel
+    const channelLabel = currentChannel === 'dm' ? 'tin nhắn riêng'
+      : currentChannel === 'team' ? 'kênh team'
+      : currentChannel === 'announcements' ? 'kênh thông báo'
+      : 'kênh chung'
+    const preview = content.length > 60 ? content.slice(0, 60) + '…' : content
     for (const m of mentioned) {
       if (m.user.id === currentUser.id || notifiedIds.has(m.user.id)) continue
       notifiedIds.add(m.user.id)
       await supabase.from('notifications').insert({
-        message: `💬 ${currentUser.name} đã nhắc đến bạn trong tin nhắn: "${content.length > 60 ? content.slice(0, 60) + '…' : content}"`,
+        message: `💬 ${currentUser.name} đã nhắc đến bạn ở ${channelLabel}: "${preview}"`,
         target_user_id: m.user.id,
+        link_channel: currentChannel,
+        link_dm_user_id: currentChannel === 'dm' ? currentUser.id : null,
       })
     }
   }
@@ -3413,7 +3438,10 @@ const NAV = [
   { id: 'social', icon: '💬', label: 'Social' },
   { id: 'profile', icon: '👤', label: 'Hồ sơ' },
 ]
-function NotificationBell({ notifications }: { notifications: { id: string; message: string; createdAt: string }[] }) {
+function NotificationBell({ notifications, onNotificationClick }: {
+  notifications: { id: string; message: string; createdAt: string; linkChannel?: string; linkDmUserId?: string }[]
+  onNotificationClick?: (n: { linkChannel?: string; linkDmUserId?: string }) => void
+}) {
   const [open, setOpen] = useState(false)
   const [lastSeen, setLastSeen] = useState(() => localStorage.getItem('lastSeenNotif') || '')
   const unread = notifications.filter(n => n.createdAt > lastSeen).length
@@ -3460,12 +3488,14 @@ function NotificationBell({ notifications }: { notifications: { id: string; mess
             <p className="text-gray-600 text-sm text-center py-6">Chưa có thông báo nào</p>
           ) : (
             notifications.map(n => (
-              <div key={n.id} className="px-4 py-3 flex items-start justify-between gap-2 group" style={{ borderBottom: '1px solid #14142a' }}>
+              <div key={n.id}
+                onClick={() => { if (n.linkChannel) { onNotificationClick?.(n); setOpen(false) } }}
+                className="px-4 py-3 flex items-start justify-between gap-2 group" style={{ borderBottom: '1px solid #14142a', cursor: n.linkChannel ? 'pointer' : 'default' }}>
                 <div className="flex-1">
                   <p className="text-sm text-gray-300">{n.message}</p>
                   <p className="text-gray-600 text-[10px] mt-1">{fmtTime(n.createdAt)}</p>
                 </div>
-                <button onClick={() => deleteOne(n.id)}
+                <button onClick={e => { e.stopPropagation(); deleteOne(n.id) }}
                   className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400 text-xs flex-shrink-0">
                   ✕
                 </button>
@@ -3490,6 +3520,18 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   const { level } = getExpProgress(currentUser.exp)
   const [showMentions, setShowMentions] = useState(false)
   const [lastSeenMention, setLastSeenMention] = useState(() => localStorage.getItem('lastSeenMention') || '')
+  const [socialTarget, setSocialTarget] = useState<{ channel: ChatChannel; dmUserId?: string } | null>(null)
+
+  const handleNotificationClick = (n: { linkChannel?: string; linkDmUserId?: string }) => {
+    if (!n.linkChannel) return
+    setView('social')
+    setShowMentions(false)
+    if (n.linkChannel === 'dm' && n.linkDmUserId) {
+      setSocialTarget({ channel: 'dm', dmUserId: n.linkDmUserId })
+    } else {
+      setSocialTarget({ channel: n.linkChannel as ChatChannel })
+    }
+  }
 
   const markMentionsSeen = () => {
     const now = new Date().toISOString()
@@ -3519,7 +3561,8 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
       case 'rewards': return <RewardsView currentUser={currentUser} redemptions={redemptions} users={users} />
       case 'social': return (
         <SocialView currentUser={currentUser} users={users} messages={messages} setMessages={setMessages}
-          showMentions={showMentions} setShowMentions={setShowMentions} markMentionsSeen={markMentionsSeen} />
+          showMentions={showMentions} setShowMentions={setShowMentions} markMentionsSeen={markMentionsSeen}
+          navigateTarget={socialTarget} clearNavigateTarget={() => setSocialTarget(null)} />
       )
       case 'profile': return <ProfileView currentUser={currentUser} setCurrentUser={setCurrentUser} tasks={tasks} />
     }
@@ -3599,7 +3642,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
               <div className="w-28"><ExpBarMini exp={currentUser.exp} /></div>
               <span className="text-gray-600 text-xs" style={{ fontFamily: 'JetBrains Mono, monospace' }}>{currentUser.exp}</span>
             </div>
-            <NotificationBell notifications={notifications} />
+            <NotificationBell notifications={notifications} onNotificationClick={handleNotificationClick} />
             <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('profile')}>
               <CharAvatar user={currentUser} size={36} />
               <div>
@@ -3657,7 +3700,7 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [checkingSession, setCheckingSession] = useState(true)
   const [redemptions, setRedemptions] = useState<{ id: string; userId: string; rewardId: string; cost: number }[]>([])
-  const [notifications, setNotifications] = useState<{ id: string; message: string; createdAt: string; targetUserId?: string }[]>([])
+  const [notifications, setNotifications] = useState<{ id: string; message: string; createdAt: string; targetUserId?: string; linkChannel?: string; linkDmUserId?: string }[]>([])
   const [collaborations, setCollaborations] = useState<Collaboration[]>([])
 
   function mapProfileToUser(p: any): User {
@@ -3727,6 +3770,8 @@ useEffect(() => {
     .then(({ data }) => data && setNotifications(data.map(n => ({
       id: n.id, message: n.message, createdAt: n.created_at,
       targetUserId: n.target_user_id ?? undefined,
+      linkChannel: n.link_channel ?? undefined,
+      linkDmUserId: n.link_dm_user_id ?? undefined,
     }))))
 
   const notifChannel = supabase.channel('notifications-changes')
@@ -3735,6 +3780,8 @@ useEffect(() => {
       setNotifications(prev => [{
         id: n.id, message: n.message, createdAt: n.created_at,
         targetUserId: n.target_user_id ?? undefined,
+        linkChannel: n.link_channel ?? undefined,
+        linkDmUserId: n.link_dm_user_id ?? undefined,
       }, ...prev])
     })
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'notifications' }, payload => {
