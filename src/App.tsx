@@ -3177,8 +3177,8 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
               {ch.icon}
               {channelUnread(ch.id) && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500" />}
             </span>
-            <div className="text-sm hidden md:flex items-center gap-1.5 truncate">
-              {ch.label}
+            <div className="text-sm hidden md:flex items-center gap-1.5 min-w-0">
+              <span className="truncate">{ch.label}</span>
               {channelUnread(ch.id) && <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />}
             </div>
             <div className="text-[10px] opacity-50 hidden md:block">{ch.desc}</div>
