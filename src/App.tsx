@@ -1406,6 +1406,7 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
       await supabase.from('notifications').insert({
         message: `📥 ${currentUser.name} vừa nộp kết quả task: ${task.title}`,
         target_user_id: uid,
+        link_task_id: task.id,
       })
     }
 
@@ -1901,10 +1902,11 @@ function TaskCommentsPanel({ taskId, currentUser, users }: { taskId: string; cur
 
 // ==================== TASKS VIEW ====================
 
-function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collaborations }: {
+function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collaborations, highlightTaskId, clearHighlightTaskId }: {
   currentUser: User; tasks: Task[]; users: User[]
   setTasks: (t: Task[]) => void; setCurrentUser: (u: User) => void
   collaborations: Collaboration[]
+  highlightTaskId?: string | null; clearHighlightTaskId?: () => void
 }) {
   const [filter, setFilter] = useState<'all' | 'mine' | 'open' | 'done'>('all')
   const [search, setSearch] = useState('')
@@ -1914,6 +1916,29 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   const [openCommentsFor, setOpenCommentsFor] = useState<string | null>(null)
   const [submittingTask, setSubmittingTask] = useState<Task | null>(null)
   const [selfMode, setSelfMode] = useState(false)
+  const taskRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const [flashTaskId, setFlashTaskId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!highlightTaskId) return
+    // Nếu task đang bị filter/search ẩn đi, tự động xoá filter/search để đảm bảo thấy được
+    setFilter('all')
+    setSearch('')
+    const tryScroll = () => {
+      const el = taskRefs.current[highlightTaskId]
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        setFlashTaskId(highlightTaskId)
+        setTimeout(() => setFlashTaskId(prev => (prev === highlightTaskId ? null : prev)), 2500)
+        clearHighlightTaskId?.()
+      } else {
+        // Task có thể chưa kịp render (do vừa đổi filter) — thử lại sau 1 nhịp
+        setTimeout(tryScroll, 150)
+      }
+    }
+    const t = setTimeout(tryScroll, 150)
+    return () => clearTimeout(t)
+  }, [highlightTaskId])
   const now = new Date()
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   const [form, setForm] = useState({
@@ -2085,7 +2110,7 @@ const handleSaveTask = async () => {
     const isCrossDept = !creatingForSelf && !currentUser.isDirector && outsideAssignees.length > 0
     const targetTeamId = isCrossDept ? outsideAssignees[0].teamId : null
 
-    await supabase.from('tasks').insert({
+    const { data: newTask } = await supabase.from('tasks').insert({
       title: form.title, description: form.description, exp_reward: form.expReward,
       status: 'open', assigned_to: creatingForSelf ? [currentUser.id] : form.assignedTo,
       project_manager: form.projectManager, supporters: form.supporters,
@@ -2096,7 +2121,8 @@ const handleSaveTask = async () => {
       important: form.important, urgent: form.urgent,
       cross_dept_pending: isCrossDept,
       target_team_id: targetTeamId,
-    })
+    }).select('id').single()
+    const newTaskId = newTask?.id
 
     // Báo cho từng nhân viên được giao (chỉ khi thật sự giao cho người khác)
     if (isManager && !selfMode) {
@@ -2105,6 +2131,7 @@ const handleSaveTask = async () => {
         await supabase.from('notifications').insert({
           message: `📋 ${currentUser.name} vừa giao cho bạn task: ${form.title}`,
           target_user_id: uid,
+          link_task_id: newTaskId,
         })
       }
 
@@ -2114,6 +2141,7 @@ const handleSaveTask = async () => {
         await supabase.from('notifications').insert({
           message: `🤝 ${currentUser.name} vừa thêm bạn làm người hỗ trợ task: ${form.title}`,
           target_user_id: uid,
+          link_task_id: newTaskId,
         })
       }
 
@@ -2125,6 +2153,7 @@ const handleSaveTask = async () => {
           await supabase.from('notifications').insert({
             message: `📨 ${currentUser.name} (${TEAMS.find(t => t.id === currentUser.teamId)?.name ?? ''}) muốn giao task "${form.title}" cho ${assigneeNames} trong phòng ban của bạn`,
             target_user_id: mgr.id,
+            link_task_id: newTaskId,
           })
         }
       }
@@ -2215,9 +2244,16 @@ const handleSaveTask = async () => {
           const catColor = CATEGORY_COLORS[task.category] ?? '#6b7280'
           const canEdit = isManager && (task.createdBy === currentUser.id || assignees.some(a => a.teamId === currentUser.teamId))
 
+          const isFlashed = flashTaskId === task.id
           return (
-            <div key={task.id} className="rounded-xl p-4 flex flex-col transition-all hover:-translate-y-0.5"
-              style={{ background: '#0e0e24', border: `1px solid ${task.status === 'completed' ? '#10b98120' : '#1e1e4a'}` }}>
+            <div key={task.id} ref={el => { taskRefs.current[task.id] = el }}
+              className="rounded-xl p-4 flex flex-col transition-all hover:-translate-y-0.5"
+              style={{
+                background: isFlashed ? '#7c3aed1a' : '#0e0e24',
+                border: `1px solid ${isFlashed ? '#7c3aed' : task.status === 'completed' ? '#10b98120' : '#1e1e4a'}`,
+                boxShadow: isFlashed ? '0 0 16px #7c3aed40' : 'none',
+                transition: 'background 0.4s ease, border 0.4s ease, box-shadow 0.4s ease',
+              }}>
               {/* Header */}
               <div className="flex items-start justify-between gap-2 mb-2">
                 <div className="flex-1 min-w-0">
@@ -3670,8 +3706,8 @@ const NAV = [
   { id: 'profile', icon: '👤', label: 'Hồ sơ' },
 ]
 function NotificationBell({ notifications, onNotificationClick }: {
-  notifications: { id: string; message: string; createdAt: string; linkChannel?: string; linkDmUserId?: string }[]
-  onNotificationClick?: (n: { linkChannel?: string; linkDmUserId?: string }) => void
+  notifications: { id: string; message: string; createdAt: string; linkChannel?: string; linkDmUserId?: string; linkTaskId?: string }[]
+  onNotificationClick?: (n: { linkChannel?: string; linkDmUserId?: string; linkTaskId?: string }) => void
 }) {
   const [open, setOpen] = useState(false)
   const [lastSeen, setLastSeen] = useState(() => localStorage.getItem('lastSeenNotif') || '')
@@ -3720,8 +3756,8 @@ function NotificationBell({ notifications, onNotificationClick }: {
           ) : (
             notifications.map(n => (
               <div key={n.id}
-                onClick={() => { if (n.linkChannel) { onNotificationClick?.(n); setOpen(false) } }}
-                className="px-4 py-3 flex items-start justify-between gap-2 group" style={{ borderBottom: '1px solid #14142a', cursor: n.linkChannel ? 'pointer' : 'default' }}>
+                onClick={() => { if (n.linkChannel || n.linkTaskId) { onNotificationClick?.(n); setOpen(false) } }}
+                className="px-4 py-3 flex items-start justify-between gap-2 group" style={{ borderBottom: '1px solid #14142a', cursor: (n.linkChannel || n.linkTaskId) ? 'pointer' : 'default' }}>
                 <div className="flex-1">
                   <p className="text-sm text-gray-300">{n.message}</p>
                   <p className="text-gray-600 text-[10px] mt-1">{fmtTime(n.createdAt)}</p>
@@ -3752,8 +3788,14 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   const [showMentions, setShowMentions] = useState(false)
   const [lastSeenMention, setLastSeenMention] = useState(() => localStorage.getItem('lastSeenMention') || '')
   const [socialTarget, setSocialTarget] = useState<{ channel: ChatChannel; dmUserId?: string } | null>(null)
+  const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null)
 
-  const handleNotificationClick = (n: { linkChannel?: string; linkDmUserId?: string }) => {
+  const handleNotificationClick = (n: { linkChannel?: string; linkDmUserId?: string; linkTaskId?: string }) => {
+    if (n.linkTaskId) {
+      setView('tasks')
+      setHighlightTaskId(n.linkTaskId)
+      return
+    }
     if (!n.linkChannel) return
     setView('social')
     setShowMentions(false)
@@ -3787,7 +3829,10 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   const renderView = () => {
     switch (view) {
       case 'dashboard': return <DashboardView {...sharedProps} />
-      case 'tasks': return <TasksView {...sharedProps} collaborations={collaborations} />
+      case 'tasks': return (
+        <TasksView {...sharedProps} collaborations={collaborations}
+          highlightTaskId={highlightTaskId} clearHighlightTaskId={() => setHighlightTaskId(null)} />
+      )
       case 'leaderboard': return <LeaderboardView users={users} tasks={tasks} />
       case 'rewards': return <RewardsView currentUser={currentUser} redemptions={redemptions} users={users} />
       case 'social': return (
@@ -3931,7 +3976,7 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [checkingSession, setCheckingSession] = useState(true)
   const [redemptions, setRedemptions] = useState<{ id: string; userId: string; rewardId: string; cost: number }[]>([])
-  const [notifications, setNotifications] = useState<{ id: string; message: string; createdAt: string; targetUserId?: string; linkChannel?: string; linkDmUserId?: string }[]>([])
+  const [notifications, setNotifications] = useState<{ id: string; message: string; createdAt: string; targetUserId?: string; linkChannel?: string; linkDmUserId?: string; linkTaskId?: string }[]>([])
   const [collaborations, setCollaborations] = useState<Collaboration[]>([])
 
   function mapProfileToUser(p: any): User {
@@ -4005,6 +4050,7 @@ useEffect(() => {
       targetUserId: n.target_user_id ?? undefined,
       linkChannel: n.link_channel ?? undefined,
       linkDmUserId: n.link_dm_user_id ?? undefined,
+      linkTaskId: n.link_task_id ?? undefined,
     }))))
 
   const notifChannel = supabase.channel('notifications-changes')
@@ -4015,6 +4061,7 @@ useEffect(() => {
         targetUserId: n.target_user_id ?? undefined,
         linkChannel: n.link_channel ?? undefined,
         linkDmUserId: n.link_dm_user_id ?? undefined,
+        linkTaskId: n.link_task_id ?? undefined,
       }, ...prev])
     })
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'notifications' }, payload => {
