@@ -30,6 +30,7 @@ interface User {
   department: string
   email?: string
   isDirector?: boolean
+  driveFolderUrl?: string
 }
 
 interface Task {
@@ -1223,117 +1224,191 @@ function DashboardView({ currentUser, tasks, users, setTasks, setCurrentUser, se
 }
 
 // ===========================================================================
-function SubmitTaskModal({ task, currentUser, onClose }: { task: Task; currentUser: User; onClose: () => void }) {
-  const [file, setFile] = useState<File | null>(null)
+// function SubmitTaskModal({ task, currentUser, onClose }: { task: Task; currentUser: User; onClose: () => void }) {
+//   const [file, setFile] = useState<File | null>(null)
+//   const [note, setNote] = useState('')
+//   const [uploading, setUploading] = useState(false)
+//   const [error, setError] = useState('')
+
+//   // const handleSubmit = async () => {
+//   //   if (!file) { setError('Vui lòng chọn ảnh hoặc file kết quả trước khi nộp.'); return }
+//   //   setError('')
+//   //   setUploading(true)
+
+//   //   const ext = file.name.split('.').pop()
+//   //   const path = `${task.id}/${Date.now()}.${ext}`
+
+//   //   const { error: uploadError } = await supabase.storage.from('task-submissions').upload(path, file)
+//   //   if (uploadError) { setUploading(false); setError('Lỗi tải file: ' + uploadError.message); return }
+
+//   //   const { data: urlData } = supabase.storage.from('task-submissions').getPublicUrl(path)
+
+//   //   const { error: updateError } = await supabase.from('tasks').update({
+//   //     status: 'submitted',
+//   //     submission_file_url: urlData.publicUrl,
+//   //     submission_note: note.trim() || null,
+//   //     submitted_at: new Date().toISOString(),
+//   //     rejected_reason: null,
+//   //   }).eq('id', task.id)
+
+//   //   setUploading(false)
+//   //   if (updateError) { setError(updateError.message); return }
+//   //   onClose()
+//   // }
+  
+//   const handleSubmit = async () => {
+//     if (!file) { setError('Vui lòng chọn ảnh hoặc file kết quả trước khi nộp.'); return }
+//     setError('')
+//     setUploading(true)
+
+//     const ext = file.name.split('.').pop()
+//     const path = `${task.id}/${Date.now()}.${ext}`
+
+//     const arrayBuffer = await file.arrayBuffer()
+//     const { error: uploadError } = await supabase.storage.from('task-submissions').upload(path, arrayBuffer, {
+//       contentType: file.type || 'application/octet-stream',
+//     })
+//     if (uploadError) { setUploading(false); setError('Lỗi tải file: ' + uploadError.message); return }
+
+//     const { data: urlData } = supabase.storage.from('task-submissions').getPublicUrl(path)
+
+//     const { error: updateError } = await supabase.from('tasks').update({
+//     status: 'submitted',
+//     submission_file_url: urlData.publicUrl,
+//     submission_note: note.trim() || null,
+//     submitted_at: new Date().toISOString(),
+//     rejected_reason: null,
+//   }).eq('id', task.id)
+
+//   setUploading(false)
+//   if (updateError) { setError(updateError.message); return }
+
+//   // Báo cho người tạo task + các QL dự án (bỏ trùng, bỏ qua nếu chính người nộp)
+//   const recipientIds = Array.from(new Set([task.createdBy, ...task.projectManager]))
+//     .filter(uid => uid && uid !== currentUser.id)
+
+//   for (const uid of recipientIds) {
+//     await supabase.from('notifications').insert({
+//       message: `📥 ${currentUser.name} vừa nộp kết quả task: ${task.title}`,
+//       target_user_id: uid,
+//     })
+//   }
+
+//   onClose()
+// }
+//   // const handleSubmit = async () => {
+//   //   if (!file) { setError('Vui lòng chọn ảnh hoặc file kết quả trước khi nộp.'); return }
+//   //   setError('')
+//   //   setUploading(true)
+
+//   //   const { data: sessionData } = await supabase.auth.getSession()
+//   //   const token = sessionData.session?.access_token
+
+//   //   const formData = new FormData()
+//   //   formData.append('file', file)
+//   //   formData.append('taskId', task.id)
+
+//   //   // const uploadRes = await fetch('https://legrsdmjstoxcoxvumgg.supabase.co/functions/v1/upload-to-b2', {
+//   //   //   method: 'POST',
+//   //   //   headers: { Authorization: `Bearer ${token}` },
+//   //   //   body: formData,
+//   //   // })
+//   //   // const uploadJson = await uploadRes.json()
+//   //   // if (!uploadRes.ok) { setUploading(false); setError('Lỗi tải file: ' + (uploadJson.error || 'lỗi không xác định')); return }
+//   //   let uploadJson
+//   //   try {
+//   //     const uploadRes = await fetch('https://legrsdmjstoxcoxvumgg.supabase.co/functions/v1/upload-to-b2', {
+//   //       method: 'POST',
+//   //       headers: { Authorization: `Bearer ${token}` },
+//   //       body: formData,
+//   //     })
+//   //     // uploadJson = await uploadRes.json()
+//   //     // if (!uploadRes.ok) { setUploading(false); setError('Lỗi tải file: ' + (uploadJson.error || 'lỗi không xác định')); return }
+//   //     uploadJson = await uploadRes.json()
+//   //     if (!uploadRes.ok) {
+//   //       setUploading(false)
+//   //       setError(`Lỗi tải file (status ${uploadRes.status}): ${uploadJson.error || uploadJson.message || JSON.stringify(uploadJson)}`)
+//   //       return
+//   //     }
+//   //   } catch (err) {
+//   //     setUploading(false)
+//   //     setError('Không kết nối được tới server upload: ' + String(err))
+//   //     return
+//   //   } 
+
+//   return (
+//     <div className="fixed inset-0 flex items-center justify-center z-50 px-4" style={{ background: '#000000a0' }}>
+//       <div className="w-full max-w-md rounded-2xl p-6" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
+//         <h3 className="text-white font-bold text-lg mb-1" style={{ fontFamily: 'Rajdhani, sans-serif' }}>Nộp kết quả task</h3>
+//         <p className="text-gray-500 text-sm mb-4">{task.title}</p>
+
+//         <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Ảnh / File kết quả</label>
+//         <input type="file" accept="image/*,.pdf,.doc,.docx,.zip"
+//           onChange={e => setFile(e.target.files?.[0] ?? null)}
+//           className="w-full text-sm text-gray-300 mb-4 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-purple-600 file:text-white"
+//         />
+
+//         <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Ghi chú (không bắt buộc)</label>
+//         <textarea value={note} onChange={e => setNote(e.target.value)} rows={3}
+//           placeholder="Mô tả ngắn gọn kết quả đã làm..."
+//           className="w-full px-4 py-2.5 mb-4 rounded-xl text-white placeholder-gray-600 text-sm outline-none resize-none"
+//           style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+
+//         {error && <p className="text-red-400 text-xs mb-3">{error}</p>}
+
+//         <div className="flex gap-2">
+//           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl font-semibold text-sm text-gray-400" style={{ background: '#14143a' }}>
+//             Huỷ
+//           </button>
+//           <button onClick={handleSubmit} disabled={uploading}
+//             className="flex-1 py-2.5 rounded-xl font-bold text-sm disabled:opacity-40"
+//             style={{ background: 'linear-gradient(135deg,#7c3aed,#5b21b6)', color: '#fff' }}>
+//             {uploading ? 'Đang tải lên...' : 'Nộp task'}
+//           </button>
+//         </div>
+//       </div>
+//     </div>
+//   )
+// }
+function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; currentUser: User; users: User[]; onClose: () => void }) {
+  const [driveLink, setDriveLink] = useState('')
   const [note, setNote] = useState('')
-  const [uploading, setUploading] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  // const handleSubmit = async () => {
-  //   if (!file) { setError('Vui lòng chọn ảnh hoặc file kết quả trước khi nộp.'); return }
-  //   setError('')
-  //   setUploading(true)
+  const pmsWithDrive = task.projectManager
+    .map(id => users.find(u => u.id === id))
+    .filter((u): u is User => !!u && !!u.driveFolderUrl)
 
-  //   const ext = file.name.split('.').pop()
-  //   const path = `${task.id}/${Date.now()}.${ext}`
-
-  //   const { error: uploadError } = await supabase.storage.from('task-submissions').upload(path, file)
-  //   if (uploadError) { setUploading(false); setError('Lỗi tải file: ' + uploadError.message); return }
-
-  //   const { data: urlData } = supabase.storage.from('task-submissions').getPublicUrl(path)
-
-  //   const { error: updateError } = await supabase.from('tasks').update({
-  //     status: 'submitted',
-  //     submission_file_url: urlData.publicUrl,
-  //     submission_note: note.trim() || null,
-  //     submitted_at: new Date().toISOString(),
-  //     rejected_reason: null,
-  //   }).eq('id', task.id)
-
-  //   setUploading(false)
-  //   if (updateError) { setError(updateError.message); return }
-  //   onClose()
-  // }
-  
   const handleSubmit = async () => {
-    if (!file) { setError('Vui lòng chọn ảnh hoặc file kết quả trước khi nộp.'); return }
+    if (!driveLink.trim()) { setError('Vui lòng dán link Google Drive chứa file kết quả trước khi nộp.'); return }
+    if (!/^https?:\/\//i.test(driveLink.trim())) { setError('Link không hợp lệ, vui lòng dán đúng đường dẫn Google Drive.'); return }
     setError('')
-    setUploading(true)
-
-    const ext = file.name.split('.').pop()
-    const path = `${task.id}/${Date.now()}.${ext}`
-
-    const arrayBuffer = await file.arrayBuffer()
-    const { error: uploadError } = await supabase.storage.from('task-submissions').upload(path, arrayBuffer, {
-      contentType: file.type || 'application/octet-stream',
-    })
-    if (uploadError) { setUploading(false); setError('Lỗi tải file: ' + uploadError.message); return }
-
-    const { data: urlData } = supabase.storage.from('task-submissions').getPublicUrl(path)
+    setSaving(true)
 
     const { error: updateError } = await supabase.from('tasks').update({
-    status: 'submitted',
-    submission_file_url: urlData.publicUrl,
-    submission_note: note.trim() || null,
-    submitted_at: new Date().toISOString(),
-    rejected_reason: null,
-  }).eq('id', task.id)
+      status: 'submitted',
+      submission_file_url: driveLink.trim(),
+      submission_note: note.trim() || null,
+      submitted_at: new Date().toISOString(),
+      rejected_reason: null,
+    }).eq('id', task.id)
 
-  setUploading(false)
-  if (updateError) { setError(updateError.message); return }
+    setSaving(false)
+    if (updateError) { setError(updateError.message); return }
 
-  // Báo cho người tạo task + các QL dự án (bỏ trùng, bỏ qua nếu chính người nộp)
-  const recipientIds = Array.from(new Set([task.createdBy, ...task.projectManager]))
-    .filter(uid => uid && uid !== currentUser.id)
+    const recipientIds = Array.from(new Set([task.createdBy, ...task.projectManager]))
+      .filter(uid => uid && uid !== currentUser.id)
 
-  for (const uid of recipientIds) {
-    await supabase.from('notifications').insert({
-      message: `📥 ${currentUser.name} vừa nộp kết quả task: ${task.title}`,
-      target_user_id: uid,
-    })
+    for (const uid of recipientIds) {
+      await supabase.from('notifications').insert({
+        message: `📥 ${currentUser.name} vừa nộp kết quả task: ${task.title}`,
+        target_user_id: uid,
+      })
+    }
+
+    onClose()
   }
-
-  onClose()
-}
-  // const handleSubmit = async () => {
-  //   if (!file) { setError('Vui lòng chọn ảnh hoặc file kết quả trước khi nộp.'); return }
-  //   setError('')
-  //   setUploading(true)
-
-  //   const { data: sessionData } = await supabase.auth.getSession()
-  //   const token = sessionData.session?.access_token
-
-  //   const formData = new FormData()
-  //   formData.append('file', file)
-  //   formData.append('taskId', task.id)
-
-  //   // const uploadRes = await fetch('https://legrsdmjstoxcoxvumgg.supabase.co/functions/v1/upload-to-b2', {
-  //   //   method: 'POST',
-  //   //   headers: { Authorization: `Bearer ${token}` },
-  //   //   body: formData,
-  //   // })
-  //   // const uploadJson = await uploadRes.json()
-  //   // if (!uploadRes.ok) { setUploading(false); setError('Lỗi tải file: ' + (uploadJson.error || 'lỗi không xác định')); return }
-  //   let uploadJson
-  //   try {
-  //     const uploadRes = await fetch('https://legrsdmjstoxcoxvumgg.supabase.co/functions/v1/upload-to-b2', {
-  //       method: 'POST',
-  //       headers: { Authorization: `Bearer ${token}` },
-  //       body: formData,
-  //     })
-  //     // uploadJson = await uploadRes.json()
-  //     // if (!uploadRes.ok) { setUploading(false); setError('Lỗi tải file: ' + (uploadJson.error || 'lỗi không xác định')); return }
-  //     uploadJson = await uploadRes.json()
-  //     if (!uploadRes.ok) {
-  //       setUploading(false)
-  //       setError(`Lỗi tải file (status ${uploadRes.status}): ${uploadJson.error || uploadJson.message || JSON.stringify(uploadJson)}`)
-  //       return
-  //     }
-  //   } catch (err) {
-  //     setUploading(false)
-  //     setError('Không kết nối được tới server upload: ' + String(err))
-  //     return
-  //   } 
 
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50 px-4" style={{ background: '#000000a0' }}>
@@ -1341,11 +1416,31 @@ function SubmitTaskModal({ task, currentUser, onClose }: { task: Task; currentUs
         <h3 className="text-white font-bold text-lg mb-1" style={{ fontFamily: 'Rajdhani, sans-serif' }}>Nộp kết quả task</h3>
         <p className="text-gray-500 text-sm mb-4">{task.title}</p>
 
-        <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Ảnh / File kết quả</label>
-        <input type="file" accept="image/*,.pdf,.doc,.docx,.zip"
-          onChange={e => setFile(e.target.files?.[0] ?? null)}
-          className="w-full text-sm text-gray-300 mb-4 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-purple-600 file:text-white"
-        />
+        {pmsWithDrive.length > 0 ? (
+          <div className="mb-4 space-y-2">
+            <label className="text-gray-500 text-xs uppercase tracking-wider block">Bước 1 — Mở Drive của quản lý, tải file lên</label>
+            {pmsWithDrive.map(pm => (
+              <a key={pm.id} href={pm.driveFolderUrl} target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-all hover:scale-[1.01]"
+                style={{ background: '#14143a', border: '1px solid #2a2a5a', color: '#60a5fa' }}>
+                <CharAvatar user={pm} size={22} />
+                📁 Mở Drive của {pm.name}
+              </a>
+            ))}
+          </div>
+        ) : (
+          <div className="mb-4 p-3 rounded-lg text-xs" style={{ background: '#2a1a00', color: '#fbbf24' }}>
+            ⚠️ Quản lý dự án chưa thiết lập link Google Drive. Hãy liên hệ trực tiếp để xin link nộp file, sau đó dán vào ô bên dưới.
+          </div>
+        )}
+
+        <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">
+          {pmsWithDrive.length > 0 ? 'Bước 2 — ' : ''}Dán link file đã tải lên Drive *
+        </label>
+        <input value={driveLink} onChange={e => setDriveLink(e.target.value)}
+          placeholder="https://drive.google.com/file/d/..."
+          className="w-full px-3 py-2.5 mb-4 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
+          style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
 
         <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Ghi chú (không bắt buộc)</label>
         <textarea value={note} onChange={e => setNote(e.target.value)} rows={3}
@@ -1359,17 +1454,16 @@ function SubmitTaskModal({ task, currentUser, onClose }: { task: Task; currentUs
           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl font-semibold text-sm text-gray-400" style={{ background: '#14143a' }}>
             Huỷ
           </button>
-          <button onClick={handleSubmit} disabled={uploading}
+          <button onClick={handleSubmit} disabled={saving}
             className="flex-1 py-2.5 rounded-xl font-bold text-sm disabled:opacity-40"
             style={{ background: 'linear-gradient(135deg,#7c3aed,#5b21b6)', color: '#fff' }}>
-            {uploading ? 'Đang tải lên...' : 'Nộp task'}
+            {saving ? 'Đang lưu...' : 'Nộp task'}
           </button>
         </div>
       </div>
     </div>
   )
 }
-
 
 //====================CollaborationRequestModal======================
 function CollaborationRequestModal({ currentUser, users, onClose }: {
@@ -2314,7 +2408,7 @@ const handleSaveTask = async () => {
                   {task.submissionFileUrl && (
                     <a href={task.submissionFileUrl} target="_blank" rel="noopener noreferrer"
                       className="text-xs underline" style={{ color: '#60a5fa' }}>
-                      📎 Xem file đã nộp
+                      📁 Xem file trên Google Drive
                     </a>
                   )}
                   {task.submissionNote && <p className="text-gray-500 text-xs max-w-[200px] text-right">{task.submissionNote}</p>}
@@ -2588,7 +2682,7 @@ const handleSaveTask = async () => {
         </div>
       )}
       {submittingTask && (
-        <SubmitTaskModal task={submittingTask} currentUser={currentUser} onClose={() => setSubmittingTask(null)} />
+        <SubmitTaskModal task={submittingTask} currentUser={currentUser} users={users} onClose={() => setSubmittingTask(null)} />
       )}
       {showCollabModal && (
         <CollaborationRequestModal currentUser={currentUser} users={users} onClose={() => setShowCollabModal(false)} />
@@ -3409,6 +3503,7 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
   const [editing, setEditing] = useState(false)
   const [draftAvatar, setDraftAvatar] = useState<AvatarConfig>(currentUser.avatar)
   const [draftName, setDraftName] = useState(currentUser.name)
+  const [draftDriveUrl, setDraftDriveUrl] = useState(currentUser.driveFolderUrl ?? '')
 
   const { progress, needed, level } = getExpProgress(currentUser.exp)
   const myDone = tasks.filter(t => t.status === 'completed' && (t.assignedTo.includes(currentUser.id) || (t.selfCreated && t.createdBy === currentUser.id)))
@@ -3442,7 +3537,7 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
             <div className="h-2 rounded-full overflow-hidden" style={{ background: '#1a1a3a' }}>
               <div className="h-full rounded-full" style={{ width: `${progress}%`, background: 'linear-gradient(90deg,#7c3aed,#f59e0b)' }} />
             </div>
-            <button onClick={() => { setDraftAvatar(currentUser.avatar); setDraftName(currentUser.name); setEditing(!editing) }}
+            <button onClick={() => { setDraftAvatar(currentUser.avatar); setDraftName(currentUser.name); setDraftDriveUrl(currentUser.driveFolderUrl ?? ''); setEditing(!editing) }}
               className="mt-4 w-full py-2 rounded-lg text-sm font-medium transition-all"
               style={{ background: editing ? '#7c3aed' : '#14143a', color: editing ? '#fff' : '#6b7280', border: '1px solid #2a2a5a' }}>
               {editing ? '↑ Đóng' : '🎭 Đổi tên & nhân vật'}
@@ -3492,6 +3587,21 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
                   style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
               </div>
 
+              {currentUser.role === 'manager' && (
+                <div className="mb-4">
+                  <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">
+                    📁 Link thư mục Google Drive (để nhân viên nộp task)
+                  </label>
+                  <input value={draftDriveUrl} onChange={e => setDraftDriveUrl(e.target.value)}
+                    placeholder="https://drive.google.com/drive/folders/..."
+                    className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
+                    style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+                  <p className="text-gray-600 text-[10px] mt-1.5 leading-relaxed">
+                    💡 Tạo 1 thư mục trên Google Drive, bật chia sẻ "Bất kỳ ai có link đều chỉnh sửa được", dán link vào đây. Nhân viên nộp task sẽ được dẫn thẳng vào thư mục này.
+                  </p>
+                </div>
+              )}
+
               <AvatarCreator value={draftAvatar} onChange={setDraftAvatar} />
               <div className="flex gap-3 mt-4">
                 <button onClick={() => setEditing(false)}
@@ -3499,8 +3609,11 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
                   style={{ background: '#14143a', border: '1px solid #2a2a5a' }}>Hủy</button>
                 <button onClick={async () => {
                   const trimmed = draftName.trim() || currentUser.name
-                  await supabase.from('profiles').update({ name: trimmed, avatar: draftAvatar }).eq('id', currentUser.id)
-                  setCurrentUser({ ...currentUser, name: trimmed, avatar: draftAvatar })
+                  await supabase.from('profiles').update({
+                    name: trimmed, avatar: draftAvatar,
+                    drive_folder_url: draftDriveUrl.trim() || null,
+                  }).eq('id', currentUser.id)
+                  setCurrentUser({ ...currentUser, name: trimmed, avatar: draftAvatar, driveFolderUrl: draftDriveUrl.trim() || undefined })
                   setEditing(false)
                 }}
                   className="flex-1 py-2.5 rounded-lg font-bold text-white text-sm"
@@ -3805,7 +3918,7 @@ export default function App() {
   const [collaborations, setCollaborations] = useState<Collaboration[]>([])
 
   function mapProfileToUser(p: any): User {
-  return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email, isDirector: p.is_director ?? false }
+  return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email, isDirector: p.is_director ?? false, driveFolderUrl: p.drive_folder_url ?? undefined }
 }
 
   function mapDbMessage(m: any): Message {
