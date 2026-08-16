@@ -30,7 +30,6 @@ interface User {
   department: string
   email?: string
   isDirector?: boolean
-  driveFolderUrl?: string
 }
 
 interface Task {
@@ -99,6 +98,13 @@ interface Reward {
   cost: number
   emoji: string
   category: string
+}
+
+interface DriveFolderAssignment {
+  id: string
+  managerId: string
+  employeeId: string
+  folderUrl: string
 }
 
 // ==================== AVATAR SYSTEM ====================
@@ -1370,15 +1376,20 @@ function DashboardView({ currentUser, tasks, users, setTasks, setCurrentUser, se
 //     </div>
 //   )
 // }
-function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; currentUser: User; users: User[]; onClose: () => void }) {
+function SubmitTaskModal({ task, currentUser, users, driveAssignments, onClose }: {
+  task: Task; currentUser: User; users: User[]; driveAssignments: DriveFolderAssignment[]; onClose: () => void
+}) {
   const [driveLink, setDriveLink] = useState('')
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  const pmsWithDrive = task.projectManager
-    .map(id => users.find(u => u.id === id))
-    .filter((u): u is User => !!u && !!u.driveFolderUrl)
+  const myFolders = task.projectManager
+    .map(pmId => ({
+      pm: users.find(u => u.id === pmId),
+      assignment: driveAssignments.find(a => a.managerId === pmId && a.employeeId === currentUser.id),
+    }))
+    .filter((x): x is { pm: User; assignment: DriveFolderAssignment } => !!x.pm && !!x.assignment)
 
   const handleSubmit = async () => {
     if (!driveLink.trim()) { setError('Vui lòng dán link Google Drive chứa file kết quả trước khi nộp.'); return }
@@ -1416,31 +1427,34 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
         <h3 className="text-white font-bold text-lg mb-1" style={{ fontFamily: 'Rajdhani, sans-serif' }}>Nộp kết quả task</h3>
         <p className="text-gray-500 text-sm mb-4">{task.title}</p>
 
-        {pmsWithDrive.length > 0 ? (
+        {myFolders.length > 0 ? (
           <div className="mb-4 space-y-2">
-            <label className="text-gray-500 text-xs uppercase tracking-wider block">Bước 1 — Mở Drive của quản lý, tải file lên</label>
-            {pmsWithDrive.map(pm => (
-              <a key={pm.id} href={pm.driveFolderUrl} target="_blank" rel="noopener noreferrer"
+            <label className="text-gray-500 text-xs uppercase tracking-wider block">Bước 1 — Mở folder riêng của bạn, tải file lên</label>
+            {myFolders.map(({ pm, assignment }) => (
+              <a key={pm.id} href={assignment.folderUrl} target="_blank" rel="noopener noreferrer"
                 className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-all hover:scale-[1.01]"
                 style={{ background: '#14143a', border: '1px solid #2a2a5a', color: '#60a5fa' }}>
                 <CharAvatar user={pm} size={22} />
-                📁 Mở Drive của {pm.name}
+                📁 Mở folder của bạn (từ {pm.name})
               </a>
             ))}
           </div>
         ) : (
           <div className="mb-4 p-3 rounded-lg text-xs" style={{ background: '#2a1a00', color: '#fbbf24' }}>
-            ⚠️ Quản lý dự án chưa thiết lập link Google Drive. Hãy liên hệ trực tiếp để xin link nộp file, sau đó dán vào ô bên dưới.
+            ⚠️ Quản lý dự án chưa thiết lập folder Drive riêng cho bạn. Hãy liên hệ trực tiếp để xin link nộp file, sau đó dán vào ô bên dưới.
           </div>
         )}
 
         <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">
-          {pmsWithDrive.length > 0 ? 'Bước 2 — ' : ''}Dán link file đã tải lên Drive *
+          {myFolders.length > 0 ? 'Bước 2 — ' : ''}Dán link file đã tải lên Drive *
         </label>
         <input value={driveLink} onChange={e => setDriveLink(e.target.value)}
           placeholder="https://drive.google.com/file/d/..."
-          className="w-full px-3 py-2.5 mb-4 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
+          className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
           style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+        <p className="text-gray-600 text-[10px] mt-1.5 mb-4 leading-relaxed">
+          💡 Sau khi tải file lên, bấm chuột phải vào <b>đúng file đó</b> → "Chia sẻ" → "Sao chép đường liên kết". Không dán link cả thư mục.
+        </p>
 
         <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Ghi chú (không bắt buộc)</label>
         <textarea value={note} onChange={e => setNote(e.target.value)} rows={3}
@@ -1899,10 +1913,10 @@ function TaskCommentsPanel({ taskId, currentUser, users }: { taskId: string; cur
 
 // ==================== TASKS VIEW ====================
 
-function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collaborations }: {
+function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collaborations, driveAssignments }: {
   currentUser: User; tasks: Task[]; users: User[]
   setTasks: (t: Task[]) => void; setCurrentUser: (u: User) => void
-  collaborations: Collaboration[]
+  collaborations: Collaboration[]; driveAssignments: DriveFolderAssignment[]
 }) {
   const [filter, setFilter] = useState<'all' | 'mine' | 'open' | 'done'>('all')
   const [search, setSearch] = useState('')
@@ -2682,7 +2696,7 @@ const handleSaveTask = async () => {
         </div>
       )}
       {submittingTask && (
-        <SubmitTaskModal task={submittingTask} currentUser={currentUser} users={users} onClose={() => setSubmittingTask(null)} />
+        <SubmitTaskModal task={submittingTask} currentUser={currentUser} users={users} driveAssignments={driveAssignments} onClose={() => setSubmittingTask(null)} />
       )}
       {showCollabModal && (
         <CollaborationRequestModal currentUser={currentUser} users={users} onClose={() => setShowCollabModal(false)} />
@@ -3497,14 +3511,33 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
 // }) {
 //   const [editing, setEditing] = useState(false)
 //   const [draftAvatar, setDraftAvatar] = useState<AvatarConfig>(currentUser.avatar)
-function ProfileView({ currentUser, setCurrentUser, tasks }: {
+function ProfileView({ currentUser, setCurrentUser, tasks, users, driveAssignments }: {
   currentUser: User; setCurrentUser: (u: User) => void; tasks: Task[]
+  users: User[]; driveAssignments: DriveFolderAssignment[]
 }) {
   const [editing, setEditing] = useState(false)
   const [draftAvatar, setDraftAvatar] = useState<AvatarConfig>(currentUser.avatar)
   const [draftName, setDraftName] = useState(currentUser.name)
-  const [driveDraft, setDriveDraft] = useState(currentUser.driveFolderUrl ?? '')
-  const [driveSaved, setDriveSaved] = useState(false)
+  const [driveDrafts, setDriveDrafts] = useState<Record<string, string>>({})
+  const [savedEmployeeId, setSavedEmployeeId] = useState<string | null>(null)
+
+  const myEmployees = users.filter(u => u.role === 'employee' && u.teamId === currentUser.teamId)
+  const getDraftFor = (employeeId: string) =>
+    driveDrafts[employeeId] ?? (driveAssignments.find(a => a.managerId === currentUser.id && a.employeeId === employeeId)?.folderUrl ?? '')
+
+  const saveDriveFolder = async (employeeId: string) => {
+    const url = getDraftFor(employeeId).trim()
+    const existing = driveAssignments.find(a => a.managerId === currentUser.id && a.employeeId === employeeId)
+    if (!url) {
+      if (existing) await supabase.from('drive_folder_assignments').delete().eq('id', existing.id)
+    } else if (existing) {
+      await supabase.from('drive_folder_assignments').update({ folder_url: url }).eq('id', existing.id)
+    } else {
+      await supabase.from('drive_folder_assignments').insert({ manager_id: currentUser.id, employee_id: employeeId, folder_url: url })
+    }
+    setSavedEmployeeId(employeeId)
+    setTimeout(() => setSavedEmployeeId(prev => (prev === employeeId ? null : prev)), 2000)
+  }
 
   const { progress, needed, level } = getExpProgress(currentUser.exp)
   const myDone = tasks.filter(t => t.status === 'completed' && (t.assignedTo.includes(currentUser.id) || (t.selfCreated && t.createdBy === currentUser.id)))
@@ -3579,30 +3612,37 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
           {currentUser.role === 'manager' && (
             <div className="rounded-xl p-4" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
               <h4 className="text-white font-bold mb-1 flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
-                📁 Thư mục nộp task (Google Drive)
+                📁 Folder nộp task theo từng nhân viên
               </h4>
-              <p className="text-gray-500 text-xs mb-3 leading-relaxed">
-                Nhân viên sẽ được dẫn tới link này để tải file kết quả lên khi nộp task cho bạn.
+              <p className="text-gray-500 text-xs mb-4 leading-relaxed">
+                Tạo 1 folder riêng trong Drive cho mỗi nhân viên, dán link vào đúng dòng của họ — mỗi người nộp vào đúng folder của mình, không bị lẫn lộn.
               </p>
-              <input value={driveDraft} onChange={e => setDriveDraft(e.target.value)}
-                placeholder="https://drive.google.com/drive/folders/..."
-                className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none mb-2"
-                style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-gray-600 text-[10px] leading-relaxed flex-1">
-                  💡 Bật chia sẻ "Bất kỳ ai có link đều chỉnh sửa được" cho thư mục này.
-                </p>
-                <button onClick={async () => {
-                  await supabase.from('profiles').update({ drive_folder_url: driveDraft.trim() || null }).eq('id', currentUser.id)
-                  setCurrentUser({ ...currentUser, driveFolderUrl: driveDraft.trim() || undefined })
-                  setDriveSaved(true)
-                  setTimeout(() => setDriveSaved(false), 2000)
-                }}
-                  className="px-4 py-2 rounded-lg font-bold text-white text-xs flex-shrink-0"
-                  style={{ background: 'linear-gradient(135deg,#7c3aed,#5b21b6)' }}>
-                  {driveSaved ? '✓ Đã lưu' : 'Lưu link'}
-                </button>
-              </div>
+              {myEmployees.length === 0 ? (
+                <p className="text-gray-600 text-xs italic">Chưa có nhân viên nào trong team của bạn.</p>
+              ) : (
+                <div className="space-y-3">
+                  {myEmployees.map(emp => (
+                    <div key={emp.id} className="p-3 rounded-lg" style={{ background: '#12122a', border: '1px solid #1a1a3a' }}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <CharAvatar user={emp} size={22} />
+                        <span className="text-white text-sm font-medium">{emp.name}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <input value={getDraftFor(emp.id)}
+                          onChange={e => setDriveDrafts(prev => ({ ...prev, [emp.id]: e.target.value }))}
+                          placeholder="https://drive.google.com/drive/folders/..."
+                          className="flex-1 min-w-0 px-3 py-2 rounded-lg text-white placeholder-gray-600 text-xs outline-none"
+                          style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+                        <button onClick={() => saveDriveFolder(emp.id)}
+                          className="px-3 py-2 rounded-lg font-bold text-white text-xs flex-shrink-0"
+                          style={{ background: 'linear-gradient(135deg,#7c3aed,#5b21b6)' }}>
+                          {savedEmployeeId === emp.id ? '✓ Đã lưu' : 'Lưu'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -3737,13 +3777,14 @@ function NotificationBell({ notifications, onNotificationClick }: {
   )
 }
 
-function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, messages, setMessages, redemptions, notifications, collaborations }: {
+function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, messages, setMessages, redemptions, notifications, collaborations, driveAssignments }: {
   currentUser: User; setCurrentUser: (u: User) => void; allUsers: User[]
   tasks: Task[]; setTasks: (t: Task[]) => void
   messages: Message[]; setMessages: (m: Message[]) => void
   redemptions: { id: string; userId: string; rewardId: string; cost: number }[]
   notifications: { id: string; message: string; createdAt: string }[]
   collaborations: Collaboration[]
+  driveAssignments: DriveFolderAssignment[]
 }) {
   const [view, setView] = useState<View>('dashboard')
   const { level } = getExpProgress(currentUser.exp)
@@ -3785,7 +3826,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   const renderView = () => {
     switch (view) {
       case 'dashboard': return <DashboardView {...sharedProps} />
-      case 'tasks': return <TasksView {...sharedProps} collaborations={collaborations} />
+      case 'tasks': return <TasksView {...sharedProps} collaborations={collaborations} driveAssignments={driveAssignments} />
       case 'leaderboard': return <LeaderboardView users={users} tasks={tasks} />
       case 'rewards': return <RewardsView currentUser={currentUser} redemptions={redemptions} users={users} />
       case 'social': return (
@@ -3793,7 +3834,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
           showMentions={showMentions} setShowMentions={setShowMentions} markMentionsSeen={markMentionsSeen}
           navigateTarget={socialTarget} clearNavigateTarget={() => setSocialTarget(null)} />
       )
-      case 'profile': return <ProfileView currentUser={currentUser} setCurrentUser={setCurrentUser} tasks={tasks} />
+      case 'profile': return <ProfileView currentUser={currentUser} setCurrentUser={setCurrentUser} tasks={tasks} users={users} driveAssignments={driveAssignments} />
     }
   }
 
@@ -3931,9 +3972,10 @@ export default function App() {
   const [redemptions, setRedemptions] = useState<{ id: string; userId: string; rewardId: string; cost: number }[]>([])
   const [notifications, setNotifications] = useState<{ id: string; message: string; createdAt: string; targetUserId?: string; linkChannel?: string; linkDmUserId?: string }[]>([])
   const [collaborations, setCollaborations] = useState<Collaboration[]>([])
+  const [driveAssignments, setDriveAssignments] = useState<DriveFolderAssignment[]>([])
 
   function mapProfileToUser(p: any): User {
-  return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email, isDirector: p.is_director ?? false, driveFolderUrl: p.drive_folder_url ?? undefined }
+  return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email, isDirector: p.is_director ?? false }
 }
 
   function mapDbMessage(m: any): Message {
@@ -3970,6 +4012,10 @@ function mapDbCollaboration(c: any): Collaboration {
     assignedBy: c.assigned_by ?? undefined, rejectedReason: c.rejected_reason ?? undefined,
     createdAt: c.created_at,
   }
+}
+
+function mapDbDriveAssignment(d: any): DriveFolderAssignment {
+  return { id: d.id, managerId: d.manager_id, employeeId: d.employee_id, folderUrl: d.folder_url }
 }
 
   //=============================================================================
@@ -4099,6 +4145,17 @@ useEffect(() => {
     }).subscribe()
   return () => { supabase.removeChannel(channel) }
 }, [session])
+
+useEffect(() => {
+  if (!session) return
+  supabase.from('drive_folder_assignments').select('*').then(({ data }) => data && setDriveAssignments(data.map(mapDbDriveAssignment)))
+
+  const channel = supabase.channel('drive-assignments-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'drive_folder_assignments' }, () => {
+      supabase.from('drive_folder_assignments').select('*').then(({ data }) => data && setDriveAssignments(data.map(mapDbDriveAssignment)))
+    }).subscribe()
+  return () => { supabase.removeChannel(channel) }
+}, [session])
   // Khi allUsers cập nhật (real-time), đồng bộ luôn currentProfile nếu có thay đổi
 useEffect(() => {
   if (!currentProfile) return
@@ -4184,6 +4241,7 @@ useEffect(() => {
       redemptions={redemptions}
       notifications={notifications}
       collaborations={collaborations}
+      driveAssignments={driveAssignments}
     />
   )
 }
