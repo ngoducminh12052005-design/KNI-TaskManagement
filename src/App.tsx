@@ -3503,7 +3503,8 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
   const [editing, setEditing] = useState(false)
   const [draftAvatar, setDraftAvatar] = useState<AvatarConfig>(currentUser.avatar)
   const [draftName, setDraftName] = useState(currentUser.name)
-  const [draftDriveUrl, setDraftDriveUrl] = useState(currentUser.driveFolderUrl ?? '')
+  const [driveDraft, setDriveDraft] = useState(currentUser.driveFolderUrl ?? '')
+  const [driveSaved, setDriveSaved] = useState(false)
 
   const { progress, needed, level } = getExpProgress(currentUser.exp)
   const myDone = tasks.filter(t => t.status === 'completed' && (t.assignedTo.includes(currentUser.id) || (t.selfCreated && t.createdBy === currentUser.id)))
@@ -3537,7 +3538,7 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
             <div className="h-2 rounded-full overflow-hidden" style={{ background: '#1a1a3a' }}>
               <div className="h-full rounded-full" style={{ width: `${progress}%`, background: 'linear-gradient(90deg,#7c3aed,#f59e0b)' }} />
             </div>
-            <button onClick={() => { setDraftAvatar(currentUser.avatar); setDraftName(currentUser.name); setDraftDriveUrl(currentUser.driveFolderUrl ?? ''); setEditing(!editing) }}
+            <button onClick={() => { setDraftAvatar(currentUser.avatar); setDraftName(currentUser.name); setEditing(!editing) }}
               className="mt-4 w-full py-2 rounded-lg text-sm font-medium transition-all"
               style={{ background: editing ? '#7c3aed' : '#14143a', color: editing ? '#fff' : '#6b7280', border: '1px solid #2a2a5a' }}>
               {editing ? '↑ Đóng' : '🎭 Đổi tên & nhân vật'}
@@ -3575,6 +3576,36 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
 
         {/* Right */}
         <div className="col-span-2 space-y-4">
+          {currentUser.role === 'manager' && (
+            <div className="rounded-xl p-4" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
+              <h4 className="text-white font-bold mb-1 flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+                📁 Thư mục nộp task (Google Drive)
+              </h4>
+              <p className="text-gray-500 text-xs mb-3 leading-relaxed">
+                Nhân viên sẽ được dẫn tới link này để tải file kết quả lên khi nộp task cho bạn.
+              </p>
+              <input value={driveDraft} onChange={e => setDriveDraft(e.target.value)}
+                placeholder="https://drive.google.com/drive/folders/..."
+                className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none mb-2"
+                style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-gray-600 text-[10px] leading-relaxed flex-1">
+                  💡 Bật chia sẻ "Bất kỳ ai có link đều chỉnh sửa được" cho thư mục này.
+                </p>
+                <button onClick={async () => {
+                  await supabase.from('profiles').update({ drive_folder_url: driveDraft.trim() || null }).eq('id', currentUser.id)
+                  setCurrentUser({ ...currentUser, driveFolderUrl: driveDraft.trim() || undefined })
+                  setDriveSaved(true)
+                  setTimeout(() => setDriveSaved(false), 2000)
+                }}
+                  className="px-4 py-2 rounded-lg font-bold text-white text-xs flex-shrink-0"
+                  style={{ background: 'linear-gradient(135deg,#7c3aed,#5b21b6)' }}>
+                  {driveSaved ? '✓ Đã lưu' : 'Lưu link'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {editing && (
             <div className="rounded-xl p-4 animate-slide-up" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
               <h4 className="text-white font-bold mb-4" style={{ fontFamily: 'Rajdhani, sans-serif' }}>🎭 Tùy chỉnh nhân vật</h4>
@@ -3587,20 +3618,7 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
                   style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
               </div>
 
-              {currentUser.role === 'manager' && (
-                <div className="mb-4">
-                  <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">
-                    📁 Link thư mục Google Drive (để nhân viên nộp task)
-                  </label>
-                  <input value={draftDriveUrl} onChange={e => setDraftDriveUrl(e.target.value)}
-                    placeholder="https://drive.google.com/drive/folders/..."
-                    className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
-                    style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
-                  <p className="text-gray-600 text-[10px] mt-1.5 leading-relaxed">
-                    💡 Tạo 1 thư mục trên Google Drive, bật chia sẻ "Bất kỳ ai có link đều chỉnh sửa được", dán link vào đây. Nhân viên nộp task sẽ được dẫn thẳng vào thư mục này.
-                  </p>
-                </div>
-              )}
+              
 
               <AvatarCreator value={draftAvatar} onChange={setDraftAvatar} />
               <div className="flex gap-3 mt-4">
@@ -3609,11 +3627,8 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
                   style={{ background: '#14143a', border: '1px solid #2a2a5a' }}>Hủy</button>
                 <button onClick={async () => {
                   const trimmed = draftName.trim() || currentUser.name
-                  await supabase.from('profiles').update({
-                    name: trimmed, avatar: draftAvatar,
-                    drive_folder_url: draftDriveUrl.trim() || null,
-                  }).eq('id', currentUser.id)
-                  setCurrentUser({ ...currentUser, name: trimmed, avatar: draftAvatar, driveFolderUrl: draftDriveUrl.trim() || undefined })
+                  await supabase.from('profiles').update({ name: trimmed, avatar: draftAvatar }).eq('id', currentUser.id)
+                  setCurrentUser({ ...currentUser, name: trimmed, avatar: draftAvatar })
                   setEditing(false)
                 }}
                   className="flex-1 py-2.5 rounded-lg font-bold text-white text-sm"
