@@ -61,6 +61,7 @@ interface Task {
   crossDeptRejectedReason?: string
   crossDeptRejectedBy?: string
   targetTeamId?: string
+  submissionOwnFolderUrl?: string
 }
 
 interface Message {
@@ -1374,6 +1375,7 @@ function DashboardView({ currentUser, tasks, users, setTasks, setCurrentUser, se
 // }
 function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; currentUser: User; users: User[]; onClose: () => void }) {
   const [driveLink, setDriveLink] = useState('')
+  const [ownFolderUrl, setOwnFolderUrl] = useState('')
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -1383,6 +1385,14 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
     .filter((u): u is User => !!u && !!u.driveFolderUrl)
 
   const handleSubmit = async () => {
+    if (task.selfCreated && !ownFolderUrl.trim()) {
+      setError('Vui lòng dán link folder Drive của bạn (đã cấp quyền xem & chỉnh sửa cho quản lý) trước khi nộp.')
+      return
+    }
+    if (task.selfCreated && !/^https?:\/\//i.test(ownFolderUrl.trim())) {
+      setError('Link folder không hợp lệ, vui lòng dán đúng đường dẫn Google Drive.')
+      return
+    }
     if (!driveLink.trim()) { setError('Vui lòng dán link Google Drive chứa file kết quả trước khi nộp.'); return }
     if (!/^https?:\/\//i.test(driveLink.trim())) { setError('Link không hợp lệ, vui lòng dán đúng đường dẫn Google Drive.'); return }
     setError('')
@@ -1391,6 +1401,7 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
     const { error: updateError } = await supabase.from('tasks').update({
       status: 'submitted',
       submission_file_url: driveLink.trim(),
+      submission_own_folder_url: task.selfCreated ? ownFolderUrl.trim() : null,
       submission_note: note.trim() || null,
       submitted_at: new Date().toISOString(),
       rejected_reason: null,
@@ -1415,11 +1426,22 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
 
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50 px-4" style={{ background: '#000000a0' }}>
-      <div className="w-full max-w-md rounded-2xl p-6" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
+      <div className="w-full max-w-md rounded-2xl p-6 max-h-[90vh] overflow-y-auto" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
         <h3 className="text-white font-bold text-lg mb-1" style={{ fontFamily: 'Rajdhani, sans-serif' }}>Nộp kết quả task</h3>
         <p className="text-gray-500 text-sm mb-4">{task.title}</p>
 
-        {pmsWithDrive.length > 0 ? (
+        {task.selfCreated ? (
+          <div className="mb-4 p-3 rounded-lg" style={{ background: '#2a1a00', border: '1px solid #4a3a00' }}>
+            <p className="text-amber-300 text-xs leading-relaxed mb-3">
+              🎯 Đây là task bạn tự tạo. Vui lòng dán link folder Drive của chính bạn, đồng thời <b>bật chia sẻ "Bất kỳ ai có link đều xem và chỉnh sửa được"</b> để quản lý có thể xem và mở file kết quả.
+            </p>
+            <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Link folder Drive của bạn *</label>
+            <input value={ownFolderUrl} onChange={e => setOwnFolderUrl(e.target.value)}
+              placeholder="https://drive.google.com/drive/folders/..."
+              className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
+              style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+          </div>
+        ) : pmsWithDrive.length > 0 ? (
           <div className="mb-4 space-y-2">
             <label className="text-gray-500 text-xs uppercase tracking-wider block">Bước 1 — Mở Drive của quản lý, tải file lên</label>
             {pmsWithDrive.map(pm => (
@@ -1438,7 +1460,7 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
         )}
 
         <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">
-          {pmsWithDrive.length > 0 ? 'Bước 2 — ' : ''}Dán link file đã tải lên Drive *
+          {!task.selfCreated && pmsWithDrive.length > 0 ? 'Bước 2 — ' : ''}Dán link file đã tải lên Drive *
         </label>
         <input value={driveLink} onChange={e => setDriveLink(e.target.value)}
           placeholder="https://drive.google.com/file/d/..."
@@ -2443,6 +2465,12 @@ const handleSaveTask = async () => {
               //     )}
               ) : task.status === 'submitted' && currentUser.role === 'manager' ? (
                 <div className="flex flex-col gap-1.5 items-end">
+                  {task.submissionOwnFolderUrl && (
+                    <a href={task.submissionOwnFolderUrl} target="_blank" rel="noopener noreferrer"
+                      className="text-xs underline" style={{ color: '#a78bfa' }}>
+                      📁 Xem folder Drive của người tự tạo task
+                    </a>
+                  )}
                   {task.submissionFileUrl && (
                     <a href={task.submissionFileUrl} target="_blank" rel="noopener noreferrer"
                       className="text-xs underline" style={{ color: '#60a5fa' }}>
@@ -4004,6 +4032,7 @@ export default function App() {
     crossDeptRejectedReason: t.cross_dept_rejected_reason ?? undefined,
     crossDeptRejectedBy: t.cross_dept_rejected_by ?? undefined,
     targetTeamId: t.target_team_id ?? undefined,
+    submissionOwnFolderUrl: t.submission_own_folder_url ?? undefined,
   }
 }
 function mapDbCollaboration(c: any): Collaboration {
