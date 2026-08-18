@@ -62,6 +62,9 @@ interface Task {
   crossDeptRejectedBy?: string
   targetTeamId?: string
   submissionOwnFolderUrl?: string
+  driveFolderCreated?: boolean
+  driveFolderName?: string
+  submissionFolderName?: string
 }
 
 interface Message {
@@ -1375,6 +1378,8 @@ function DashboardView({ currentUser, tasks, users, setTasks, setCurrentUser, se
 // }
 function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; currentUser: User; users: User[]; onClose: () => void }) {
   const [driveLink, setDriveLink] = useState('')
+  const [ownFolderUrl, setOwnFolderUrl] = useState('')
+  const [folderName, setFolderName] = useState('')
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -1383,8 +1388,23 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
     .map(id => users.find(u => u.id === id))
     .filter((u): u is User => !!u && !!u.driveFolderUrl)
 
+  const hasNamedFolder = !task.selfCreated && task.driveFolderCreated && !!task.driveFolderName
+  const needsOwnFolderName = !task.selfCreated && !hasNamedFolder
+
   const handleSubmit = async () => {
-    if (!driveLink.trim()) { setError('Vui lòng dán link Google Drive chứa file kết quả trước khi nộp.'); return }
+    if (task.selfCreated && !ownFolderUrl.trim()) {
+      setError('Vui lòng dán link folder Drive của bạn (đã cấp quyền xem & chỉnh sửa cho quản lý) trước khi nộp.')
+      return
+    }
+    if (task.selfCreated && !/^https?:\/\//i.test(ownFolderUrl.trim())) {
+      setError('Link folder không hợp lệ, vui lòng dán đúng đường dẫn Google Drive.')
+      return
+    }
+    if (needsOwnFolderName && !folderName.trim()) {
+      setError('Vui lòng ghi tên folder bạn đã tự tạo trước khi nộp.')
+      return
+    }
+    if (!driveLink.trim()) { setError('Vui lòng dán link Google Drive chứa file/folder kết quả trước khi nộp.'); return }
     if (!/^https?:\/\//i.test(driveLink.trim())) { setError('Link không hợp lệ, vui lòng dán đúng đường dẫn Google Drive.'); return }
     setError('')
     setSaving(true)
@@ -1392,6 +1412,8 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
     const { error: updateError } = await supabase.from('tasks').update({
       status: 'submitted',
       submission_file_url: driveLink.trim(),
+      submission_own_folder_url: task.selfCreated ? ownFolderUrl.trim() : null,
+      submission_folder_name: needsOwnFolderName ? folderName.trim() : null,
       submission_note: note.trim() || null,
       submitted_at: new Date().toISOString(),
       rejected_reason: null,
@@ -1420,41 +1442,71 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
         <h3 className="text-white font-bold text-lg mb-1" style={{ fontFamily: 'Rajdhani, sans-serif' }}>Nộp kết quả task</h3>
         <p className="text-gray-500 text-sm mb-4">{task.title}</p>
 
-        {task.selfCreated && (
+        {task.selfCreated ? (
           <div className="mb-4 p-3 rounded-lg" style={{ background: '#2a1a00', border: '1px solid #4a3a00' }}>
-            <p className="text-amber-300 text-xs leading-relaxed">
-              🎯 Đây là task bạn tự tạo. Vui lòng dán link file/folder Drive chứa kết quả vào ô bên dưới, đồng thời <b>bật chia sẻ "Bất kỳ ai có link đều xem và chỉnh sửa được"</b> để quản lý có thể xem và mở file kết quả.
+            <p className="text-amber-300 text-xs leading-relaxed mb-3">
+              🎯 Đây là task bạn tự tạo. Vui lòng dán link folder Drive của chính bạn, đồng thời <b>bật chia sẻ "Bất kỳ ai có link đều xem và chỉnh sửa được"</b> để quản lý có thể xem file kết quả.
             </p>
+            <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Link folder Drive của bạn *</label>
+            <input value={ownFolderUrl} onChange={e => setOwnFolderUrl(e.target.value)}
+              placeholder="https://drive.google.com/drive/folders/..."
+              className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
+              style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
           </div>
-        )}
-
-        {!task.selfCreated && pmsWithDrive.length > 0 && (
-          <div className="mb-4 space-y-2">
-            <label className="text-gray-500 text-xs uppercase tracking-wider block">Bước 1 — Mở Drive của quản lý, tải file lên</label>
+        ) : hasNamedFolder ? (
+          <div className="mb-4 p-3 rounded-lg" style={{ background: '#1a0a3a', border: '1px solid #3a1a6a' }}>
+            <p className="text-violet-300 text-xs leading-relaxed mb-3">
+              📁 Quản lý đã tạo sẵn folder cho task này. Vào Drive của quản lý, tìm đúng folder tên <b>"{task.driveFolderName}"</b> và nộp file vào đó.
+            </p>
             {pmsWithDrive.map(pm => (
               <a key={pm.id} href={pm.driveFolderUrl} target="_blank" rel="noopener noreferrer"
                 className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-all hover:scale-[1.01]"
-                style={{ background: '#14143a', border: '1px solid #2a2a5a', color: '#60a5fa' }}>
+                style={{ background: '#14143a', border: '1px solid #2a2a5a', color: '#a78bfa' }}>
                 <CharAvatar user={pm} size={22} />
                 📁 Mở Drive của {pm.name}
               </a>
             ))}
           </div>
-        )}
-
-        {!task.selfCreated && pmsWithDrive.length === 0 && (
+        ) : needsOwnFolderName && pmsWithDrive.length > 0 ? (
+          <div className="mb-4 p-3 rounded-lg" style={{ background: '#2a1a00', border: '1px solid #4a3a00' }}>
+            <p className="text-amber-300 text-xs leading-relaxed mb-3">
+              ⚠️ Quản lý chưa tạo sẵn folder cho task này. Vào Drive bên dưới, tự tạo 1 folder mới, đặt tên tuỳ ý, rồi ghi lại tên đó ở ô bên dưới.
+            </p>
+            <div className="space-y-2">
+              {pmsWithDrive.map(pm => (
+                <a key={pm.id} href={pm.driveFolderUrl} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-all hover:scale-[1.01]"
+                  style={{ background: '#14143a', border: '1px solid #2a2a5a', color: '#60a5fa' }}>
+                  <CharAvatar user={pm} size={22} />
+                  📁 Mở Drive của {pm.name}
+                </a>
+              ))}
+            </div>
+          </div>
+        ) : (
           <div className="mb-4 p-3 rounded-lg text-xs" style={{ background: '#2a1a00', color: '#fbbf24' }}>
             ⚠️ Quản lý dự án chưa thiết lập link Google Drive. Hãy liên hệ trực tiếp để xin link nộp file, sau đó dán vào ô bên dưới.
           </div>
         )}
 
-        <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">
-          {!task.selfCreated && pmsWithDrive.length > 0 ? 'Bước 2 — ' : ''}Dán link file/folder đã tải lên Drive *
-        </label>
+        {needsOwnFolderName && (
+          <>
+            <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Tên folder bạn đã tự tạo *</label>
+            <input value={folderName} onChange={e => setFolderName(e.target.value)}
+              placeholder="VD: Nộp task - Nguyễn Văn A"
+              className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none mb-4"
+              style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+          </>
+        )}
+
+        <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Dán link file/folder đã nộp *</label>
         <input value={driveLink} onChange={e => setDriveLink(e.target.value)}
           placeholder="https://drive.google.com/file/d/... hoặc /folders/..."
-          className="w-full px-3 py-2.5 mb-4 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
+          className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
           style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+        <p className="text-gray-600 text-[10px] mt-1.5 mb-4 leading-relaxed">
+          💡 Bấm chuột phải vào file/folder → "Chia sẻ" → bật quyền <b>"Bất kỳ ai có link đều xem và chỉnh sửa được"</b> → "Sao chép đường liên kết", rồi dán vào đây.
+        </p>
 
         <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Ghi chú (không bắt buộc)</label>
         <textarea value={note} onChange={e => setNote(e.target.value)} rows={3}
@@ -1957,6 +2009,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     category: 'development', priority: 'medium' as TaskPriority,
     important: false, urgent: false,
     assignedTo: [] as string[], projectManager: [] as string[], supporters: [] as string[],
+    driveFolderCreated: false, driveFolderName: '',
   })
 
   const isManager = currentUser.role === 'manager'
@@ -2094,6 +2147,8 @@ const openEditModal = (task: Task) => {
     category: task.category, priority: task.priority,
     important: task.important, urgent: task.urgent,
     assignedTo: task.assignedTo, projectManager: task.projectManager, supporters: task.supporters,
+    driveFolderCreated: task.driveFolderCreated ?? false,
+    driveFolderName: task.driveFolderName ?? '',
   })
   setShowModal(true)
 }
@@ -2113,6 +2168,8 @@ const handleSaveTask = async () => {
       start_date: form.startDate, due_date: form.dueDate,
       category: form.category, priority: form.priority,
       important: form.important, urgent: form.urgent,
+      drive_folder_created: form.driveFolderCreated,
+      drive_folder_name: form.driveFolderCreated ? (form.driveFolderName.trim() || null) : null,
     }).eq('id', editingTask.id)
   } else {
     const creatingForSelf = !isManager || selfMode
@@ -2132,6 +2189,8 @@ const handleSaveTask = async () => {
       important: form.important, urgent: form.urgent,
       cross_dept_pending: isCrossDept,
       target_team_id: targetTeamId,
+      drive_folder_created: !creatingForSelf && form.driveFolderCreated,
+      drive_folder_name: (!creatingForSelf && form.driveFolderCreated) ? (form.driveFolderName.trim() || null) : null,
     }).select('id').single()
     const newTaskId = newTask?.id
 
@@ -2174,7 +2233,7 @@ const handleSaveTask = async () => {
   setShowModal(false)
   setEditingTask(null)
   setSelfMode(false)
-  setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'development', priority: 'medium', important: false, urgent: false, assignedTo: [], projectManager: [], supporters: [] })
+  setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'development', priority: 'medium', important: false, urgent: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '' })
 }
 
   const toggleFormArray = (field: 'assignedTo' | 'projectManager' | 'supporters', uid: string) => {
@@ -2454,6 +2513,15 @@ const handleSaveTask = async () => {
               //     )}
               ) : task.status === 'submitted' && currentUser.role === 'manager' ? (
                 <div className="flex flex-col gap-1.5 items-end">
+                  {task.submissionOwnFolderUrl && (
+                    <a href={task.submissionOwnFolderUrl} target="_blank" rel="noopener noreferrer"
+                      className="text-xs underline" style={{ color: '#a78bfa' }}>
+                      📁 Xem folder Drive của người tự tạo task
+                    </a>
+                  )}
+                  {task.submissionFolderName && (
+                    <p className="text-gray-500 text-[11px] max-w-[200px] text-right">📂 Nhân viên tự đặt tên folder: {task.submissionFolderName}</p>
+                  )}
                   {task.submissionFileUrl && (
                     <a href={task.submissionFileUrl} target="_blank" rel="noopener noreferrer"
                       className="text-xs underline" style={{ color: '#60a5fa' }}>
@@ -2715,6 +2783,26 @@ const handleSaveTask = async () => {
                     selected={form.supporters}
                     onToggle={uid => toggleFormArray('supporters', uid)}
                     placeholder="Chọn người hỗ trợ..." />
+
+                  <div className="p-3 rounded-lg" style={{ background: '#0a0a1a', border: '1px solid #1e1e3a' }}>
+                    <label className="flex items-center gap-2.5 mb-2 cursor-pointer select-none">
+                      <input type="checkbox" checked={form.driveFolderCreated}
+                        onChange={e => setForm({ ...form, driveFolderCreated: e.target.checked })}
+                        className="w-4 h-4 rounded accent-violet-500" />
+                      <span className="text-white text-sm font-medium">📁 Tôi đã tạo sẵn folder Drive cho task này</span>
+                    </label>
+
+                    {form.driveFolderCreated ? (
+                      <input value={form.driveFolderName} onChange={e => setForm({ ...form, driveFolderName: e.target.value })}
+                        placeholder="Tên folder (VD: Nộp task - Nguyễn Văn A)"
+                        className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
+                        style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+                    ) : (
+                      <p className="text-gray-600 text-[10px] leading-relaxed">
+                        💡 Nếu không tick, nhân viên sẽ tự tạo folder trong Drive của bạn và tự đặt tên khi nộp.
+                      </p>
+                    )}
+                  </div>
                 </>
               )}
 
@@ -4016,6 +4104,9 @@ export default function App() {
     crossDeptRejectedBy: t.cross_dept_rejected_by ?? undefined,
     targetTeamId: t.target_team_id ?? undefined,
     submissionOwnFolderUrl: t.submission_own_folder_url ?? undefined,
+    driveFolderCreated: t.drive_folder_created ?? false,
+    driveFolderName: t.drive_folder_name ?? undefined,
+    submissionFolderName: t.submission_folder_name ?? undefined,
   }
 }
 function mapDbCollaboration(c: any): Collaboration {
