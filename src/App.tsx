@@ -1704,7 +1704,7 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
       status: 'assigned', assigned_employee_id: pickedEmployee, assigned_by: currentUser.id,
     }).eq('id', c.id)
 
-    await supabase.from('tasks').insert({
+    const { data: newTask } = await supabase.from('tasks').insert({
       title: c.title,
       description: `[Phối hợp phòng ban] ${c.description}`,
       exp_reward: exp,
@@ -1720,16 +1720,19 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
       self_created: false,
       important: false,
       urgent: false,
-    })
+    }).select('id').single()
+    const newTaskId = newTask?.id
 
     const employeeName = getUserById(pickedEmployee)?.name ?? ''
     await supabase.from('notifications').insert({
       message: `🤝 ${currentUser.name} đã phân công ${employeeName} hợp tác trong dự án "${c.title}"`,
       target_user_id: c.requestedBy,
+      link_task_id: newTaskId,
     })
     await supabase.from('notifications').insert({
       message: `🤝 Bạn vừa được phân công hợp tác trong dự án "${c.title}" (phối hợp với ${TEAMS.find(t => t.id === c.requestingTeamId)?.name ?? ''})`,
       target_user_id: pickedEmployee,
+      link_task_id: newTaskId,
     })
 
     setAssigningId(null)
