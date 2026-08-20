@@ -65,6 +65,7 @@ interface Task {
   driveFolderCreated?: boolean
   driveFolderName?: string
   submissionFolderName?: string
+  driveFolderOwnerId?: string
 }
 
 interface Message {
@@ -94,6 +95,8 @@ interface Collaboration {
   assignedBy?: string
   rejectedReason?: string
   createdAt: string
+  driveFolderCreated?: boolean
+  driveFolderName?: string
 }
 
 interface Reward {
@@ -1384,9 +1387,10 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  const pmsWithDrive = task.projectManager
-    .map(id => users.find(u => u.id === id))
-    .filter((u): u is User => !!u && !!u.driveFolderUrl)
+  const driveOwner = task.driveFolderOwnerId ? users.find(u => u.id === task.driveFolderOwnerId) : undefined
+  const pmsWithDrive = task.driveFolderOwnerId
+    ? (driveOwner?.driveFolderUrl ? [driveOwner] : [])
+    : task.projectManager.map(id => users.find(u => u.id === id)).filter((u): u is User => !!u && !!u.driveFolderUrl)
 
   const hasNamedFolder = !task.selfCreated && task.driveFolderCreated && !!task.driveFolderName
   const needsOwnFolderName = !task.selfCreated && !hasNamedFolder
@@ -1542,6 +1546,8 @@ function CollaborationRequestModal({ currentUser, users, onClose }: {
   const [targetTeamId, setTargetTeamId] = useState('')
   const [targetManagerId, setTargetManagerId] = useState('')
   const [expReward, setExpReward] = useState(80)
+  const [driveFolderCreated, setDriveFolderCreated] = useState(false)
+  const [driveFolderName, setDriveFolderName] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -1565,6 +1571,8 @@ function CollaborationRequestModal({ currentUser, users, onClose }: {
       target_manager_id: targetManagerId,
       exp_reward: expReward,
       status: 'pending',
+      drive_folder_created: driveFolderCreated,
+      drive_folder_name: driveFolderCreated ? (driveFolderName.trim() || null) : null,
     })
     setSaving(false)
     if (insertError) { setError(insertError.message); return }
@@ -1623,6 +1631,44 @@ function CollaborationRequestModal({ currentUser, users, onClose }: {
             <input type="number" value={expReward} onChange={e => setExpReward(parseInt(e.target.value) || 0)}
               className="w-full px-3 py-2.5 rounded-lg text-amber-400 text-sm outline-none font-bold"
               style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+          </div>
+
+          <div className="p-3 rounded-lg" style={{ background: '#0a0a1a', border: '1px solid #1e1e3a' }}>
+            <label className="flex items-center gap-2.5 mb-2 cursor-pointer select-none">
+              <input type="checkbox" checked={driveFolderCreated}
+                onChange={e => setDriveFolderCreated(e.target.checked)}
+                className="w-4 h-4 rounded accent-violet-500" />
+              <span className="text-white text-sm font-medium">📁 Tôi đã tạo sẵn folder Drive cho công việc này</span>
+            </label>
+            {driveFolderCreated ? (
+              <input value={driveFolderName} onChange={e => setDriveFolderName(e.target.value)}
+                placeholder="Tên folder (VD: Phối hợp - Chiến dịch Q4)"
+                className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
+                style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+            ) : (
+              <p className="text-gray-600 text-[10px] leading-relaxed">
+                💡 Nếu không tick, nhân viên được phân công sẽ tự tạo folder trong Drive của bạn và tự đặt tên khi nộp.
+              </p>
+            )}
+          </div>
+
+          <div className="p-3 rounded-lg" style={{ background: '#0a0a1a', border: '1px solid #1e1e3a' }}>
+            <label className="flex items-center gap-2.5 mb-2 cursor-pointer select-none">
+              <input type="checkbox" checked={driveFolderCreated}
+                onChange={e => setDriveFolderCreated(e.target.checked)}
+                className="w-4 h-4 rounded accent-violet-500" />
+              <span className="text-white text-sm font-medium">📁 Tôi đã tạo sẵn folder Drive cho công việc này</span>
+            </label>
+            {driveFolderCreated ? (
+              <input value={driveFolderName} onChange={e => setDriveFolderName(e.target.value)}
+                placeholder="Tên folder (VD: Phối hợp - Chiến dịch Q4)"
+                className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
+                style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+            ) : (
+              <p className="text-gray-600 text-[10px] leading-relaxed">
+                💡 Nếu không tick, nhân viên được phân công sẽ tự tạo folder trong Drive của bạn và tự đặt tên khi nộp.
+              </p>
+            )}
           </div>
 
           <div>
@@ -1720,6 +1766,9 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
       self_created: false,
       important: false,
       urgent: false,
+      drive_folder_owner_id: c.requestedBy,
+      drive_folder_created: c.driveFolderCreated ?? false,
+      drive_folder_name: c.driveFolderCreated ? (c.driveFolderName ?? null) : null,
     }).select('id').single()
     const newTaskId = newTask?.id
 
@@ -4110,6 +4159,7 @@ export default function App() {
     driveFolderCreated: t.drive_folder_created ?? false,
     driveFolderName: t.drive_folder_name ?? undefined,
     submissionFolderName: t.submission_folder_name ?? undefined,
+    driveFolderOwnerId: t.drive_folder_owner_id ?? undefined,
   }
 }
 function mapDbCollaboration(c: any): Collaboration {
@@ -4122,6 +4172,8 @@ function mapDbCollaboration(c: any): Collaboration {
     status: c.status, assignedEmployeeId: c.assigned_employee_id ?? undefined,
     assignedBy: c.assigned_by ?? undefined, rejectedReason: c.rejected_reason ?? undefined,
     createdAt: c.created_at,
+    driveFolderCreated: c.drive_folder_created ?? false,
+    driveFolderName: c.drive_folder_name ?? undefined,
   }
 }
 
