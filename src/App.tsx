@@ -1652,25 +1652,6 @@ function CollaborationRequestModal({ currentUser, users, onClose }: {
             )}
           </div>
 
-          <div className="p-3 rounded-lg" style={{ background: '#0a0a1a', border: '1px solid #1e1e3a' }}>
-            <label className="flex items-center gap-2.5 mb-2 cursor-pointer select-none">
-              <input type="checkbox" checked={driveFolderCreated}
-                onChange={e => setDriveFolderCreated(e.target.checked)}
-                className="w-4 h-4 rounded accent-violet-500" />
-              <span className="text-white text-sm font-medium">📁 Tôi đã tạo sẵn folder Drive cho công việc này</span>
-            </label>
-            {driveFolderCreated ? (
-              <input value={driveFolderName} onChange={e => setDriveFolderName(e.target.value)}
-                placeholder="Tên folder (VD: Phối hợp - Chiến dịch Q4)"
-                className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
-                style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
-            ) : (
-              <p className="text-gray-600 text-[10px] leading-relaxed">
-                💡 Nếu không tick, nhân viên được phân công sẽ tự tạo folder trong Drive của bạn và tự đặt tên khi nộp.
-              </p>
-            )}
-          </div>
-
           <div>
             <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Chọn phòng ban muốn nhờ hỗ trợ *</label>
             <select value={targetTeamId} onChange={e => { setTargetTeamId(e.target.value); setTargetManagerId('') }}
