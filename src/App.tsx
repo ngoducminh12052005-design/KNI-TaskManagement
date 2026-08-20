@@ -4070,7 +4070,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
         <div className="mb-4">
           <img src={companyLogo} alt="KNI" className="w-10 h-10 rounded-lg object-contain" />
         </div>
-        {NAV.map(item => (
+        {navItems.map(item => (
           <button key={item.id}
             onClick={() => {
               setView(item.id as View)
@@ -4102,7 +4102,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
         {/* Bottom nav — chỉ hiện trên mobile */}
       <div className="flex md:hidden items-center justify-around py-2 flex-shrink-0"
         style={{ background: '#06060f', borderTop: '1px solid #1a1a3a' }}>
-        {NAV.map(item => (
+        {navItems.map(item => (
           <button key={item.id}
             onClick={() => {
               setView(item.id as View)
