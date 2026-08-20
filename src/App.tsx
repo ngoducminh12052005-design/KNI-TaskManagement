@@ -5,7 +5,7 @@ import * as XLSX from 'xlsx'
 // ==================== TYPES ====================
 
 type Role = 'manager' | 'employee'
-type View = 'dashboard' | 'tasks' | 'leaderboard' | 'rewards' | 'social' | 'profile'
+type View = 'dashboard' | 'tasks' | 'leaderboard' | 'rewards' | 'social' | 'profile' | 'bodlog'
 type TaskStatus = 'open' | 'in-progress' | 'submitted' | 'completed'
 type TaskPriority = 'low' | 'medium' | 'high'
 type ChatChannel = 'general' | 'team' | 'announcements' | 'dm'
@@ -66,6 +66,8 @@ interface Task {
   driveFolderName?: string
   submissionFolderName?: string
   driveFolderOwnerId?: string
+  approvedBy?: string
+  approvedAt?: string
 }
 
 interface Message {
@@ -2099,7 +2101,11 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
 }
 
 const handleApprove = async (task: Task) => {
-  await supabase.from('tasks').update({ status: 'completed' }).eq('id', task.id)
+  await supabase.from('tasks').update({
+    status: 'completed',
+    approved_by: currentUser.id,
+    approved_at: new Date().toISOString(),
+  }).eq('id', task.id)
 
   // Mỗi người Phụ trách nhận đủ 100% EXP (không chia, dù có nhiều người)
   for (const uid of task.assignedTo) {
@@ -3075,6 +3081,7 @@ ws['!cols'] = [{ wch: 22 }, { wch: 26 }, { wch: 28 }, { wch: 25 }, { wch: 14 }, 
               <tr className="text-gray-500 text-left" style={{ borderBottom: '1px solid #1e1e4a' }}>
                 <th className="py-2 pr-4">Nhân viên</th>
                 <th className="py-2 pr-4">Email</th>
+                <th className="py-2 pr-4">Phòng ban</th>
                 <th className="py-2 pr-4">Phần thưởng</th>
                 <th className="py-2 pr-4">Điểm</th>
                 <th className="py-2 pr-4">Ngày đổi</th>
@@ -3083,15 +3090,17 @@ ws['!cols'] = [{ wch: 22 }, { wch: 26 }, { wch: 28 }, { wch: 25 }, { wch: 14 }, 
             <tbody>
               {filtered.map(r => {
                 const u = users.find(x => x.id === r.userId)
+                const team = TEAMS.find(t => t.id === u?.teamId)
                 return (
                   <tr key={r.id} style={{ borderBottom: '1px solid #14142a' }}>
                     <td className="py-2 pr-4 text-gray-300">{u?.name ?? '(đã xoá)'}</td>
                     <td className="py-2 pr-4 text-gray-500 text-xs">{u?.email ?? ''}</td>
+                    <td className="py-2 pr-4 text-gray-500 text-xs">{team?.name ?? ''}</td>
                     <td className="py-2 pr-4 text-gray-300">{r.rewardName}</td>
                     <td className="py-2 pr-4 text-amber-400">{r.cost}</td>
                     <td className="py-2 pr-4 text-gray-500">{new Date(r.redeemedAt).toLocaleDateString('vi-VN')}</td>
                   </tr>
-                )
+                ) 
               })}
             </tbody>
           </table>
@@ -3100,6 +3109,81 @@ ws['!cols'] = [{ wch: 22 }, { wch: 26 }, { wch: 28 }, { wch: 25 }, { wch: 14 }, 
     </div>
   )
 }
+
+function BodLogView({ tasks, users }: { tasks: Task[]; users: User[] }) {
+  const [tab, setTab] = useState<'tasks' | 'rewards'>('tasks')
+  const getUserById = (id?: string) => users.find(u => u.id === id)
+
+  const approvedTasks = [...tasks]
+    .filter(t => t.status === 'completed')
+    .sort((a, b) => (b.approvedAt ?? '').localeCompare(a.approvedAt ?? ''))
+
+  return (
+    <div className="p-6 max-w-6xl mx-auto">
+      <div className="text-center mb-6">
+        <h2 className="text-white text-3xl font-black mb-1" style={{ fontFamily: 'Rajdhani, sans-serif' }}>📊 Nhật ký BOD</h2>
+        <p className="text-gray-500 text-sm">Theo dõi task đã duyệt và phần thưởng đã đổi toàn công ty</p>
+      </div>
+
+      <div className="flex p-1 rounded-xl mb-6 max-w-md mx-auto" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
+        {[['tasks', '📋 Task đã duyệt'], ['rewards', '🎁 Phần thưởng đã đổi']].map(([id, lbl]) => (
+          <button key={id} onClick={() => setTab(id as typeof tab)}
+            className="flex-1 py-2 rounded-lg text-sm font-medium transition-all"
+            style={{ background: tab === id ? '#7c3aed' : 'transparent', color: tab === id ? '#fff' : '#6b7280' }}>
+            {lbl}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'tasks' ? (
+        <div className="rounded-xl overflow-hidden" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
+          {approvedTasks.length === 0 ? (
+            <p className="text-gray-500 text-sm text-center py-10">Chưa có task nào được duyệt.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-gray-500 text-left" style={{ borderBottom: '1px solid #1e1e4a' }}>
+                    <th className="py-2.5 px-4">Task</th>
+                    <th className="py-2.5 px-4">Người phụ trách</th>
+                    <th className="py-2.5 px-4">Phòng ban</th>
+                    <th className="py-2.5 px-4">Duyệt bởi</th>
+                    <th className="py-2.5 px-4">Ngày duyệt</th>
+                    <th className="py-2.5 px-4">EXP</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {approvedTasks.map(t => {
+                    const assignee = getUserById(t.assignedTo[0])
+                    const approver = getUserById(t.approvedBy)
+                    const team = TEAMS.find(team => team.id === assignee?.teamId)
+                    return (
+                      <tr key={t.id} style={{ borderBottom: '1px solid #14142a' }}>
+                        <td className="py-2.5 px-4 text-white font-medium">{t.title}</td>
+                        <td className="py-2.5 px-4 text-gray-300">
+                          {t.assignedTo.map(id => getUserById(id)?.name).filter(Boolean).join(', ') || '—'}
+                        </td>
+                        <td className="py-2.5 px-4 text-gray-500 text-xs">{team?.name ?? '—'}</td>
+                        <td className="py-2.5 px-4 text-gray-300">{approver?.name ?? '—'}</td>
+                        <td className="py-2.5 px-4 text-gray-500 text-xs">
+                          {t.approvedAt ? new Date(t.approvedAt).toLocaleString('vi-VN') : '—'}
+                        </td>
+                        <td className="py-2.5 px-4 text-amber-400 font-bold">+{t.expReward}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) : (
+        <RedemptionHistoryPanel users={users} />
+      )}
+    </div>
+  )
+}
+
 
 function RewardsView({ currentUser, redemptions, users }: { currentUser: User; redemptions: { id: string; userId: string; rewardId: string; cost: number }[]; users: User[] }) {
   const myRedemptions = redemptions.filter(r => r.userId === currentUser.id)
@@ -3921,6 +4005,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   const [lastSeenMention, setLastSeenMention] = useState(() => localStorage.getItem('lastSeenMention') || '')
   const [socialTarget, setSocialTarget] = useState<{ channel: ChatChannel; dmUserId?: string } | null>(null)
   const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null)
+  const navItems = currentUser.isDirector ? [...NAV, { id: 'bodlog', icon: '📊', label: 'Log BOD' }] : NAV
 
   const handleNotificationClick = (n: { linkChannel?: string; linkDmUserId?: string; linkTaskId?: string }) => {
     if (n.linkTaskId) {
@@ -3973,6 +4058,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
           navigateTarget={socialTarget} clearNavigateTarget={() => setSocialTarget(null)} />
       )
       case 'profile': return <ProfileView currentUser={currentUser} setCurrentUser={setCurrentUser} tasks={tasks} />
+          case 'bodlog': return currentUser.isDirector ? <BodLogView tasks={tasks} users={users} /> : <DashboardView {...sharedProps} />
     }
   }
 
@@ -4041,7 +4127,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
           <div className="flex items-center gap-2.5">
             <img src={companyLogo} alt="KNI" className="w-8 h-8 rounded-md object-contain md:hidden" />
             <h1 className="text-white font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
-              {NAV.find(n => n.id === view)?.icon} {NAV.find(n => n.id === view)?.label}
+              {navItems.find(n => n.id === view)?.icon} {navItems.find(n => n.id === view)?.label}
             </h1>
           </div>
           <div className="flex items-center gap-4">
@@ -4141,6 +4227,8 @@ export default function App() {
     driveFolderName: t.drive_folder_name ?? undefined,
     submissionFolderName: t.submission_folder_name ?? undefined,
     driveFolderOwnerId: t.drive_folder_owner_id ?? undefined,
+    approvedBy: t.approved_by ?? undefined,
+    approvedAt: t.approved_at ?? undefined,
   }
 }
 function mapDbCollaboration(c: any): Collaboration {
