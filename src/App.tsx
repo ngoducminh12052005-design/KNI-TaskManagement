@@ -6570,6 +6570,11 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
 }
 
 const handleApprove = async (task: Task) => {
+  // Chỉ bước DUYỆT HOÀN THÀNH sau khi nhân viên đã nộp task mới chạy đoạn này.
+  // "Duyệt nhận task" của phối hợp phòng ban dùng handleApproveCrossDept()
+  // và KHÔNG cộng EXP / KHÔNG báo BOD.
+  if (task.status === 'completed') return
+
   const approvedAt = new Date().toISOString()
 
   const { error: approveError } = await supabase.from('tasks').update({
@@ -6583,30 +6588,9 @@ const handleApprove = async (task: Task) => {
     return
   }
 
-  // ==================== THÔNG BÁO CHO BOD ====================
-  // Bất kỳ quản lý nào duyệt task của nhân viên hoặc task tự tạo
-  // đều gửi thông báo đến tất cả thành viên BOD (is_director = true).
-  const bodUsers = users.filter(u => u.isDirector && u.id !== currentUser.id)
-  const taskOwnerIds = Array.from(new Set([
-    ...task.assignedTo,
-    task.createdBy,
-  ])).filter(Boolean)
-
-  const taskOwnerNames = taskOwnerIds
-    .map(uid => users.find(u => u.id === uid)?.name)
-    .filter(Boolean)
-    .join(', ')
-
-  const taskTypeLabel = task.selfCreated ? 'task tự tạo' : 'task được giao'
-  const departmentName = TEAMS.find(t => t.id === currentUser.teamId)?.name ?? currentUser.department
-
-  for (const bod of bodUsers) {
-    await supabase.from('notifications').insert({
-      message: `📢 ${currentUser.name} (${departmentName}) đã duyệt ${taskTypeLabel}: "${task.title}"${taskOwnerNames ? ` — Nhân sự: ${taskOwnerNames}` : ''}`,
-      target_user_id: bod.id,
-      link_task_id: task.id,
-    })
-  }
+  // ==================== CỘNG EXP ====================
+  // Đây là lần DUYỆT CUỐI sau khi task đã làm xong/nộp bài.
+  // Bao gồm cả task thường, task tự tạo và task phối hợp liên phòng ban.
 
   // Mỗi người Phụ trách nhận đủ 100% EXP (không chia, dù có nhiều người)
   for (const uid of task.assignedTo) {
@@ -6632,6 +6616,55 @@ const handleApprove = async (task: Task) => {
       await supabase.from('profiles').update({ exp: supporter.exp + supportExp }).eq('id', supporter.id)
     }
   }
+
+  // ==================== THÔNG BÁO BOD ====================
+  // QUAN TRỌNG: chỉ gửi sau khi bước duyệt + cộng EXP đã chạy.
+  // Vì vậy "Duyệt nhận task" liên phòng ban sẽ KHÔNG vào đây.
+  // Còn khi nhân viên phòng ban phối hợp làm xong -> Nộp ->
+  // quản lý phòng ban nhận việc bấm "✓ Duyệt" -> vào đây -> BOD nhận thông báo.
+  //
+  // Query trực tiếp profiles thay vì lấy users trong state để chắc chắn
+  // mọi BOD (is_director = true) đều nhận được, kể cả khi state users chưa refresh.
+  const { data: bodProfiles, error: bodQueryError } = await supabase
+    .from('profiles')
+    .select('id, name, is_director')
+    .eq('is_director', true)
+
+  if (!bodQueryError && bodProfiles) {
+    const taskOwnerIds = Array.from(new Set([
+      ...task.assignedTo,
+      task.createdBy,
+    ])).filter(Boolean)
+
+    const taskOwnerNames = taskOwnerIds
+      .map(uid => users.find(u => u.id === uid)?.name)
+      .filter(Boolean)
+      .join(', ')
+
+    const departmentName = TEAMS.find(t => t.id === currentUser.teamId)?.name ?? currentUser.department
+    const isCrossDeptTask = !!task.targetTeamId
+    const taskTypeLabel = task.selfCreated
+      ? 'task tự tạo'
+      : isCrossDeptTask
+        ? 'task phối hợp phòng ban'
+        : 'task được giao'
+
+    const notificationMessage =
+      `📢 ${currentUser.name} (${departmentName}) đã duyệt ${taskTypeLabel}: "${task.title}"` +
+      `${taskOwnerNames ? ` — Nhân sự: ${taskOwnerNames}` : ''}` +
+      ` — Đã hoàn thành và cộng ${task.expReward} EXP`
+
+    for (const bod of bodProfiles) {
+      // Không cần tự gửi cho chính mình nếu người duyệt cũng là BOD.
+      if (bod.id === currentUser.id) continue
+
+      await supabase.from('notifications').insert({
+        message: notificationMessage,
+        target_user_id: bod.id,
+        link_task_id: task.id,
+      })
+    }
+  }
 }
 
 // const handleReject = async (task: Task) => {
@@ -6650,6 +6683,8 @@ const handleReject = async (task: Task) => {
 }
 
 const handleApproveCrossDept = async (task: Task) => {
+  // Đây CHỈ là bước quản lý phòng ban đích xác nhận NHẬN việc phối hợp.
+  // Không hoàn thành task, không cộng EXP và không báo BOD.
   await supabase.from('tasks').update({ cross_dept_pending: false }).eq('id', task.id)
 }
 
