@@ -4467,7 +4467,7 @@
 //     />
 //   )
 // }
-import { useState, useRef, useEffect, createContext, useContext } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { supabase } from './supabaseClient'
 import companyLogo from './assets/company-logo.png'
 import * as XLSX from 'xlsx'
@@ -5185,46 +5185,6 @@ const TEAMS = [
 ]
 
 
-
-// ==================== THEME (Sáng / Tối) ====================
-type Theme = 'dark' | 'light'
-type ThemeColors = {
-  bg: string; bgAlt: string; card: string; cardAlt: string
-  border: string; borderAlt: string; input: string; inputBorder: string
-  text: string; textMuted: string; textFaint: string
-}
-const THEMES: Record<Theme, ThemeColors> = {
-  dark: {
-    bg: '#080812', bgAlt: '#06060f', card: '#0e0e24', cardAlt: '#12122a',
-    border: '#1e1e4a', borderAlt: '#1a1a3a', input: '#14143a', inputBorder: '#2a2a5a',
-    text: '#ffffff', textMuted: '#9ca3af', textFaint: '#6b7280',
-  },
-  light: {
-    bg: '#f4f5fa', bgAlt: '#ffffff', card: '#ffffff', cardAlt: '#f0f1f7',
-    border: '#e3e5f0', borderAlt: '#e8eaf2', input: '#f4f5fa', inputBorder: '#d7d9e8',
-    text: '#111827', textMuted: '#4b5563', textFaint: '#6b7280',
-  },
-}
-const ThemeContext = createContext<{ theme: Theme; colors: ThemeColors; toggleTheme: () => void }>({
-  theme: 'dark', colors: THEMES.dark, toggleTheme: () => {},
-})
-const useTheme = () => useContext(ThemeContext)
-
-function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem('kni-theme') as Theme) || 'dark')
-  const toggleTheme = () => {
-    setTheme(prev => {
-      const next: Theme = prev === 'dark' ? 'light' : 'dark'
-      localStorage.setItem('kni-theme', next)
-      return next
-    })
-  }
-  return (
-    <ThemeContext.Provider value={{ theme, colors: THEMES[theme], toggleTheme }}>
-      {children}
-    </ThemeContext.Provider>
-  )
-}
 
 const CATEGORY_COLORS: Record<string, string> = {
   development: '#8b5cf6', design: '#06b6d4', marketing: '#f59e0b',
@@ -8540,7 +8500,6 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   notifications: { id: string; message: string; createdAt: string }[]
   collaborations: Collaboration[]
 }) {
-  const { colors, theme, toggleTheme } = useTheme()
   const [view, setView] = useState<View>('dashboard')
   const { level } = getExpProgress(currentUser.exp)
   const [showMentions, setShowMentions] = useState(false)
@@ -8605,10 +8564,10 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   }
 
   return (
-    <div className="flex flex-col md:flex-row h-screen overflow-hidden overflow-x-hidden" style={{ background: colors.bg, fontFamily: 'Inter, sans-serif' }}>
+    <div className="flex flex-col md:flex-row h-screen overflow-hidden overflow-x-hidden" style={{ background: '#080812', fontFamily: 'Inter, sans-serif' }}>
       {/* Sidebar */}
       <div className="hidden md:flex w-[72px] flex-col items-center py-4 gap-0.5 flex-shrink-0"
-        style={{ background: colors.bgAlt, borderRight: `1px solid ${colors.borderAlt}` }}>
+        style={{ background: '#06060f', borderRight: '1px solid #1a1a3a' }}>
         <div className="mb-4">
           <img src={companyLogo} alt="KNI" className="w-10 h-10 rounded-lg object-contain" />
         </div>
@@ -8643,7 +8602,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
 
         {/* Bottom nav — chỉ hiện trên mobile */}
       <div className="flex md:hidden items-center justify-around py-2 flex-shrink-0"
-        style={{ background: colors.bgAlt, borderTop: `1px solid ${colors.borderAlt}` }}>
+        style={{ background: '#06060f', borderTop: '1px solid #1a1a3a' }}>
         {navItems.map(item => (
           <button key={item.id}
             onClick={() => {
@@ -8665,18 +8624,14 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden order-first md:order-none">
         {/* Topbar */}
-        <div className="h-16 flex items-center justify-between px-5 flex-shrink-0" style={{ borderBottom: `1px solid ${colors.borderAlt}` }}>
+        <div className="h-16 flex items-center justify-between px-5 flex-shrink-0" style={{ borderBottom: '1px solid #1a1a3a' }}>
           <div className="flex items-center gap-2.5">
             <img src={companyLogo} alt="KNI" className="w-8 h-8 rounded-md object-contain md:hidden" />
-            <h1 className="font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif', color: colors.text }}>
+            <h1 className="text-white font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
               {navItems.find(n => n.id === view)?.icon} {navItems.find(n => n.id === view)?.label}
             </h1>
           </div>
           <div className="flex items-center gap-4">
-            <button onClick={toggleTheme} title={theme === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'}
-              className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-[#1a1a40] text-lg">
-              {theme === 'dark' ? '☀️' : '🌙'}
-            </button>
             <div className="flex items-center gap-2.5">
               <span className="text-amber-400 text-xs font-bold" style={{ fontFamily: 'JetBrains Mono, monospace' }}>Lv.{level}</span>
               <div className="w-28"><ExpBarMini exp={currentUser.exp} /></div>
@@ -9007,19 +8962,17 @@ useEffect(() => {
   if (!session || !currentProfile) return <LoginScreen onLoggedIn={() => {}} />
 
   return (
-    <ThemeProvider>
-      <AppShell
-        currentUser={currentProfile}
-        setCurrentUser={setCurrentProfile}
-        allUsers={allUsers}
-        tasks={tasks}
-        setTasks={setTasks}
-        messages={messages}
-        setMessages={setMessages}
-        redemptions={redemptions}
-        notifications={notifications}
-        collaborations={collaborations}
-      />
-    </ThemeProvider>
+    <AppShell
+      currentUser={currentProfile}
+      setCurrentUser={setCurrentProfile}
+      allUsers={allUsers}
+      tasks={tasks}
+      setTasks={setTasks}
+      messages={messages}
+      setMessages={setMessages}
+      redemptions={redemptions}
+      notifications={notifications}
+      collaborations={collaborations}
+    />
   )
 }
