@@ -4848,37 +4848,41 @@ function AvatarCreator({ value, onChange }: { value: AvatarConfig; onChange: (a:
         </div>
 
         {/* Controls */}
-        <div className="flex-1 space-y-3.5 min-w-0">
+        <div className="flex-1 space-y-2.5 min-w-0">
           {tab === 'custom' ? (
             <>
               {/* Skin */}
-              <div>
-                <p className="text-gray-500 text-[10px] uppercase tracking-widest mb-1.5">Màu da</p>
-                <div className="flex gap-2">
+              <div className="p-3 rounded-xl" style={{ background: '#0a0a1a', border: '1px solid #1a1a3a' }}>
+                <p className="text-gray-400 text-[11px] font-semibold tracking-wide mb-2 flex items-center gap-1.5">
+                  <span>🎨</span> Màu da
+                </p>
+                <div className="flex gap-2.5">
                   {SKIN_TONES.map(c => (
                     <button key={c} onClick={() => update({ skinTone: c })}
-                      className="w-7 h-7 rounded-full transition-all hover:scale-110"
+                      className="w-8 h-8 rounded-full transition-all hover:scale-110 flex items-center justify-center"
                       style={{
                         background: c,
-                        outline: value.skinTone === c ? `3px solid ${c}` : '3px solid transparent',
-                        outlineOffset: '2px',
-                        border: value.skinTone === c ? '2px solid white' : '2px solid transparent',
-                      }} />
+                        boxShadow: value.skinTone === c ? `0 0 0 2.5px #0a0a1a, 0 0 0 4.5px #7c3aed` : '0 0 0 2px #0a0a1a, 0 0 0 3px #262650',
+                      }}>
+                      {value.skinTone === c && <span className="text-[11px]" style={{ color: darkenColor(c, 0.5) }}>✓</span>}
+                    </button>
                   ))}
                 </div>
               </div>
 
               {/* Hair style */}
-              <div>
-                <p className="text-gray-500 text-[10px] uppercase tracking-widest mb-1.5">Kiểu tóc</p>
-                <div className="flex flex-wrap gap-1">
+              <div className="p-3 rounded-xl" style={{ background: '#0a0a1a', border: '1px solid #1a1a3a' }}>
+                <p className="text-gray-400 text-[11px] font-semibold tracking-wide mb-2 flex items-center gap-1.5">
+                  <span>💇</span> Kiểu tóc
+                </p>
+                <div className="flex flex-wrap gap-1.5">
                   {HAIR_STYLE_LABELS.map((lbl, i) => (
                     <button key={i} onClick={() => update({ hairStyle: i })}
-                      className="px-2.5 py-1 rounded-lg text-xs transition-all"
+                      className="px-3 py-1.5 rounded-full text-xs font-medium transition-all"
                       style={{
-                        background: value.hairStyle === i ? '#7c3aed' : '#14143a',
-                        color: value.hairStyle === i ? '#fff' : '#6b7280',
-                        border: `1px solid ${value.hairStyle === i ? '#7c3aed' : '#1e1e4a'}`,
+                        background: value.hairStyle === i ? 'linear-gradient(135deg,#7c3aed,#a78bfa)' : '#14143a',
+                        color: value.hairStyle === i ? '#fff' : '#8b8ba7',
+                        boxShadow: value.hairStyle === i ? '0 2px 8px #7c3aed50' : 'none',
                       }}>
                       {lbl}
                     </button>
@@ -4887,49 +4891,52 @@ function AvatarCreator({ value, onChange }: { value: AvatarConfig; onChange: (a:
               </div>
 
               {/* Hair color */}
-              <div>
-                <p className="text-gray-500 text-[10px] uppercase tracking-widest mb-1.5">Màu tóc</p>
-                <div className="flex flex-wrap gap-1.5">
+              <div className="p-3 rounded-xl" style={{ background: '#0a0a1a', border: '1px solid #1a1a3a' }}>
+                <p className="text-gray-400 text-[11px] font-semibold tracking-wide mb-2 flex items-center gap-1.5">
+                  <span>🖌️</span> Màu tóc
+                </p>
+                <div className="flex flex-wrap gap-2">
                   {HAIR_COLORS.map(c => (
                     <button key={c} onClick={() => update({ hairColor: c })}
-                      className="w-5 h-5 rounded-full transition-all hover:scale-110"
+                      className="w-6 h-6 rounded-full transition-all hover:scale-110"
                       style={{
                         background: c,
-                        border: `2px solid ${value.hairColor === c ? 'white' : '#1e1e4a'}`,
-                        boxShadow: value.hairColor === c ? `0 0 6px ${c}` : 'none',
+                        boxShadow: value.hairColor === c ? `0 0 0 2px #0a0a1a, 0 0 0 4px ${c}` : '0 0 0 2px #0a0a1a, 0 0 0 3px #262650',
                       }} />
                   ))}
                 </div>
               </div>
 
               {/* Outfit */}
-              <div>
-                <p className="text-gray-500 text-[10px] uppercase tracking-widest mb-1.5">Trang phục</p>
-                <div className="flex flex-wrap gap-1.5">
+              <div className="p-3 rounded-xl" style={{ background: '#0a0a1a', border: '1px solid #1a1a3a' }}>
+                <p className="text-gray-400 text-[11px] font-semibold tracking-wide mb-2 flex items-center gap-1.5">
+                  <span>👕</span> Trang phục
+                </p>
+                <div className="flex flex-wrap gap-2">
                   {OUTFIT_COLORS.map(c => (
                     <button key={c} onClick={() => update({ outfitColor: c })}
-                      className="w-5 h-5 rounded-full transition-all hover:scale-110"
+                      className="w-6 h-6 rounded-full transition-all hover:scale-110"
                       style={{
                         background: c,
-                        border: `2px solid ${value.outfitColor === c ? 'white' : '#1e1e4a'}`,
-                        boxShadow: value.outfitColor === c ? `0 0 6px ${c}` : 'none',
+                        boxShadow: value.outfitColor === c ? `0 0 0 2px #0a0a1a, 0 0 0 4px ${c}` : '0 0 0 2px #0a0a1a, 0 0 0 3px #262650',
                       }} />
                   ))}
                 </div>
               </div>
 
               {/* Accessory */}
-              <div>
-                <p className="text-gray-500 text-[10px] uppercase tracking-widest mb-1.5">Phụ kiện</p>
-                <div className="flex flex-wrap gap-1">
+              <div className="p-3 rounded-xl" style={{ background: '#0a0a1a', border: '1px solid #1a1a3a' }}>
+                <p className="text-gray-400 text-[11px] font-semibold tracking-wide mb-2 flex items-center gap-1.5">
+                  <span>✨</span> Phụ kiện
+                </p>
+                <div className="flex flex-wrap gap-1.5">
                   {ACCESSORY_LABELS.map((lbl, i) => (
                     <button key={i} onClick={() => update({ accessory: i })}
-                      className="px-2 py-1 rounded-lg text-xs transition-all"
+                      className="px-3 py-1.5 rounded-full text-xs font-medium transition-all"
                       style={{
-                        background: value.accessory === i ? '#f59e0b' : '#14143a',
-                        color: value.accessory === i ? '#1a0f00' : '#6b7280',
-                        border: `1px solid ${value.accessory === i ? '#f59e0b' : '#1e1e4a'}`,
-                        fontWeight: value.accessory === i ? '600' : '400',
+                        background: value.accessory === i ? 'linear-gradient(135deg,#f59e0b,#fbbf24)' : '#14143a',
+                        color: value.accessory === i ? '#1a0f00' : '#8b8ba7',
+                        boxShadow: value.accessory === i ? '0 2px 8px #f59e0b50' : 'none',
                       }}>
                       {lbl}
                     </button>
