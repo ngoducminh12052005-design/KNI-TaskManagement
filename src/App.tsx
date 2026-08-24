@@ -5897,8 +5897,16 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
     setSaving(false)
     if (updateError) { setError(updateError.message); return }
 
-    const recipientIds = Array.from(new Set([task.createdBy, ...task.projectManager]))
-      .filter(uid => uid && uid !== currentUser.id)
+    const recipientIds = new Set(
+      Array.from(new Set([task.createdBy, ...task.projectManager]))
+        .filter(uid => uid && uid !== currentUser.id)
+    )
+
+    if (task.selfCreated) {
+      users
+        .filter(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)
+        .forEach(mgr => recipientIds.add(mgr.id))
+    }
 
     for (const uid of recipientIds) {
       await supabase.from('notifications').insert({
