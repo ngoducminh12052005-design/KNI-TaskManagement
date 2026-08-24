@@ -6608,6 +6608,17 @@ const handleApprove = async (task: Task) => {
     })
   }
 
+  // Báo cho người phụ trách + PM + hỗ trợ rằng task đã được duyệt
+  const notifyIds = Array.from(new Set([...task.assignedTo, ...task.projectManager, ...task.supporters]))
+    .filter(uid => uid && uid !== currentUser.id)
+  for (const uid of notifyIds) {
+    await supabase.from('notifications').insert({
+      message: `✅ ${currentUser.name} đã duyệt task: "${task.title}" — bạn nhận được +${task.expReward} EXP`,
+      target_user_id: uid,
+      link_task_id: task.id,
+    })
+  }
+
   // Mỗi người Phụ trách nhận đủ 100% EXP (không chia, dù có nhiều người)
   for (const uid of task.assignedTo) {
     const assignee = users.find(u => u.id === uid)
@@ -6766,6 +6777,16 @@ const handleSaveTask = async () => {
             link_task_id: newTaskId,
           })
         }
+      }
+    } else if (creatingForSelf) {
+      // Nhân viên (hoặc quản lý) tự tạo task cho mình -> báo cho quản lý cùng team
+      const teamManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)
+      for (const mgr of teamManagers) {
+        await supabase.from('notifications').insert({
+          message: `🎯 ${currentUser.name} vừa tự tạo task: ${form.title}`,
+          target_user_id: mgr.id,
+          link_task_id: newTaskId,
+        })
       }
     }
   }
