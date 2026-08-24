@@ -4698,73 +4698,75 @@ function CharacterSVG({ config, w = 100, h = 120, vb = '0 0 100 120' }: {
 
   return (
     <svg viewBox={vb} width={w} height={h} style={{ display: 'block', overflow: 'visible' }}>
-      {/* Hair (below head) */}
-      {renderHair()}
+      {/* ===== ĐẦU (scale to lên để ra tỉ lệ chibi dễ thương, đầu to - thân nhỏ) ===== */}
+      <g transform="translate(-7.5,-4.8) scale(1.15)">
+        {/* Hair (below head) */}
+        {renderHair()}
 
-      {/* Hat (below head) */}
-      {accessory === 3 && renderAccessory()}
+        {/* Hat (below head) */}
+        {accessory === 3 && renderAccessory()}
 
-      {/* Ears */}
-      <ellipse cx="29" cy="34" rx="4.5" ry="5.5" fill={skinTone} />
-      <ellipse cx="71" cy="34" rx="4.5" ry="5.5" fill={skinTone} />
+        {/* Ears */}
+        <ellipse cx="29" cy="34" rx="4.5" ry="5.5" fill={skinTone} />
+        <ellipse cx="71" cy="34" rx="4.5" ry="5.5" fill={skinTone} />
 
-      {/* Head */}
-      <ellipse cx="50" cy="32" rx="21" ry="22" fill={skinTone} />
+        {/* Head */}
+        <ellipse cx="50" cy="32" rx="21" ry="22" fill={skinTone} />
 
-      {/* Cheek blush */}
-      <ellipse cx="37" cy="40" rx="6" ry="4" fill="#ff7777" opacity="0.16" />
-      <ellipse cx="63" cy="40" rx="6" ry="4" fill="#ff7777" opacity="0.16" />
+        {/* Cheek blush - to và hồng hơn cho cute */}
+        <ellipse cx="36" cy="41" rx="7" ry="4.5" fill="#ff8899" opacity="0.35" />
+        <ellipse cx="64" cy="41" rx="7" ry="4.5" fill="#ff8899" opacity="0.35" />
 
-      {/* Eyebrows */}
-      <path d="M38,24 Q43,22 47,25" stroke={browColor} strokeWidth="1.5" fill="none" strokeLinecap="round" />
-      <path d="M53,25 Q57,22 62,24" stroke={browColor} strokeWidth="1.5" fill="none" strokeLinecap="round" />
+        {/* Eyebrows */}
+        <path d="M38,23 Q43,21 47,24" stroke={browColor} strokeWidth="1.5" fill="none" strokeLinecap="round" />
+        <path d="M53,24 Q57,21 62,23" stroke={browColor} strokeWidth="1.5" fill="none" strokeLinecap="round" />
 
-      {/* Eyes - sclera */}
-      <ellipse cx="43" cy="30" rx="3.5" ry="3.8" fill="white" />
-      <ellipse cx="57" cy="30" rx="3.5" ry="3.8" fill="white" />
-      {/* Pupils */}
-      <circle cx="43.5" cy="30.5" r="2.2" fill="#1a1a2e" />
-      <circle cx="57.5" cy="30.5" r="2.2" fill="#1a1a2e" />
-      {/* Eye shine */}
-      <circle cx="44.3" cy="29.4" r="0.9" fill="white" />
-      <circle cx="58.3" cy="29.4" r="0.9" fill="white" />
+        {/* Eyes - to tròn kiểu anime cute */}
+        <ellipse cx="42" cy="31" rx="4.8" ry="5.4" fill="white" />
+        <ellipse cx="58" cy="31" rx="4.8" ry="5.4" fill="white" />
+        <circle cx="42.6" cy="32.2" r="3.1" fill="#1a1a2e" />
+        <circle cx="58.6" cy="32.2" r="3.1" fill="#1a1a2e" />
+        <circle cx="43.9" cy="30.2" r="1.3" fill="white" />
+        <circle cx="59.9" cy="30.2" r="1.3" fill="white" />
+        <circle cx="41.3" cy="33.3" r="0.6" fill="white" opacity="0.85" />
+        <circle cx="57.3" cy="33.3" r="0.6" fill="white" opacity="0.85" />
 
-      {/* Nose */}
-      <path d="M48.5,37 Q50,40 51.5,37" stroke={skinDark} strokeWidth="1.2" fill="none" strokeLinecap="round" />
+        {/* Nose - chấm nhỏ xíu cute */}
+        <circle cx="50" cy="38" r="0.9" fill={skinDark} opacity="0.5" />
 
-      {/* Mouth - smile */}
-      <path d="M44,44 Q50,49 56,44" stroke="#c07070" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+        {/* Mouth - cười nhỏ cute */}
+        <path d="M46,43 Q50,46.5 54,43" stroke="#c07070" strokeWidth="1.6" fill="none" strokeLinecap="round" />
 
-      {/* Glasses/Headband (over face) */}
-      {(accessory === 1 || accessory === 2 || accessory === 4) && renderAccessory()}
+        {/* Glasses/Headband (over face) */}
+        {(accessory === 1 || accessory === 2 || accessory === 4) && renderAccessory()}
+      </g>
 
       {/* Neck */}
       <rect x="44" y="53" width="12" height="10" rx="2" fill={skinTone} />
 
-      {/* Body (shirt) */}
-      <rect x="26" y="62" width="48" height="33" rx="8" fill={outfitColor} />
-      {/* Subtle highlight on shirt */}
-      <rect x="26" y="62" width="48" height="6" rx="8" fill="rgba(255,255,255,0.06)" />
+      {/* Body - bo tròn mềm như thú bông */}
+      <rect x="27" y="62" width="46" height="30" rx="16" fill={outfitColor} />
+      <rect x="27" y="62" width="46" height="6" rx="16" fill="rgba(255,255,255,0.08)" />
       {/* Collar */}
-      <path d="M45,62 L50,70 L55,62 Z" fill={darkenColor(outfitColor, 0.1)} />
+      <path d="M45,62 L50,69 L55,62 Z" fill={darkenColor(outfitColor, 0.1)} />
 
-      {/* Left arm / sleeve */}
-      <path d="M27,68 Q13,76 10,89" stroke={outfitColor} strokeWidth="12" strokeLinecap="round" fill="none" />
-      {/* Left hand */}
-      <circle cx="10" cy="89" r="5.5" fill={skinTone} />
+      {/* Left arm - ngắn mập cute */}
+      <path d="M29,68 Q17,76 13,88" stroke={outfitColor} strokeWidth="13" strokeLinecap="round" fill="none" />
+      <circle cx="13" cy="88" r="6.5" fill={skinTone} />
 
-      {/* Right arm / sleeve */}
-      <path d="M73,68 Q87,76 90,89" stroke={outfitColor} strokeWidth="12" strokeLinecap="round" fill="none" />
-      {/* Right hand */}
-      <circle cx="90" cy="89" r="5.5" fill={skinTone} />
+      {/* Right arm */}
+      <path d="M71,68 Q83,76 87,88" stroke={outfitColor} strokeWidth="13" strokeLinecap="round" fill="none" />
+      <circle cx="87" cy="88" r="6.5" fill={skinTone} />
 
-      {/* Pants */}
-      <rect x="31" y="93" width="16" height="23" rx="6" fill={pants} />
-      <rect x="53" y="93" width="16" height="23" rx="6" fill={pants} />
+      {/* Pants - chân ngắn kiểu chibi */}
+      <rect x="32" y="90" width="15" height="17" rx="7" fill={pants} />
+      <rect x="53" y="90" width="15" height="17" rx="7" fill={pants} />
 
-      {/* Shoes */}
-      <ellipse cx="39" cy="117" rx="10" ry="5" fill="#12121e" />
-      <ellipse cx="61" cy="117" rx="10" ry="5" fill="#12121e" />
+      {/* Shoes - to tròn cute, có chút highlight */}
+      <ellipse cx="39" cy="110" rx="11" ry="6" fill="#22222e" />
+      <ellipse cx="61" cy="110" rx="11" ry="6" fill="#22222e" />
+      <ellipse cx="36" cy="108.3" rx="3" ry="1.4" fill="rgba(255,255,255,0.15)" />
+      <ellipse cx="58" cy="108.3" rx="3" ry="1.4" fill="rgba(255,255,255,0.15)" />
     </svg>
   )
 }
@@ -5411,7 +5413,15 @@ onLoggedIn()
 
   return (
     <div className="min-h-screen flex items-center justify-center relative overflow-hidden"
-      style={{ background: 'radial-gradient(ellipse at 20% 50%, #1a0a3a 0%, #080812 50%, #0a1a0a 100%)', fontFamily: 'Inter, sans-serif' }}>
+      style={{
+        background: `
+          radial-gradient(circle at 18% 20%, #3b1e8a30 0%, transparent 45%),
+          radial-gradient(circle at 85% 15%, #f59e0b18 0%, transparent 40%),
+          radial-gradient(circle at 75% 85%, #0891b230 0%, transparent 45%),
+          linear-gradient(160deg, #0a0a16 0%, #050509 100%)
+        `,
+        fontFamily: 'Inter, sans-serif',
+      }}>
       {[...Array(20)].map((_, i) => (
         <div key={i} className="absolute rounded-full pointer-events-none"
           style={{
