@@ -6666,6 +6666,17 @@ const handleReject = async (task: Task) => {
   await supabase.from('tasks').update({
     status: 'in-progress', submission_file_url: null, submission_note: null, rejected_reason: reason,
   }).eq('id', task.id)
+
+  const notifyIds = Array.from(new Set([...task.assignedTo, ...task.supporters]))
+    .filter(uid => uid && uid !== currentUser.id)
+
+  for (const uid of notifyIds) {
+    await supabase.from('notifications').insert({
+      message: `❌ ${currentUser.name} đã từ chối task: "${task.title}"${reason ? ` — Lý do: ${reason}` : ''}`,
+      target_user_id: uid,
+      link_task_id: task.id,
+    })
+  }
 }
 
 const handleApproveCrossDept = async (task: Task) => {
