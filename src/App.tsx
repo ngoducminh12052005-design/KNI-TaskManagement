@@ -5231,6 +5231,40 @@ const STATUS_CONFIG = {
   completed: { label: 'Hoàn thành', color: '#10b981' },
 }
 
+// ==================== THEME ====================
+type ThemeMode = 'dark' | 'light'
+
+const THEMES: Record<ThemeMode, {
+  bgApp: string; bgSidebar: string; bgPanel: string; bgCard: string; bgCardAlt: string
+  border: string; borderStrong: string
+  textPrimary: string; textSecondary: string; textMuted: string; textFaint: string
+  inputBg: string
+}> = {
+  dark: {
+    bgApp: '#080812', bgSidebar: '#06060f', bgPanel: '#0e0e24', bgCard: '#12122a', bgCardAlt: '#0a0a1a',
+    border: '#1e1e4a', borderStrong: '#2a2a5a',
+    textPrimary: '#f1f5f9', textSecondary: '#9ca3af', textMuted: '#6b7280', textFaint: '#374151',
+    inputBg: '#14143a',
+  },
+  light: {
+    bgApp: '#f4f5fb', bgSidebar: '#ffffff', bgPanel: '#ffffff', bgCard: '#f7f8fc', bgCardAlt: '#eef0f9',
+    border: '#e2e4f0', borderStrong: '#cdd0e8',
+    textPrimary: '#1a1a2e', textSecondary: '#4b5568', textMuted: '#8b8ba0', textFaint: '#b8bad0',
+    inputBg: '#ffffff',
+  },
+}
+
+function useThemeVars(mode: ThemeMode) {
+  const t = THEMES[mode]
+  return {
+    '--bg-app': t.bgApp, '--bg-sidebar': t.bgSidebar, '--bg-panel': t.bgPanel,
+    '--bg-card': t.bgCard, '--bg-card-alt': t.bgCardAlt,
+    '--border': t.border, '--border-strong': t.borderStrong,
+    '--text-primary': t.textPrimary, '--text-secondary': t.textSecondary,
+    '--text-muted': t.textMuted, '--text-faint': t.textFaint,
+    '--input-bg': t.inputBg,
+  } as React.CSSProperties
+}
 // ==================== LOGIN SCREEN ====================
 
 // function LoginScreen({ onLogin }: { onLogin: (u: User) => void }) {
@@ -7478,15 +7512,15 @@ function LeaderboardView({ users, tasks }: { users: User[]; tasks: Task[] }) {
   return (
     <div className="p-6 max-w-3xl mx-auto">
       <div className="text-center mb-6">
-        <h2 className="text-white text-3xl font-black mb-1" style={{ fontFamily: 'Rajdhani, sans-serif' }}>🏆 BẢNG XẾP HẠNG</h2>
-        <p className="text-gray-500 text-sm">Cạnh tranh lành mạnh — phát triển cùng nhau</p>
+        <h2 className="text-3xl font-black mb-1" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>🏆 BẢNG XẾP HẠNG</h2>
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Cạnh tranh lành mạnh — phát triển cùng nhau</p>
       </div>
 
-      <div className="flex p-1 rounded-xl mb-6" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
+      <div className="flex p-1 rounded-xl mb-6" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
         {[['individual', '👤 Cá nhân'], ['team', '👥 Đội nhóm']].map(([id, lbl]) => (
           <button key={id} onClick={() => setTab(id as typeof tab)}
             className="flex-1 py-2 rounded-lg text-sm font-medium transition-all"
-            style={{ background: tab === id ? '#7c3aed' : 'transparent', color: tab === id ? '#fff' : '#6b7280' }}>
+            style={{ background: tab === id ? '#7c3aed' : 'transparent', color: tab === id ? '#fff' : 'var(--text-muted)' }}>
             {lbl}
           </button>
         ))}
@@ -7499,27 +7533,27 @@ function LeaderboardView({ users, tasks }: { users: User[]; tasks: Task[] }) {
             return (
               <div key={user.id} className="rounded-xl p-4 flex items-center gap-3 transition-all hover:translate-x-1"
                 style={{
-                  background: i < 3 ? `linear-gradient(135deg, ${user.avatar.outfitColor}10, #0e0e24)` : '#0e0e24',
-                  border: `1px solid ${i < 3 ? user.avatar.outfitColor + '25' : '#1e1e4a'}`,
+                  background: i < 3 ? `linear-gradient(135deg, ${user.avatar.outfitColor}10, var(--bg-panel))` : 'var(--bg-panel)',
+                  border: `1px solid ${i < 3 ? user.avatar.outfitColor + '25' : 'var(--border)'}`,
                 }}>
                 <div className="w-8 text-center">
                   {i < 3 ? <span className="text-xl">{medals[i]}</span>
-                    : <span className="text-gray-600 font-bold text-sm font-mono">#{i + 1}</span>}
+                    : <span className="font-bold text-sm font-mono" style={{ color: 'var(--text-muted)' }}>#{i + 1}</span>}
                 </div>
                 <CharAvatar user={user} size={44} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-0.5">
-                    <span className="text-white font-semibold text-sm">{user.name}</span>
+                    <span className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{user.name}</span>
                     <LevelBadge exp={user.exp} />
                     {user.role === 'manager' && <span className="text-[10px] px-1.5 rounded-full" style={{ background: '#1e0a3a', color: '#a78bfa' }}>Manager</span>}
                   </div>
                   
-                  <div className="text-gray-500 text-xs mb-1">{TEAMS.find(t => t.id === user.teamId)?.name ?? '—'} · {done} task xong</div>
+                  <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>{TEAMS.find(t => t.id === user.teamId)?.name ?? '—'} · {done} task xong</div>
                   <div className="max-w-[140px]"><ExpBarMini exp={user.exp} /></div>
                 </div>
                 <div className="text-right">
                   <div className="text-amber-400 text-xl font-black" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{user.exp.toLocaleString()}</div>
-                  <div className="text-gray-600 text-xs">EXP</div>
+                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>EXP</div>
                 </div>
               </div>
             )
@@ -7529,31 +7563,31 @@ function LeaderboardView({ users, tasks }: { users: User[]; tasks: Task[] }) {
         <div className="space-y-4">
           {teams.map((team, i) => (
             <div key={team.id} className="rounded-xl p-5"
-              style={{ background: '#0e0e24', border: `1px solid ${i === 0 ? '#f59e0b25' : '#1e1e4a'}` }}>
+              style={{ background: 'var(--bg-panel)', border: `1px solid ${i === 0 ? '#f59e0b25' : 'var(--border)'}` }}>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
                   <span className="text-3xl">{i < 3 ? medals[i] : `#${i + 1}`}</span>
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-xl">{team.emoji}</span>
-                      <span className="text-white font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif' }}>Team {team.name}</span>
+                      <span className="font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>Team {team.name}</span>
                     </div>
-                    <div className="text-gray-500 text-xs">Manager: {team.manager?.name} · {team.memberCount} thành viên</div>
+                    <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Manager: {team.manager?.name} · {team.memberCount} thành viên</div>
                   </div>
                 </div>
                 <div className="text-right">
                   <div className="text-amber-400 text-2xl font-black" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{team.totalExp.toLocaleString()}</div>
-                  <div className="text-gray-600 text-xs">tổng EXP</div>
+                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>tổng EXP</div>
                 </div>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3" style={{ borderTop: '1px solid #1e1e3a' }}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
                 <div className="text-center">
-                  <div className="text-white font-bold" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{team.done}</div>
-                  <div className="text-gray-600 text-xs">Task xong</div>
+                  <div className="font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>{team.done}</div>
+                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Task xong</div>
                 </div>
                 <div className="text-center">
-                  <div className="text-white font-bold" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{Math.round(team.totalExp / team.memberCount)}</div>
-                  <div className="text-gray-600 text-xs">EXP TB/người</div>
+                  <div className="font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>{Math.round(team.totalExp / team.memberCount)}</div>
+                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>EXP TB/người</div>
                 </div>
               </div>
             </div>
@@ -8595,6 +8629,15 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   collaborations: Collaboration[]
 }) {
   const [view, setView] = useState<View>('dashboard')
+  const [theme, setTheme] = useState<ThemeMode>(() => (localStorage.getItem('themeMode') as ThemeMode) || 'dark')
+  const themeVars = useThemeVars(theme)
+  const toggleTheme = () => {
+    setTheme(prev => {
+      const next = prev === 'dark' ? 'light' : 'dark'
+      localStorage.setItem('themeMode', next)
+      return next
+    })
+  }
   const { level } = getExpProgress(currentUser.exp)
   const [showMentions, setShowMentions] = useState(false)
   const [lastSeenMention, setLastSeenMention] = useState(() => localStorage.getItem('lastSeenMention') || '')
@@ -8658,10 +8701,10 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   }
 
   return (
-    <div className="flex flex-col md:flex-row h-screen overflow-hidden overflow-x-hidden" style={{ background: '#080812', fontFamily: 'Inter, sans-serif' }}>
+    <div className="flex flex-col md:flex-row h-screen overflow-hidden overflow-x-hidden" style={{ ...themeVars, background: 'var(--bg-app)', fontFamily: 'Inter, sans-serif' }}>
       {/* Sidebar */}
       <div className="hidden md:flex w-[72px] flex-col items-center py-4 gap-0.5 flex-shrink-0"
-        style={{ background: '#06060f', borderRight: '1px solid #1a1a3a' }}>
+        style={{ background: 'var(--bg-sidebar)', borderRight: '1px solid var(--border)' }}>
         <div className="mb-4">
           <img src={companyLogo} alt="KNI" className="w-10 h-10 rounded-lg object-contain" />
         </div>
@@ -8718,14 +8761,20 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden order-first md:order-none">
         {/* Topbar */}
-        <div className="h-16 flex items-center justify-between px-5 flex-shrink-0" style={{ borderBottom: '1px solid #1a1a3a' }}>
+        <div className="h-16 flex items-center justify-between px-5 flex-shrink-0" style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
           <div className="flex items-center gap-2.5">
             <img src={companyLogo} alt="KNI" className="w-8 h-8 rounded-md object-contain md:hidden" />
-            <h1 className="text-white font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+            <h1 className="font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
               {navItems.find(n => n.id === view)?.icon} {navItems.find(n => n.id === view)?.label}
             </h1>
           </div>
           <div className="flex items-center gap-4">
+            <button onClick={toggleTheme}
+              title={theme === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'}
+              className="w-9 h-9 rounded-lg flex items-center justify-center text-lg transition-all"
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
+              {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
             <div className="flex items-center gap-2.5">
               <span className="text-amber-400 text-xs font-bold" style={{ fontFamily: 'JetBrains Mono, monospace' }}>Lv.{level}</span>
               <div className="w-28"><ExpBarMini exp={currentUser.exp} /></div>
@@ -8752,7 +8801,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto">{renderView()}</div>
+        <div className="flex-1 overflow-y-auto" style={{ background: 'var(--bg-app)' }}>{renderView()}</div>
       </div>
     </div>
   )
