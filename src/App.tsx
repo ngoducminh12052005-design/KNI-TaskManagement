@@ -4525,6 +4525,7 @@ interface Task {
   startDate?: string
   important: boolean
   urgent: boolean
+  isTeamProject?: boolean
   crossDeptPending?: boolean
   crossDeptRejected?: boolean
   crossDeptRejectedReason?: string
@@ -6529,7 +6530,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   const [form, setForm] = useState({
     title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '',
     category: 'development', priority: 'medium' as TaskPriority,
-    important: false, urgent: false,
+    important: false, urgent: false, isTeamProject: false,
     assignedTo: [] as string[], projectManager: [] as string[], supporters: [] as string[],
     driveFolderCreated: false, driveFolderName: '',
   })
@@ -6602,8 +6603,9 @@ const handleApprove = async (task: Task) => {
   }
 
   // ==================== TÍNH TOÁN EXP TRƯỚC (đặt lên đầu để tránh lỗi dùng trước khi khai báo) ====================
-  // teamwork = có từ 2 người Phụ trách trở lên, hoặc có người Hỗ trợ tham gia
-  const isTeamwork = task.assignedTo.length > 1 || task.supporters.length > 0
+  // teamwork = được tick thủ công là "Dự án nhóm", HOẶC có từ 2 người Phụ trách trở lên,
+  // HOẶC có người Hỗ trợ tham gia
+  const isTeamwork = task.isTeamProject || task.assignedTo.length > 1 || task.supporters.length > 0
   // Người hỗ trợ nhận % của EXP gốc
   const supportExp = Math.round(task.expReward * SUPPORTER_EXP_PERCENT)
 
@@ -6753,7 +6755,7 @@ const openEditModal = (task: Task) => {
     title: task.title, description: task.description, expReward: task.expReward,
     startDate: task.startDate || todayStr, dueDate: task.dueDate,
     category: task.category, priority: task.priority,
-    important: task.important, urgent: task.urgent,
+    important: task.important, urgent: task.urgent, isTeamProject: task.isTeamProject ?? false,
     assignedTo: task.assignedTo, projectManager: task.projectManager, supporters: task.supporters,
     driveFolderCreated: task.driveFolderCreated ?? false,
     driveFolderName: task.driveFolderName ?? '',
@@ -6775,7 +6777,7 @@ const handleSaveTask = async () => {
       assigned_to: form.assignedTo, project_manager: form.projectManager, supporters: form.supporters,
       start_date: form.startDate, due_date: form.dueDate,
       category: form.category, priority: form.priority,
-      important: form.important, urgent: form.urgent,
+      important: form.important, urgent: form.urgent, is_team_project: form.isTeamProject,
       drive_folder_created: form.driveFolderCreated,
       drive_folder_name: form.driveFolderCreated ? (form.driveFolderName.trim() || null) : null,
     }).eq('id', editingTask.id)
@@ -6794,7 +6796,7 @@ const handleSaveTask = async () => {
       start_date: form.startDate,
       due_date: form.dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
       category: form.category, priority: form.priority, self_created: creatingForSelf,
-      important: form.important, urgent: form.urgent,
+      important: form.important, urgent: form.urgent, is_team_project: form.isTeamProject,
       cross_dept_pending: isCrossDept,
       target_team_id: targetTeamId,
       drive_folder_created: !creatingForSelf && form.driveFolderCreated,
@@ -6851,7 +6853,7 @@ const handleSaveTask = async () => {
   setShowModal(false)
   setEditingTask(null)
   setSelfMode(false)
-  setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'development', priority: 'medium', important: false, urgent: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '' })
+  setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'development', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '' })
 }
 
   const toggleFormArray = (field: 'assignedTo' | 'projectManager' | 'supporters', uid: string) => {
@@ -7377,6 +7379,20 @@ const handleSaveTask = async () => {
                   </select>
                 </div>
               </div>
+
+              {isManager && (
+                <div className="p-3 rounded-lg" style={{ background: '#0a1a2a', border: '1px solid #1a3a5a' }}>
+                  <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                    <input type="checkbox" checked={form.isTeamProject}
+                      onChange={e => setForm({ ...form, isTeamProject: e.target.checked })}
+                      className="w-4 h-4 rounded accent-cyan-500" />
+                    <span className="text-white text-sm font-medium">👥 Đây là dự án nhóm (Teamwork)</span>
+                  </label>
+                  <p className="text-gray-500 text-[10px] mt-1.5 leading-relaxed ml-6">
+                    💡 Tick vào nếu đây là công việc nhóm — Quản lý dự án (PM) sẽ luôn được nhận EXP dù chỉ giao cho 1 người phụ trách.
+                  </p>
+                </div>
+              )}
 
               {isManager && !selfMode && (
                 <>
