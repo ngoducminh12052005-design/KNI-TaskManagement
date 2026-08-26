@@ -6601,9 +6601,13 @@ const handleApprove = async (task: Task) => {
     return
   }
 
+  // ==================== TÍNH TOÁN EXP TRƯỚC (đặt lên đầu để tránh lỗi dùng trước khi khai báo) ====================
+  // teamwork = có từ 2 người Phụ trách trở lên, hoặc có người Hỗ trợ tham gia
+  const isTeamwork = task.assignedTo.length > 1 || task.supporters.length > 0
+  // Người hỗ trợ nhận % của EXP gốc
+  const supportExp = Math.round(task.expReward * SUPPORTER_EXP_PERCENT)
+
   // ==================== THÔNG BÁO CHO BOD ====================
-  // Bất kỳ quản lý nào duyệt task của nhân viên hoặc task tự tạo
-  // đều gửi thông báo đến tất cả thành viên BOD (is_director = true).
   const bodUsers = users.filter(u => u.isDirector && u.id !== currentUser.id)
   const taskOwnerIds = Array.from(new Set([
     ...task.assignedTo,
@@ -6626,16 +6630,35 @@ const handleApprove = async (task: Task) => {
     })
   }
 
-  // Báo cho người phụ trách + PM + hỗ trợ rằng task đã được duyệt
-  const notifyIds = Array.from(new Set([...task.assignedTo, ...task.projectManager, ...task.supporters]))
+  // Báo cho người phụ trách + hỗ trợ rằng task đã được duyệt (những người này luôn nhận EXP)
+  const rewardedIds = Array.from(new Set([...task.assignedTo, ...task.supporters]))
     .filter(uid => uid && uid !== currentUser.id)
-  for (const uid of notifyIds) {
+  for (const uid of rewardedIds) {
+    const isSupporter = task.supporters.includes(uid) && !task.assignedTo.includes(uid)
+    const earnedExp = isSupporter ? supportExp : task.expReward
     await supabase.from('notifications').insert({
-      message: `✅ ${currentUser.name} đã duyệt task: "${task.title}" — bạn nhận được +${task.expReward} EXP`,
+      message: `✅ ${currentUser.name} đã duyệt task: "${task.title}" — bạn nhận được +${earnedExp} EXP`,
       target_user_id: uid,
       link_task_id: task.id,
     })
   }
+
+  // Báo riêng cho PM: nhân viên làm PM luôn được EXP, task tự tạo luôn được EXP,
+  // quản lý làm PM cho task do người khác giao thì chỉ được khi teamwork
+  const pmIds = task.projectManager.filter(uid => uid && uid !== currentUser.id)
+  for (const uid of pmIds) {
+    const pm = users.find(u => u.id === uid)
+    const eligibleForExp = pm?.role === 'employee' || task.selfCreated || isTeamwork
+    await supabase.from('notifications').insert({
+      message: eligibleForExp
+        ? `✅ ${currentUser.name} đã duyệt task: "${task.title}" — bạn nhận được +${task.expReward} EXP`
+        : `✅ ${currentUser.name} đã duyệt task: "${task.title}" (task cá nhân, không cộng EXP cho PM)`,
+      target_user_id: uid,
+      link_task_id: task.id,
+    })
+  }
+
+  // ==================== CỘNG ĐIỂM ====================
 
   // Mỗi người Phụ trách nhận đủ 100% EXP (không chia, dù có nhiều người)
   for (const uid of task.assignedTo) {
@@ -6645,16 +6668,21 @@ const handleApprove = async (task: Task) => {
     }
   }
 
-  // Mỗi Quản lý dự án (PM) cũng nhận đủ 100% EXP (dù có nhiều người)
+  // Quản lý dự án (PM):
+  // - Nếu PM là "nhân viên" (role employee) -> luôn được nhận EXP bình thường
+  // - Nếu task là tự tạo (selfCreated) -> luôn được nhận EXP bình thường, không bị chặn
+  // - Nếu PM là "quản lý" (role manager) VÀ task do quản lý khác giao (không tự tạo)
+  //   -> chỉ được EXP khi task mang tính teamwork
   for (const uid of task.projectManager) {
     const pm = users.find(u => u.id === uid)
-    if (pm) {
+    if (!pm) continue
+    const eligibleForExp = pm.role === 'employee' || task.selfCreated || isTeamwork
+    if (eligibleForExp) {
       await supabase.from('profiles').update({ exp: pm.exp + task.expReward }).eq('id', pm.id)
     }
   }
 
   // Người hỗ trợ nhận % của EXP gốc
-  const supportExp = Math.round(task.expReward * SUPPORTER_EXP_PERCENT)
   for (const uid of task.supporters) {
     const supporter = users.find(u => u.id === uid)
     if (supporter) {
