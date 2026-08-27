@@ -5094,7 +5094,7 @@ function isMessageVisibleTo(m: Message, user: User, users: User[]): boolean {
 function ExpBarMini({ exp }: { exp: number }) {
   const { progress } = getExpProgress(exp)
   return (
-    <div className="h-1.5 bg-[#1a1a3a] rounded-full overflow-hidden">
+    <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
       <div className="h-full rounded-full" style={{ width: `${progress}%`, background: 'linear-gradient(90deg,#7c3aed,#f59e0b)', transition: 'width 0.6s ease' }} />
     </div>
   )
@@ -7508,6 +7508,8 @@ function LeaderboardView({ users, tasks }: { users: User[]; tasks: Task[] }) {
     return { ...team, totalExp, memberCount: members.length, done, manager: users.find(u => u.teamId === team.id && u.role === 'manager') }
   }).sort((a, b) => b.totalExp - a.totalExp)
   const medals = ['🥇', '🥈', '🥉']
+  const medalBg = ['#fef3c7', '#f1f5f9', '#fed7aa']
+  const rankBorder = ['#f59e0b40', '#94a3b840', '#ea580c30']
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
@@ -7519,8 +7521,8 @@ function LeaderboardView({ users, tasks }: { users: User[]; tasks: Task[] }) {
       <div className="flex p-1 rounded-xl mb-6" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
         {[['individual', '👤 Cá nhân'], ['team', '👥 Đội nhóm']].map(([id, lbl]) => (
           <button key={id} onClick={() => setTab(id as typeof tab)}
-            className="flex-1 py-2 rounded-lg text-sm font-medium transition-all"
-            style={{ background: tab === id ? '#7c3aed' : 'transparent', color: tab === id ? '#fff' : 'var(--text-muted)' }}>
+            className="flex-1 py-2 rounded-lg text-sm font-semibold transition-all"
+            style={{ background: tab === id ? 'linear-gradient(135deg,#7c3aed,#6d28d9)' : 'transparent', color: tab === id ? '#fff' : 'var(--text-muted)' }}>
             {lbl}
           </button>
         ))}
@@ -7530,30 +7532,38 @@ function LeaderboardView({ users, tasks }: { users: User[]; tasks: Task[] }) {
         <div className="space-y-3">
           {sorted.map((user, i) => {
             const done = tasks.filter(t => t.status === 'completed' && t.assignedTo.includes(user.id)).length
+            const isTop = i < 3
             return (
-              <div key={user.id} className="rounded-xl p-4 flex items-center gap-3 transition-all hover:translate-x-1"
+              <div key={user.id} className="rounded-xl p-4 flex items-center gap-3 transition-all hover:-translate-y-0.5"
                 style={{
-                  background: i < 3 ? `linear-gradient(135deg, ${user.avatar.outfitColor}10, var(--bg-panel))` : 'var(--bg-panel)',
-                  border: `1px solid ${i < 3 ? user.avatar.outfitColor + '25' : 'var(--border)'}`,
+                  background: isTop ? `linear-gradient(135deg, ${user.avatar.outfitColor}12, var(--bg-panel))` : 'var(--bg-panel)',
+                  border: `1px solid ${isTop ? rankBorder[i] : 'var(--border)'}`,
+                  boxShadow: isTop ? `0 4px 16px ${user.avatar.outfitColor}18` : '0 1px 3px rgba(0,0,0,0.04)',
                 }}>
-                <div className="w-8 text-center">
-                  {i < 3 ? <span className="text-xl">{medals[i]}</span>
-                    : <span className="font-bold text-sm font-mono" style={{ color: 'var(--text-muted)' }}>#{i + 1}</span>}
+                <div className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ background: isTop ? medalBg[i] : 'var(--bg-card-alt)' }}>
+                  {isTop ? <span className="text-lg">{medals[i]}</span>
+                    : <span className="font-bold text-xs font-mono" style={{ color: 'var(--text-muted)' }}>#{i + 1}</span>}
                 </div>
                 <CharAvatar user={user} size={44} />
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
+                  <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                     <span className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{user.name}</span>
                     <LevelBadge exp={user.exp} />
-                    {user.role === 'manager' && <span className="text-[10px] px-1.5 rounded-full" style={{ background: '#1e0a3a', color: '#a78bfa' }}>Manager</span>}
+                    {user.role === 'manager' && (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: '#a78bfa22', color: '#8b5cf6', border: '1px solid #a78bfa30' }}>
+                        Quản lý
+                      </span>
+                    )}
                   </div>
-                  
-                  <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>{TEAMS.find(t => t.id === user.teamId)?.name ?? '—'} · {done} task xong</div>
-                  <div className="max-w-[140px]"><ExpBarMini exp={user.exp} /></div>
+                  <div className="text-xs mb-1.5" style={{ color: 'var(--text-muted)' }}>
+                    {TEAMS.find(t => t.id === user.teamId)?.name ?? '—'} · {done} task xong
+                  </div>
+                  <div className="max-w-[160px]"><ExpBarMini exp={user.exp} /></div>
                 </div>
-                <div className="text-right">
-                  <div className="text-amber-400 text-xl font-black" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{user.exp.toLocaleString()}</div>
-                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>EXP</div>
+                <div className="text-right flex-shrink-0">
+                  <div className="text-amber-500 text-xl font-black" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{user.exp.toLocaleString()}</div>
+                  <div className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>EXP</div>
                 </div>
               </div>
             )
@@ -7561,37 +7571,51 @@ function LeaderboardView({ users, tasks }: { users: User[]; tasks: Task[] }) {
         </div>
       ) : (
         <div className="space-y-4">
-          {teams.map((team, i) => (
-            <div key={team.id} className="rounded-xl p-5"
-              style={{ background: 'var(--bg-panel)', border: `1px solid ${i === 0 ? '#f59e0b25' : 'var(--border)'}` }}>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <span className="text-3xl">{i < 3 ? medals[i] : `#${i + 1}`}</span>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl">{team.emoji}</span>
-                      <span className="font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>Team {team.name}</span>
+          {teams.map((team, i) => {
+            const isTop = i === 0
+            return (
+              <div key={team.id} className="rounded-xl p-5 transition-all hover:-translate-y-0.5"
+                style={{
+                  background: 'var(--bg-panel)',
+                  border: `1px solid ${isTop ? '#f59e0b40' : 'var(--border)'}`,
+                  boxShadow: isTop ? '0 4px 16px #f59e0b15' : '0 1px 3px rgba(0,0,0,0.04)',
+                }}>
+                <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0"
+                      style={{ background: i < 3 ? medalBg[i] : 'var(--bg-card-alt)' }}>
+                      <span className="text-xl">{i < 3 ? medals[i] : `#${i + 1}`}</span>
                     </div>
-                    <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Manager: {team.manager?.name} · {team.memberCount} thành viên</div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">{team.emoji}</span>
+                        <span className="font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>{team.name}</span>
+                      </div>
+                      <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                        Quản lý: {team.manager?.name ?? '—'} · {team.memberCount} thành viên
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-amber-500 text-2xl font-black" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{team.totalExp.toLocaleString()}</div>
+                    <div className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>tổng EXP</div>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-amber-400 text-2xl font-black" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{team.totalExp.toLocaleString()}</div>
-                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>tổng EXP</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+                  <div className="text-center">
+                    <div className="font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>{team.done}</div>
+                    <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Task xong</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
+                      {team.memberCount > 0 ? Math.round(team.totalExp / team.memberCount) : 0}
+                    </div>
+                    <div className="text-xs" style={{ color: 'var(--text-muted)' }}>EXP TB/người</div>
+                  </div>
                 </div>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
-                <div className="text-center">
-                  <div className="font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>{team.done}</div>
-                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Task xong</div>
-                </div>
-                <div className="text-center">
-                  <div className="font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>{Math.round(team.totalExp / team.memberCount)}</div>
-                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>EXP TB/người</div>
-                </div>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
