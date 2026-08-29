@@ -5625,34 +5625,34 @@ function DashboardView({ currentUser, tasks, users, setTasks, setCurrentUser, se
     <div className="p-6 max-w-6xl mx-auto space-y-5">
       {/* Hero */}
       <div className="rounded-2xl p-6 relative overflow-hidden"
-        style={{ background: `linear-gradient(135deg, ${currentUser.avatar.outfitColor}22, #0a0a1e)`, border: `1px solid ${currentUser.avatar.outfitColor}35` }}>
+        style={{ background: `linear-gradient(135deg, ${currentUser.avatar.outfitColor}18, var(--bg-panel))`, border: `1px solid ${currentUser.avatar.outfitColor}35` }}>
         <div className="flex items-center gap-5">
           <div className="rounded-2xl overflow-hidden flex-shrink-0"
-            style={{ width: 80, height: 96, background: `${currentUser.avatar.outfitColor}20`, border: `2px solid ${currentUser.avatar.outfitColor}40`, boxShadow: `0 0 30px ${currentUser.avatar.outfitColor}40` }}>
+            style={{ width: 80, height: 96, background: `${currentUser.avatar.outfitColor}20`, border: `2px solid ${currentUser.avatar.outfitColor}40`, boxShadow: `0 0 30px ${currentUser.avatar.outfitColor}30` }}>
             <FullAvatar avatar={currentUser.avatar} size={72} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-gray-400 text-sm">Xin chào,</span>
+              <span className="text-sm" style={{ color: 'var(--text-muted)' }}>Xin chào,</span>
               <LevelBadge exp={currentUser.exp} />
-              {isManager && <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: '#1a0a3a', color: '#a78bfa' }}>👑 Manager</span>}
+              {isManager && <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>👑 Quản lý</span>}
             </div>
-            <h2 className="text-white text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{currentUser.name}</h2>
-            
-            <p className="text-gray-500 text-sm">{TEAMS.find(t => t.id === currentUser.teamId)?.name ?? 'Chưa có team'}</p>
+            <h2 className="text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>{currentUser.name}</h2>
+
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{TEAMS.find(t => t.id === currentUser.teamId)?.name ?? 'Chưa có team'}</p>
             <div className="mt-3">
               <div className="flex justify-between text-xs mb-1.5">
-                <span className="text-gray-500">Level {level} → {level + 1}</span>
-                <span className="text-gray-600">Cần {needed} EXP</span>
+                <span style={{ color: 'var(--text-muted)' }}>Level {level} → {level + 1}</span>
+                <span style={{ color: 'var(--text-muted)' }}>Cần {needed} EXP</span>
               </div>
-              <div className="h-2 rounded-full overflow-hidden" style={{ background: '#1a1a3a' }}>
+              <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
                 <div className="h-full rounded-full" style={{ width: `${progress}%`, background: 'linear-gradient(90deg,#7c3aed,#f59e0b)', transition: 'width 0.7s ease' }} />
               </div>
             </div>
           </div>
           <div className="text-right flex-shrink-0">
-            <div className="text-amber-400 text-4xl font-black" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{currentUser.exp.toLocaleString()}</div>
-            <div className="text-gray-600 text-xs uppercase tracking-wider">EXP tổng</div>
+            <div className="text-amber-500 text-4xl font-black" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{currentUser.exp.toLocaleString()}</div>
+            <div className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>EXP tổng</div>
           </div>
         </div>
       </div>
@@ -5667,46 +5667,46 @@ function DashboardView({ currentUser, tasks, users, setTasks, setCurrentUser, se
             ? { label: 'Tổng EXP team', value: teamExp.toLocaleString(), color: '#a78bfa', icon: '👥' }
             : { label: 'Hạng cá nhân', value: '#' + ([...users].sort((a, b) => b.exp - a.exp).findIndex(u => u.id === currentUser.id) + 1), color: '#ec4899', icon: '🏆' },
         ].map(stat => (
-          <div key={stat.label} className="rounded-xl p-4" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
+          <div key={stat.label} className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
             <div className="flex items-center justify-between mb-2">
               <span className="text-xl">{stat.icon}</span>
               <span className="text-2xl font-black" style={{ color: stat.color, fontFamily: 'Rajdhani, sans-serif' }}>{stat.value}</span>
             </div>
-            <div className="text-gray-500 text-xs">{stat.label}</div>
+            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{stat.label}</div>
           </div>
         ))}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {/* Tasks */}
-        <div className="col-span-2 rounded-xl p-5" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
-          <h3 className="text-white font-bold mb-4 flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+        <div className="col-span-2 rounded-xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+          <h3 className="font-bold mb-4 flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
             ⚡ Task của tôi
-            <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: '#1e1e4a', color: '#6b7280' }}>{pending.length} chờ</span>
+            <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: 'var(--border)', color: 'var(--text-muted)' }}>{pending.length} chờ</span>
           </h3>
           <div className="space-y-2">
             {pending.slice(0, 5).map(task => (
               <div key={task.id} className="p-3 rounded-lg flex items-center gap-3 group"
-                style={{ background: '#12122a', border: '1px solid #1a1a3a' }}>
+                style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
                 <div className="w-1.5 h-8 rounded-full flex-shrink-0" style={{ background: PRIORITY_CONFIG[task.priority].color }} />
                 <div className="flex-1 min-w-0">
-                  <div className="text-white text-sm font-medium truncate">
+                  <div className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
                     {task.title}
-                    {task.selfCreated && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#1a2a1a', color: '#10b981' }}>Tự tạo</span>}
-                    {task.urgent && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#3a0a0a', color: '#f87171' }}>⏰ GẤP</span>}
-                    {task.important && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#3a1a0a', color: '#fbbf24' }}>🔥 Quan trọng</span>}
+                    {task.selfCreated && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#10b98122', color: '#10b981' }}>Tự tạo</span>}
+                    {task.urgent && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#f8717122', color: '#f87171' }}>⏰ GẤP</span>}
+                    {task.important && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#fbbf2422', color: '#d97706' }}>🔥 Quan trọng</span>}
                   </div>
                   <div className="text-xs mt-0.5">
                     <span style={{ color: STATUS_CONFIG[task.status].color }}>{STATUS_CONFIG[task.status].label}</span>
-                    <span className="text-gray-700 mx-1">·</span>
-                    <span className="text-gray-600">Hạn {fmtDate(task.dueDate)}</span>
+                    <span className="mx-1" style={{ color: 'var(--text-muted)' }}>·</span>
+                    <span style={{ color: 'var(--text-muted)' }}>Hạn {fmtDate(task.dueDate)}</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className="text-amber-400 font-bold text-sm" style={{ fontFamily: 'Rajdhani, sans-serif' }}>+{task.expReward}</span>
+                  <span className="text-amber-500 font-bold text-sm" style={{ fontFamily: 'Rajdhani, sans-serif' }}>+{task.expReward}</span>
                   {task.assignedTo.includes(currentUser.id) && task.status === 'in-progress' && (
                     <button onClick={() => setView('tasks')}
-                      className="text-xs px-3 py-1 rounded-lg font-semibold" style={{ background: '#1a1a40', color: '#a78bfa' }}>
+                      className="text-xs px-3 py-1 rounded-lg font-semibold" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>
                       Vào nộp task →
                     </button>
                   )}
@@ -5714,7 +5714,7 @@ function DashboardView({ currentUser, tasks, users, setTasks, setCurrentUser, se
               </div>
             ))}
             {pending.length === 0 && (
-              <div className="text-center py-8 text-gray-600">
+              <div className="text-center py-8" style={{ color: 'var(--text-muted)' }}>
                 <div className="text-3xl mb-2">🎉</div>
                 <div className="text-sm">Tất cả task đã hoàn thành!</div>
               </div>
@@ -5723,8 +5723,8 @@ function DashboardView({ currentUser, tasks, users, setTasks, setCurrentUser, se
         </div>
 
         {/* Mini leaderboard */}
-        <div className="rounded-xl p-5" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
-          <h3 className="text-white font-bold mb-4 flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+        <div className="rounded-xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+          <h3 className="font-bold mb-4 flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
             🏆 {isManager ? 'Team' : 'Bảng xếp hạng'}
           </h3>
           <div className="space-y-3">
@@ -5732,13 +5732,13 @@ function DashboardView({ currentUser, tasks, users, setTasks, setCurrentUser, se
               : users.filter(u => u.role === 'employee'))
               .sort((a, b) => b.exp - a.exp).slice(0, 5).map((user, i) => (
                 <div key={user.id} className="flex items-center gap-2.5">
-                  <span className="text-gray-600 text-xs w-4 font-mono">#{i + 1}</span>
+                  <span className="text-xs w-4 font-mono" style={{ color: 'var(--text-muted)' }}>#{i + 1}</span>
                   <CharAvatar user={user} size={28} />
                   <div className="flex-1 min-w-0">
-                    <div className="text-white text-xs font-medium truncate">{user.name.split(' ').slice(-1)[0]}</div>
+                    <div className="text-xs font-medium truncate" style={{ color: 'var(--text-primary)' }}>{user.name.split(' ').slice(-1)[0]}</div>
                     <ExpBarMini exp={user.exp} />
                   </div>
-                  <div className="text-amber-400 text-xs font-bold" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{user.exp}</div>
+                  <div className="text-amber-500 text-xs font-bold" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{user.exp}</div>
                 </div>
               ))}
           </div>
