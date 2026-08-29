@@ -8808,8 +8808,8 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
             <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('profile')}>
               <CharAvatar user={currentUser} size={36} />
               <div>
-                <div className="text-white text-sm font-medium leading-tight">{currentUser.name.split(' ').slice(-1)[0]}</div>
-                <div className="text-gray-600 text-[10px]">{currentUser.role === 'manager' ? '👑 Quản lý' : '⚔️ Nhân viên'}</div>
+                <div className="text-sm font-medium leading-tight" style={{ color: 'var(--text-primary)' }}>{currentUser.name.split(' ').slice(-1)[0]}</div>
+                <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{currentUser.role === 'manager' ? '👑 Quản lý' : '⚔️ Nhân viên'}</div>
               </div>
             </div>
             <button
