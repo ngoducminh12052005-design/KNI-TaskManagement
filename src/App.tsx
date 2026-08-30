@@ -6541,7 +6541,6 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
 
   useEffect(() => {
     if (!highlightTaskId) return
-    // Nếu task đang bị filter/search ẩn đi, tự động xoá filter/search để đảm bảo thấy được
     setFilter('all')
     setSearch('')
     const tryScroll = () => {
@@ -6552,7 +6551,6 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
         setTimeout(() => setFlashTaskId(prev => (prev === highlightTaskId ? null : prev)), 2500)
         clearHighlightTaskId?.()
       } else {
-        // Task có thể chưa kịp render (do vừa đổi filter) — thử lại sau 1 nhịp
         setTimeout(tryScroll, 150)
       }
     }
@@ -6570,11 +6568,9 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   })
 
   const isManager = currentUser.role === 'manager'
-// const employees = users.filter(u => u.role === 'employee' && u.teamId === currentUser.teamId)
-// const teamUsers = users.filter(u => u.teamId === currentUser.teamId)
   const employees = currentUser.isDirector
-  ? users
-  : users.filter(u => u.role === 'employee' && u.teamId === currentUser.teamId)
+    ? users
+    : users.filter(u => u.role === 'employee' && u.teamId === currentUser.teamId)
   const teamUsers = currentUser.isDirector
     ? users
     : users.filter(u => u.teamId === currentUser.teamId)
@@ -6599,296 +6595,234 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     return true
   })
 
-  // const handleStart = (id: string) => setTasks(tasks.map(t => t.id === id ? { ...t, status: 'in-progress' } : t))
-  // const handleComplete = (id: string, exp: number) => {
-  //   setTasks(tasks.map(t => t.id === id ? { ...t, status: 'completed' } : t))
-  //   setCurrentUser({ ...currentUser, exp: currentUser.exp + exp })
-  // }
-  // const handleCreate = () => {
-  //   if (!form.title.trim()) return
-  //   setTasks([...tasks, {
-  //     id: `task_${Date.now()}`, title: form.title, description: form.description, expReward: form.expReward,
-  //     status: 'open', assignedTo: isManager ? (form.assignedTo || undefined) : currentUser.id,
-  //     projectManager: form.projectManager || undefined, supporters: form.supporters,
-  //     createdBy: currentUser.id,
-  //     dueDate: form.dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
-  //     category: form.category, priority: form.priority, selfCreated: !isManager,
-  //   }])
-  //   setShowModal(false)
-  //   setForm({ title: '', description: '', expReward: 50, dueDate: '', category: 'development', priority: 'medium', assignedTo: '', projectManager: '', supporters: [] })
-  // }
-
   const handleStart = async (id: string) => {
-  await supabase.from('tasks').update({ status: 'in-progress' }).eq('id', id)
-}
-
-const handleApprove = async (task: Task) => {
-  const approvedAt = new Date().toISOString()
-
-  const { error: approveError } = await supabase.from('tasks').update({
-    status: 'completed',
-    approved_by: currentUser.id,
-    approved_at: approvedAt,
-  }).eq('id', task.id)
-
-  if (approveError) {
-    alert('Không thể duyệt task: ' + approveError.message)
-    return
+    await supabase.from('tasks').update({ status: 'in-progress' }).eq('id', id)
   }
 
-  // ==================== TÍNH TOÁN EXP TRƯỚC (đặt lên đầu để tránh lỗi dùng trước khi khai báo) ====================
-  // teamwork = được tick thủ công là "Dự án nhóm", HOẶC có từ 2 người Phụ trách trở lên,
-  // HOẶC có người Hỗ trợ tham gia
-  const isTeamwork = task.isTeamProject || task.assignedTo.length > 1 || task.supporters.length > 0
-  // Người hỗ trợ nhận % của EXP gốc
-  const supportExp = Math.round(task.expReward * SUPPORTER_EXP_PERCENT)
+  const handleApprove = async (task: Task) => {
+    const approvedAt = new Date().toISOString()
 
-  // ==================== THÔNG BÁO CHO BOD ====================
-  const bodUsers = users.filter(u => u.isDirector && u.id !== currentUser.id)
-  const taskOwnerIds = Array.from(new Set([
-    ...task.assignedTo,
-    task.createdBy,
-  ])).filter(Boolean)
+    const { error: approveError } = await supabase.from('tasks').update({
+      status: 'completed',
+      approved_by: currentUser.id,
+      approved_at: approvedAt,
+    }).eq('id', task.id)
 
-  const taskOwnerNames = taskOwnerIds
-    .map(uid => users.find(u => u.id === uid)?.name)
-    .filter(Boolean)
-    .join(', ')
+    if (approveError) {
+      alert('Không thể duyệt task: ' + approveError.message)
+      return
+    }
 
-  const taskTypeLabel = task.selfCreated ? 'task tự tạo' : 'task được giao'
-  const departmentName = TEAMS.find(t => t.id === currentUser.teamId)?.name ?? currentUser.department
+    const isTeamwork = task.isTeamProject || task.assignedTo.length > 1 || task.supporters.length > 0
+    const supportExp = Math.round(task.expReward * SUPPORTER_EXP_PERCENT)
 
-  for (const bod of bodUsers) {
-    await supabase.from('notifications').insert({
-      message: `📢 ${currentUser.name} (${departmentName}) đã duyệt ${taskTypeLabel}: "${task.title}"${taskOwnerNames ? ` — Nhân sự: ${taskOwnerNames}` : ''}`,
-      target_user_id: bod.id,
-      link_task_id: task.id,
-    })
-  }
+    const bodUsers = users.filter(u => u.isDirector && u.id !== currentUser.id)
+    const taskOwnerIds = Array.from(new Set([
+      ...task.assignedTo,
+      task.createdBy,
+    ])).filter(Boolean)
 
-  // Báo cho người phụ trách + hỗ trợ rằng task đã được duyệt (những người này luôn nhận EXP)
-  const rewardedIds = Array.from(new Set([...task.assignedTo, ...task.supporters]))
-    .filter(uid => uid && uid !== currentUser.id)
-  for (const uid of rewardedIds) {
-    const isSupporter = task.supporters.includes(uid) && !task.assignedTo.includes(uid)
-    const earnedExp = isSupporter ? supportExp : task.expReward
-    await supabase.from('notifications').insert({
-      message: `✅ ${currentUser.name} đã duyệt task: "${task.title}" — bạn nhận được +${earnedExp} EXP`,
-      target_user_id: uid,
-      link_task_id: task.id,
-    })
-  }
+    const taskOwnerNames = taskOwnerIds
+      .map(uid => users.find(u => u.id === uid)?.name)
+      .filter(Boolean)
+      .join(', ')
 
-  // Báo riêng cho PM: nhân viên làm PM luôn được EXP, task tự tạo luôn được EXP,
-  // quản lý làm PM cho task do người khác giao thì chỉ được khi teamwork
-  const pmIds = task.projectManager.filter(uid => uid && uid !== currentUser.id)
-  for (const uid of pmIds) {
-    const pm = users.find(u => u.id === uid)
-    const eligibleForExp = pm?.role === 'employee' || task.selfCreated || isTeamwork
-    await supabase.from('notifications').insert({
-      message: eligibleForExp
-        ? `✅ ${currentUser.name} đã duyệt task: "${task.title}" — bạn nhận được +${task.expReward} EXP`
-        : `✅ ${currentUser.name} đã duyệt task: "${task.title}" (task cá nhân, không cộng EXP cho PM)`,
-      target_user_id: uid,
-      link_task_id: task.id,
-    })
-  }
+    const taskTypeLabel = task.selfCreated ? 'task tự tạo' : 'task được giao'
+    const departmentName = TEAMS.find(t => t.id === currentUser.teamId)?.name ?? currentUser.department
 
-  // ==================== CỘNG ĐIỂM ====================
+    for (const bod of bodUsers) {
+      await supabase.from('notifications').insert({
+        message: `📢 ${currentUser.name} (${departmentName}) đã duyệt ${taskTypeLabel}: "${task.title}"${taskOwnerNames ? ` — Nhân sự: ${taskOwnerNames}` : ''}`,
+        target_user_id: bod.id,
+        link_task_id: task.id,
+      })
+    }
 
-  // Mỗi người Phụ trách nhận đủ 100% EXP (không chia, dù có nhiều người)
-  for (const uid of task.assignedTo) {
-    const assignee = users.find(u => u.id === uid)
-    if (assignee) {
-      await supabase.from('profiles').update({ exp: assignee.exp + task.expReward }).eq('id', assignee.id)
+    const rewardedIds = Array.from(new Set([...task.assignedTo, ...task.supporters]))
+      .filter(uid => uid && uid !== currentUser.id)
+    for (const uid of rewardedIds) {
+      const isSupporter = task.supporters.includes(uid) && !task.assignedTo.includes(uid)
+      const earnedExp = isSupporter ? supportExp : task.expReward
+      await supabase.from('notifications').insert({
+        message: `✅ ${currentUser.name} đã duyệt task: "${task.title}" — bạn nhận được +${earnedExp} EXP`,
+        target_user_id: uid,
+        link_task_id: task.id,
+      })
+    }
+
+    const pmIds = task.projectManager.filter(uid => uid && uid !== currentUser.id)
+    for (const uid of pmIds) {
+      const pm = users.find(u => u.id === uid)
+      const eligibleForExp = pm?.role === 'employee' || task.selfCreated || isTeamwork
+      await supabase.from('notifications').insert({
+        message: eligibleForExp
+          ? `✅ ${currentUser.name} đã duyệt task: "${task.title}" — bạn nhận được +${task.expReward} EXP`
+          : `✅ ${currentUser.name} đã duyệt task: "${task.title}" (task cá nhân, không cộng EXP cho PM)`,
+        target_user_id: uid,
+        link_task_id: task.id,
+      })
+    }
+
+    for (const uid of task.assignedTo) {
+      const assignee = users.find(u => u.id === uid)
+      if (assignee) {
+        await supabase.from('profiles').update({ exp: assignee.exp + task.expReward }).eq('id', assignee.id)
+      }
+    }
+
+    for (const uid of task.projectManager) {
+      const pm = users.find(u => u.id === uid)
+      if (!pm) continue
+      const eligibleForExp = pm.role === 'employee' || task.selfCreated || isTeamwork
+      if (eligibleForExp) {
+        await supabase.from('profiles').update({ exp: pm.exp + task.expReward }).eq('id', pm.id)
+      }
+    }
+
+    for (const uid of task.supporters) {
+      const supporter = users.find(u => u.id === uid)
+      if (supporter) {
+        await supabase.from('profiles').update({ exp: supporter.exp + supportExp }).eq('id', supporter.id)
+      }
     }
   }
 
-  // Quản lý dự án (PM):
-  // - Nếu PM là "nhân viên" (role employee) -> luôn được nhận EXP bình thường
-  // - Nếu task là tự tạo (selfCreated) -> luôn được nhận EXP bình thường, không bị chặn
-  // - Nếu PM là "quản lý" (role manager) VÀ task do quản lý khác giao (không tự tạo)
-  //   -> chỉ được EXP khi task mang tính teamwork
-  for (const uid of task.projectManager) {
-    const pm = users.find(u => u.id === uid)
-    if (!pm) continue
-    const eligibleForExp = pm.role === 'employee' || task.selfCreated || isTeamwork
-    if (eligibleForExp) {
-      await supabase.from('profiles').update({ exp: pm.exp + task.expReward }).eq('id', pm.id)
-    }
-  }
-
-  // Người hỗ trợ nhận % của EXP gốc
-  for (const uid of task.supporters) {
-    const supporter = users.find(u => u.id === uid)
-    if (supporter) {
-      await supabase.from('profiles').update({ exp: supporter.exp + supportExp }).eq('id', supporter.id)
-    }
-  }
-}
-
-// const handleReject = async (task: Task) => {
-//   const reason = window.prompt('Lý do từ chối (nhân viên sẽ thấy để sửa lại):') ?? ''
-//   await supabase.from('tasks').update({
-//     status: 'in-progress', submission_file_url: null, submission_note: null, rejected_reason: reason,
-//   }).eq('id', task.id)
-// }
-
-// const handleCreate = async () => {
-const handleReject = async (task: Task) => {
-  const reason = window.prompt('Lý do từ chối (nhân viên sẽ thấy để sửa lại):') ?? ''
-  await supabase.from('tasks').update({
-    status: 'in-progress', submission_file_url: null, submission_note: null, rejected_reason: reason,
-  }).eq('id', task.id)
-
-  const notifyIds = Array.from(new Set([...task.assignedTo, ...task.supporters]))
-    .filter(uid => uid && uid !== currentUser.id)
-
-  for (const uid of notifyIds) {
-    await supabase.from('notifications').insert({
-      message: `❌ ${currentUser.name} đã từ chối task: "${task.title}"${reason ? ` — Lý do: ${reason}` : ''}`,
-      target_user_id: uid,
-      link_task_id: task.id,
-    })
-  }
-}
-
-const handleApproveCrossDept = async (task: Task) => {
-  await supabase.from('tasks').update({ cross_dept_pending: false }).eq('id', task.id)
-}
-
-const handleRejectCrossDept = async (task: Task) => {
-  const reason = window.prompt('Lý do từ chối (quản lý đã giao sẽ thấy lý do này):') ?? ''
-  if (reason.trim() === '' && !window.confirm('Bạn chưa nhập lý do, vẫn muốn từ chối?')) return
-  await supabase.from('tasks').update({
-    cross_dept_pending: false,
-    cross_dept_rejected: true,
-    cross_dept_rejected_reason: reason.trim() || null,
-    cross_dept_rejected_by: currentUser.id,
-  }).eq('id', task.id)
-}
-
-// const viewSubmissionFile = async (key: string) => {
-//   const { data: sessionData } = await supabase.auth.getSession()
-//   const token = sessionData.session?.access_token
-//   const res = await fetch('https://legrsdmjstoxcoxvumgg.supabase.co/functions/v1/get-file-url', {
-//     method: 'POST',
-//     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-//     body: JSON.stringify({ key }),
-//   })
-//   const json = await res.json()
-//   if (res.ok && json.url) window.open(json.url, '_blank')
-//   else alert('Không mở được file: ' + (json.error || 'lỗi không xác định'))
-// }
-
-
-const openEditModal = (task: Task) => {
-  setEditingTask(task)
-  setSelfMode(task.selfCreated)
-  setForm({
-    title: task.title, description: task.description, expReward: task.expReward,
-    startDate: task.startDate || todayStr, dueDate: task.dueDate,
-    category: task.category, priority: task.priority,
-    important: task.important, urgent: task.urgent, isTeamProject: task.isTeamProject ?? false,
-    assignedTo: task.assignedTo, projectManager: task.projectManager, supporters: task.supporters,
-    driveFolderCreated: task.driveFolderCreated ?? false,
-    driveFolderName: task.driveFolderName ?? '',
-  })
-  setShowModal(true)
-}
-
-const handleSaveTask = async () => {
-  if (!form.title.trim()) return
-  const { min, max } = getExpRange(form.priority, form.important, form.urgent)
-  if (form.expReward < min || form.expReward > max) {
-    alert(`Điểm EXP phải nằm trong khoảng ${min}–${max} cho mức độ "${PRIORITY_CONFIG[form.priority].label}" với lựa chọn Quan trọng/Gấp hiện tại`)
-    return
-  }
-
-  if (editingTask) {
+  const handleReject = async (task: Task) => {
+    const reason = window.prompt('Lý do từ chối (nhân viên sẽ thấy để sửa lại):') ?? ''
     await supabase.from('tasks').update({
-      title: form.title, description: form.description, exp_reward: form.expReward,
-      assigned_to: form.assignedTo, project_manager: form.projectManager, supporters: form.supporters,
-      start_date: form.startDate, due_date: form.dueDate,
-      category: form.category, priority: form.priority,
-      important: form.important, urgent: form.urgent, is_team_project: form.isTeamProject,
-      drive_folder_created: form.driveFolderCreated,
-      drive_folder_name: form.driveFolderCreated ? (form.driveFolderName.trim() || null) : null,
-    }).eq('id', editingTask.id)
-  } else {
-    const creatingForSelf = !isManager || selfMode
-    const assignedUsers = form.assignedTo.map(uid => users.find(u => u.id === uid)).filter(Boolean) as User[]
-    const outsideAssignees = assignedUsers.filter(u => u.teamId !== currentUser.teamId)
-    const isCrossDept = !creatingForSelf && !currentUser.isDirector && outsideAssignees.length > 0
-    const targetTeamId = isCrossDept ? outsideAssignees[0].teamId : null
+      status: 'in-progress', submission_file_url: null, submission_note: null, rejected_reason: reason,
+    }).eq('id', task.id)
 
-    const { data: newTask } = await supabase.from('tasks').insert({
-      title: form.title, description: form.description, exp_reward: form.expReward,
-      status: 'open', assigned_to: creatingForSelf ? [currentUser.id] : form.assignedTo,
-      project_manager: form.projectManager, supporters: form.supporters,
-      created_by: currentUser.id,
-      start_date: form.startDate,
-      due_date: form.dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
-      category: form.category, priority: form.priority, self_created: creatingForSelf,
-      important: form.important, urgent: form.urgent, is_team_project: form.isTeamProject,
-      cross_dept_pending: isCrossDept,
-      target_team_id: targetTeamId,
-      drive_folder_created: !creatingForSelf && form.driveFolderCreated,
-      drive_folder_name: (!creatingForSelf && form.driveFolderCreated) ? (form.driveFolderName.trim() || null) : null,
-    }).select('id').single()
-    const newTaskId = newTask?.id
+    const notifyIds = Array.from(new Set([...task.assignedTo, ...task.supporters]))
+      .filter(uid => uid && uid !== currentUser.id)
 
-    // Báo cho từng nhân viên được giao (chỉ khi thật sự giao cho người khác)
-    if (isManager && !selfMode) {
-      for (const uid of form.assignedTo) {
-        if (uid === currentUser.id) continue
-        await supabase.from('notifications').insert({
-          message: `📋 ${currentUser.name} vừa giao cho bạn task: ${form.title}`,
-          target_user_id: uid,
-          link_task_id: newTaskId,
-        })
-      }
+    for (const uid of notifyIds) {
+      await supabase.from('notifications').insert({
+        message: `❌ ${currentUser.name} đã từ chối task: "${task.title}"${reason ? ` — Lý do: ${reason}` : ''}`,
+        target_user_id: uid,
+        link_task_id: task.id,
+      })
+    }
+  }
 
-      // Báo cho từng người hỗ trợ được thêm vào task
-      for (const uid of form.supporters) {
-        if (uid === currentUser.id) continue
-        await supabase.from('notifications').insert({
-          message: `🤝 ${currentUser.name} vừa thêm bạn làm người hỗ trợ task: ${form.title}`,
-          target_user_id: uid,
-          link_task_id: newTaskId,
-        })
-      }
+  const handleApproveCrossDept = async (task: Task) => {
+    await supabase.from('tasks').update({ cross_dept_pending: false }).eq('id', task.id)
+  }
 
-      // Báo cho quản lý phòng ban đích nếu đây là task liên phòng ban
-      if (isCrossDept && targetTeamId) {
-        const targetManagers = users.filter(u => u.role === 'manager' && u.teamId === targetTeamId)
-        const assigneeNames = outsideAssignees.map(u => u.name).join(', ')
-        for (const mgr of targetManagers) {
+  const handleRejectCrossDept = async (task: Task) => {
+    const reason = window.prompt('Lý do từ chối (quản lý đã giao sẽ thấy lý do này):') ?? ''
+    if (reason.trim() === '' && !window.confirm('Bạn chưa nhập lý do, vẫn muốn từ chối?')) return
+    await supabase.from('tasks').update({
+      cross_dept_pending: false,
+      cross_dept_rejected: true,
+      cross_dept_rejected_reason: reason.trim() || null,
+      cross_dept_rejected_by: currentUser.id,
+    }).eq('id', task.id)
+  }
+
+  const openEditModal = (task: Task) => {
+    setEditingTask(task)
+    setSelfMode(task.selfCreated)
+    setForm({
+      title: task.title, description: task.description, expReward: task.expReward,
+      startDate: task.startDate || todayStr, dueDate: task.dueDate,
+      category: task.category, priority: task.priority,
+      important: task.important, urgent: task.urgent, isTeamProject: task.isTeamProject ?? false,
+      assignedTo: task.assignedTo, projectManager: task.projectManager, supporters: task.supporters,
+      driveFolderCreated: task.driveFolderCreated ?? false,
+      driveFolderName: task.driveFolderName ?? '',
+    })
+    setShowModal(true)
+  }
+
+  const handleSaveTask = async () => {
+    if (!form.title.trim()) return
+    const { min, max } = getExpRange(form.priority, form.important, form.urgent)
+    if (form.expReward < min || form.expReward > max) {
+      alert(`Điểm EXP phải nằm trong khoảng ${min}–${max} cho mức độ "${PRIORITY_CONFIG[form.priority].label}" với lựa chọn Quan trọng/Gấp hiện tại`)
+      return
+    }
+
+    if (editingTask) {
+      await supabase.from('tasks').update({
+        title: form.title, description: form.description, exp_reward: form.expReward,
+        assigned_to: form.assignedTo, project_manager: form.projectManager, supporters: form.supporters,
+        start_date: form.startDate, due_date: form.dueDate,
+        category: form.category, priority: form.priority,
+        important: form.important, urgent: form.urgent, is_team_project: form.isTeamProject,
+        drive_folder_created: form.driveFolderCreated,
+        drive_folder_name: form.driveFolderCreated ? (form.driveFolderName.trim() || null) : null,
+      }).eq('id', editingTask.id)
+    } else {
+      const creatingForSelf = !isManager || selfMode
+      const assignedUsers = form.assignedTo.map(uid => users.find(u => u.id === uid)).filter(Boolean) as User[]
+      const outsideAssignees = assignedUsers.filter(u => u.teamId !== currentUser.teamId)
+      const isCrossDept = !creatingForSelf && !currentUser.isDirector && outsideAssignees.length > 0
+      const targetTeamId = isCrossDept ? outsideAssignees[0].teamId : null
+
+      const { data: newTask } = await supabase.from('tasks').insert({
+        title: form.title, description: form.description, exp_reward: form.expReward,
+        status: 'open', assigned_to: creatingForSelf ? [currentUser.id] : form.assignedTo,
+        project_manager: form.projectManager, supporters: form.supporters,
+        created_by: currentUser.id,
+        start_date: form.startDate,
+        due_date: form.dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+        category: form.category, priority: form.priority, self_created: creatingForSelf,
+        important: form.important, urgent: form.urgent, is_team_project: form.isTeamProject,
+        cross_dept_pending: isCrossDept,
+        target_team_id: targetTeamId,
+        drive_folder_created: !creatingForSelf && form.driveFolderCreated,
+        drive_folder_name: (!creatingForSelf && form.driveFolderCreated) ? (form.driveFolderName.trim() || null) : null,
+      }).select('id').single()
+      const newTaskId = newTask?.id
+
+      if (isManager && !selfMode) {
+        for (const uid of form.assignedTo) {
+          if (uid === currentUser.id) continue
           await supabase.from('notifications').insert({
-            message: `📨 ${currentUser.name} (${TEAMS.find(t => t.id === currentUser.teamId)?.name ?? ''}) muốn giao task "${form.title}" cho ${assigneeNames} trong phòng ban của bạn`,
+            message: `📋 ${currentUser.name} vừa giao cho bạn task: ${form.title}`,
+            target_user_id: uid,
+            link_task_id: newTaskId,
+          })
+        }
+
+        for (const uid of form.supporters) {
+          if (uid === currentUser.id) continue
+          await supabase.from('notifications').insert({
+            message: `🤝 ${currentUser.name} vừa thêm bạn làm người hỗ trợ task: ${form.title}`,
+            target_user_id: uid,
+            link_task_id: newTaskId,
+          })
+        }
+
+        if (isCrossDept && targetTeamId) {
+          const targetManagers = users.filter(u => u.role === 'manager' && u.teamId === targetTeamId)
+          const assigneeNames = outsideAssignees.map(u => u.name).join(', ')
+          for (const mgr of targetManagers) {
+            await supabase.from('notifications').insert({
+              message: `📨 ${currentUser.name} (${TEAMS.find(t => t.id === currentUser.teamId)?.name ?? ''}) muốn giao task "${form.title}" cho ${assigneeNames} trong phòng ban của bạn`,
+              target_user_id: mgr.id,
+              link_task_id: newTaskId,
+            })
+          }
+        }
+      } else if (creatingForSelf) {
+        const teamManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)
+        for (const mgr of teamManagers) {
+          await supabase.from('notifications').insert({
+            message: `🎯 ${currentUser.name} vừa tự tạo task: ${form.title}`,
             target_user_id: mgr.id,
             link_task_id: newTaskId,
           })
         }
       }
-    } else if (creatingForSelf) {
-      // Nhân viên (hoặc quản lý) tự tạo task cho mình -> báo cho quản lý cùng team
-      const teamManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)
-      for (const mgr of teamManagers) {
-        await supabase.from('notifications').insert({
-          message: `🎯 ${currentUser.name} vừa tự tạo task: ${form.title}`,
-          target_user_id: mgr.id,
-          link_task_id: newTaskId,
-        })
-      }
     }
-  }
 
-  setShowModal(false)
-  setEditingTask(null)
-  setSelfMode(false)
-  setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'development', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '' })
-}
+    setShowModal(false)
+    setEditingTask(null)
+    setSelfMode(false)
+    setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'development', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '' })
+  }
 
   const toggleFormArray = (field: 'assignedTo' | 'projectManager' | 'supporters', uid: string) => {
     setForm(f => ({
@@ -6912,14 +6846,14 @@ const handleSaveTask = async () => {
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-white text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif' }}>Quản lý Task</h2>
-          <p className="text-gray-500 text-sm">{visible.length} task</p>
+          <h2 className="text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>Quản lý Task</h2>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{visible.length} task</p>
         </div>
         <div className="flex gap-2">
           {isManager && (
             <button onClick={() => setShowCollabModal(true)}
               className="px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition-all hover:scale-105"
-              style={{ background: '#14143a', border: '1px solid #2a2a5a', color: '#a78bfa' }}>
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#8b5cf6' }}>
               🤝 Phối hợp phòng ban
             </button>
           )}
@@ -6933,25 +6867,26 @@ const handleSaveTask = async () => {
       </div>
 
       <div className="relative mb-3">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600 text-sm">🔍</span>
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--text-muted)' }}>🔍</span>
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Tìm task theo tên hoặc mô tả..."
-          className="w-full pl-9 pr-9 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
-          style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }} />
+          className="w-full pl-9 pr-9 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
+          style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
         {search && (
           <button onClick={() => setSearch('')}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-300 text-sm">
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-sm hover:opacity-70"
+            style={{ color: 'var(--text-muted)' }}>
             ✕
           </button>
         )}
       </div>
-      
+
       <CollaborationsPanel currentUser={currentUser} users={users} collaborations={collaborations} />
       <div className="flex gap-2 mb-5">
         {[{ id: 'all', label: 'Tất cả' }, { id: 'mine', label: 'Của tôi' }, { id: 'open', label: 'Chưa làm' }, { id: 'done', label: 'Xong' }].map(f => (
           <button key={f.id} onClick={() => setFilter(f.id as typeof filter)}
             className="px-3.5 py-1.5 rounded-lg text-sm transition-all"
-            style={{ background: filter === f.id ? '#7c3aed' : '#0e0e24', color: filter === f.id ? '#fff' : '#6b7280', border: `1px solid ${filter === f.id ? '#7c3aed' : '#1e1e4a'}` }}>
+            style={{ background: filter === f.id ? '#7c3aed' : 'var(--bg-panel)', color: filter === f.id ? '#fff' : 'var(--text-muted)', border: `1px solid ${filter === f.id ? '#7c3aed' : 'var(--border)'}` }}>
             {f.label}
           </button>
         ))}
@@ -6973,8 +6908,8 @@ const handleSaveTask = async () => {
             <div key={task.id} ref={el => { taskRefs.current[task.id] = el }}
               className="rounded-xl p-4 flex flex-col transition-all hover:-translate-y-0.5"
               style={{
-                background: isFlashed ? '#7c3aed1a' : '#0e0e24',
-                border: `1px solid ${isFlashed ? '#7c3aed' : task.status === 'completed' ? '#10b98120' : '#1e1e4a'}`,
+                background: isFlashed ? '#7c3aed1a' : 'var(--bg-panel)',
+                border: `1px solid ${isFlashed ? '#7c3aed' : task.status === 'completed' ? '#10b98130' : 'var(--border)'}`,
                 boxShadow: isFlashed ? '0 0 16px #7c3aed40' : 'none',
                 transition: 'background 0.4s ease, border 0.4s ease, box-shadow 0.4s ease',
               }}>
@@ -6984,259 +6919,191 @@ const handleSaveTask = async () => {
                   <div className="flex items-center gap-1.5 mb-1 flex-wrap">
                     <span className="text-[10px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wider"
                       style={{ background: `${catColor}20`, color: catColor }}>{task.category}</span>
-                    {task.selfCreated && <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#1a2a1a', color: '#10b981' }}>Tự tạo</span>}
-                    {task.urgent && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold animate-pulse" style={{ background: '#3a0a0a', color: '#f87171' }}>⏰ GẤP</span>}
-                    {task.important && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#3a1a0a', color: '#fbbf24' }}>🔥 Quan trọng</span>}
+                    {task.selfCreated && <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#10b98122', color: '#10b981' }}>Tự tạo</span>}
+                    {task.urgent && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold animate-pulse" style={{ background: '#f8717122', color: '#dc2626' }}>⏰ GẤP</span>}
+                    {task.important && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#fbbf2422', color: '#d97706' }}>🔥 Quan trọng</span>}
                   </div>
-                  <h3 className="text-white font-semibold text-sm">{task.title}</h3>
+                  <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{task.title}</h3>
                 </div>
                 <div className="text-right flex-shrink-0">
                   {canEdit && (
                     <button onClick={() => openEditModal(task)}
-                      className="text-gray-500 hover:text-violet-400 text-[10px] mb-1 block ml-auto">
+                      className="hover:text-violet-400 text-[10px] mb-1 block ml-auto" style={{ color: 'var(--text-muted)' }}>
                       ✏️ Sửa
                     </button>
                   )}
-                  <div className="text-amber-400 font-black text-lg leading-none" style={{ fontFamily: 'Rajdhani, sans-serif' }}>+{task.expReward}</div>
-                  <div className="text-amber-700 text-[10px]">EXP</div>
+                  <div className="text-amber-500 font-black text-lg leading-none" style={{ fontFamily: 'Rajdhani, sans-serif' }}>+{task.expReward}</div>
+                  <div className="text-amber-600 text-[10px] opacity-70">EXP</div>
                 </div>
               </div>
 
-              <p className="text-gray-500 text-xs mb-3 line-clamp-2 leading-relaxed">{task.description}</p>
+              <p className="text-xs mb-3 line-clamp-2 leading-relaxed" style={{ color: 'var(--text-muted)' }}>{task.description}</p>
 
               {/* Priority + date */}
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-xs px-2 py-0.5 rounded" style={{ background: pri.bg, color: pri.color }}>{pri.label}</span>
-                <span className="text-gray-600 text-xs">📅 {fmtDate(task.dueDate)}</span>
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>📅 {fmtDate(task.dueDate)}</span>
               </div>
 
               {/* People section */}
               <div className="space-y-1.5 mb-3">
-                {/* Assignees (có thể nhiều người) */}
                 <div className="flex items-start gap-2">
-                  <span className="text-gray-700 text-[10px] w-14 flex-shrink-0 mt-0.5">Phụ trách:</span>
+                  <span className="text-[10px] w-14 flex-shrink-0 mt-0.5" style={{ color: 'var(--text-muted)' }}>Phụ trách:</span>
                   {assignees.length > 0 ? (
                     <div className="flex items-center gap-2 flex-wrap">
                       {assignees.map(a => (
                         <div key={a.id} className="flex items-center gap-1">
                           <CharAvatar user={a} size={20} />
-                          <span className="text-gray-400 text-xs">{a.name.split(' ').slice(-1)[0]}</span>
+                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{a.name.split(' ').slice(-1)[0]}</span>
                         </div>
                       ))}
                     </div>
-                  ) : <span className="text-gray-700 text-xs italic">Chưa giao</span>}
+                  ) : <span className="text-xs italic" style={{ color: 'var(--text-muted)' }}>Chưa giao</span>}
                 </div>
 
-                {/* Project Managers (có thể nhiều người) */}
                 {pms.length > 0 && (
                   <div className="flex items-start gap-2">
-                    <span className="text-gray-700 text-[10px] w-14 flex-shrink-0 mt-0.5">QL dự án:</span>
+                    <span className="text-[10px] w-14 flex-shrink-0 mt-0.5" style={{ color: 'var(--text-muted)' }}>QL dự án:</span>
                     <div className="flex items-center gap-2 flex-wrap">
                       {pms.map(pm => (
                         <div key={pm.id} className="flex items-center gap-1">
                           <CharAvatar user={pm} size={20} />
-                          <span className="text-gray-400 text-xs">{pm.name.split(' ').slice(-1)[0]}</span>
+                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{pm.name.split(' ').slice(-1)[0]}</span>
                         </div>
                       ))}
-                      <span className="text-[9px] px-1 rounded" style={{ background: '#1a0a3a', color: '#a78bfa' }}>PM</span>
+                      <span className="text-[9px] px-1 rounded" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>PM</span>
                     </div>
                   </div>
                 )}
 
-                {/* Supporters */}
                 {task.supporters.length > 0 && (
                   <div className="flex items-center gap-2">
-                    <span className="text-gray-700 text-[10px] w-14 flex-shrink-0">Hỗ trợ:</span>
+                    <span className="text-[10px] w-14 flex-shrink-0" style={{ color: 'var(--text-muted)' }}>Hỗ trợ:</span>
                     <div className="flex -space-x-1">
                       {task.supporters.slice(0, 4).map(sid => {
                         const su = getUserById(sid)
                         return su ? <CharAvatar key={sid} user={su} size={20} /> : null
                       })}
                       {task.supporters.length > 4 && (
-                        <div className="w-5 h-5 rounded-full bg-[#1e1e4a] flex items-center justify-center text-[9px] text-gray-400"
-                          style={{ border: '2px solid #0e0e24' }}>+{task.supporters.length - 4}</div>
+                        <div className="w-5 h-5 rounded-full flex items-center justify-center text-[9px]"
+                          style={{ background: 'var(--border)', color: 'var(--text-muted)', border: '2px solid var(--bg-panel)' }}>+{task.supporters.length - 4}</div>
                       )}
                     </div>
                   </div>
                 )}
               </div>
 
-              {/* Actions
-              <div className="flex items-center justify-end mt-auto">
-                {task.status === 'completed'
-                  ? <span className="text-green-400 text-xs">✓ Hoàn thành</span>
-                  : isMyTask
-                    ? (
+              {/* Actions */}
+              <div className="flex items-center justify-end mt-3">
+                {task.crossDeptPending &&
+                  currentUser.role === 'manager' &&
+                  (currentUser.teamId === task.targetTeamId || currentUser.isDirector) ? (
+                    <div className="flex flex-col gap-1.5 items-end">
+                      <p className="text-[10px] text-right max-w-[220px] leading-relaxed" style={{ color: '#d97706' }}>
+                        📨 {getUserById(task.createdBy)?.name} ({TEAMS.find(t => t.id === getUserById(task.createdBy)?.teamId)?.name}) muốn giao cho team {TEAMS.find(t => t.id === task.targetTeamId)?.name}
+                      </p>
                       <div className="flex gap-1.5">
+                        <button onClick={() => handleRejectCrossDept(task)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>
+                          Từ chối
+                        </button>
+                        <button onClick={() => handleApproveCrossDept(task)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#34d39922', color: '#059669' }}>
+                          ✓ Duyệt nhận task
+                        </button>
+                      </div>
+                    </div>
 
-                        {task.status === 'open' && (
+                  ) : task.crossDeptPending ? (
+                    <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#fbbf2422', color: '#d97706' }}>
+                      ⏳ Chờ quản lý phòng ban duyệt
+                    </span>
+
+                  ) : task.crossDeptRejected ? (
+                    <div className="flex flex-col gap-1 items-end max-w-[240px]">
+                      <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#f8717122', color: '#dc2626' }}>
+                        ❌ Bị từ chối bởi {getUserById(task.crossDeptRejectedBy)?.name ?? 'quản lý phòng đích'}
+                      </span>
+                      {task.crossDeptRejectedReason && (
+                        <p className="text-xs text-right" style={{ color: 'var(--text-muted)' }}>Lý do: {task.crossDeptRejectedReason}</p>
+                      )}
+                    </div>
+
+                  ) : task.status === 'completed' ? (
+                    <span className="text-xs" style={{ color: '#059669' }}>✓ Hoàn thành</span>
+
+                  ) : task.status === 'submitted' && currentUser.role === 'manager' ? (
+                    <div className="flex flex-col gap-1.5 items-end">
+                      {task.submissionOwnFolderUrl && (
+                        <a href={task.submissionOwnFolderUrl} target="_blank" rel="noopener noreferrer"
+                          className="text-xs underline" style={{ color: '#8b5cf6' }}>
+                          📁 Xem folder Drive của người tự tạo task
+                        </a>
+                      )}
+                      {task.submissionFolderName && (
+                        <p className="text-[11px] max-w-[200px] text-right" style={{ color: 'var(--text-muted)' }}>📂 Nhân viên tự đặt tên folder: {task.submissionFolderName}</p>
+                      )}
+                      {task.submissionFileUrl && (
+                        <a href={task.submissionFileUrl} target="_blank" rel="noopener noreferrer"
+                          className="text-xs underline" style={{ color: '#3b82f6' }}>
+                          📁 Xem file trên Google Drive
+                        </a>
+                      )}
+                      {task.submissionNote && <p className="text-xs max-w-[200px] text-right" style={{ color: 'var(--text-muted)' }}>{task.submissionNote}</p>}
+                      <div className="flex gap-1.5">
+                        <button onClick={() => handleReject(task)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>
+                          Không chấp nhận
+                        </button>
+                        <button onClick={() => handleApprove(task)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#34d39922', color: '#059669' }}>
+                          ✓ Duyệt
+                        </button>
+                      </div>
+                    </div>
+
+                  ) : task.status === 'submitted' && task.assignedTo.includes(currentUser.id) ? (
+                    <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>
+                      ⏳ Đang chờ quản lý duyệt
+                    </span>
+
+                  ) : isMyTask ? (
+                    <div className="flex flex-col gap-1 items-end">
+                      <div className="flex gap-1.5">
+                        {task.status === 'open' && !task.crossDeptPending && isBeforeStartDate && (
+                          <span className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
+                            🔒 Chưa tới ngày bắt đầu ({fmtDate(task.startDate!)})
+                          </span>
+                        )}
+                        {task.status === 'open' && !task.crossDeptPending && !isBeforeStartDate && (
                           <button onClick={() => handleStart(task.id)}
-                            className="px-4 py-2 rounded-xl text-sm font-bold" style={{ background: '#1e293b', color: '#60a5fa' }}>
+                            className="px-4 py-2 rounded-xl text-sm font-bold" style={{ background: '#3b82f622', color: '#2563eb' }}>
                             Bắt đầu
                           </button>
                         )}
-                        {task.status === 'in-progress' && task.assignedTo === currentUser.id && (
+                        {task.status === 'in-progress' && (
                           <button onClick={() => setSubmittingTask(task)}
-                            className="px-4 py-2 rounded-xl text-sm font-bold" style={{ background: '#1e293b', color: '#34d399' }}>
+                            className="px-4 py-2 rounded-xl text-sm font-bold" style={{ background: '#34d39922', color: '#059669' }}>
                             Nộp task ✓
                           </button>
                         )}
-                        {task.status === 'in-progress' && task.rejectedReason && task.assignedTo === currentUser.id && (
-                          <p className="text-red-400 text-xs mt-1">❌ Bị từ chối: {task.rejectedReason}</p>
-                        )}
-                        {task.status === 'submitted' && task.assignedTo === currentUser.id && (
-                          <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#1a1a40', color: '#a78bfa' }}>
-                            ⏳ Đang chờ quản lý duyệt
-                          </span>
-                        )}
-                        {task.status === 'submitted' && currentUser.role === 'manager' && (
-                          <div className="flex flex-col gap-1.5 items-end">
-                            {task.submissionFileUrl && (
-                              <a href={task.submissionFileUrl} target="_blank" rel="noopener noreferrer"
-                                className="text-xs underline" style={{ color: '#60a5fa' }}>
-                                📎 Xem file đã nộp
-                              </a>
-                            )}
-                            {task.submissionNote && <p className="text-gray-500 text-xs max-w-[200px] text-right">{task.submissionNote}</p>}
-                            <div className="flex gap-1.5">
-                              <button onClick={() => handleReject(task)}
-                                className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#2a1010', color: '#f87171' }}>
-                                Không chấp nhận
-                              </button>
-                              <button onClick={() => handleApprove(task)}
-                                className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#0f2a1a', color: '#34d399' }}>
-                                ✓ Duyệt
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
                       </div>
-                    )
-                    : <span className="text-xs px-2 py-0.5 rounded" style={{ color: STATUS_CONFIG[task.status].color, background: '#12121a' }}>
+                      {task.status === 'in-progress' && task.rejectedReason && (
+                        <p className="text-xs mt-1 max-w-[200px] text-right" style={{ color: '#dc2626' }}>❌ Bị từ chối: {task.rejectedReason}</p>
+                      )}
+                    </div>
+
+                  ) : (
+                    <span className="text-xs px-2 py-0.5 rounded" style={{ color: STATUS_CONFIG[task.status].color, background: 'var(--bg-card-alt)' }}>
                       {STATUS_CONFIG[task.status].label}
                     </span>
-                }
-              </div> */}
-              {/* Actions */}
-            <div className="flex items-center justify-end mt-3">
-              {task.crossDeptPending &&
-                currentUser.role === 'manager' &&
-                (currentUser.teamId === task.targetTeamId || currentUser.isDirector) ? (
-                  <div className="flex flex-col gap-1.5 items-end">
-                    <p className="text-amber-400 text-[10px] text-right max-w-[220px] leading-relaxed">
-                      📨 {getUserById(task.createdBy)?.name} ({TEAMS.find(t => t.id === getUserById(task.createdBy)?.teamId)?.name}) muốn giao cho team {TEAMS.find(t => t.id === task.targetTeamId)?.name}
-                    </p>
-                    <div className="flex gap-1.5">
-                      <button onClick={() => handleRejectCrossDept(task)}
-                        className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#2a1010', color: '#f87171' }}>
-                        Từ chối
-                      </button>
-                      <button onClick={() => handleApproveCrossDept(task)}
-                        className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#0f2a1a', color: '#34d399' }}>
-                        ✓ Duyệt nhận task
-                      </button>
-                    </div>
-                  </div>
-
-                ) : task.crossDeptPending ? (
-                  <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#2a1a00', color: '#fbbf24' }}>
-                    ⏳ Chờ quản lý phòng ban duyệt
-                  </span>
-
-                ) : task.crossDeptRejected ? (
-                  <div className="flex flex-col gap-1 items-end max-w-[240px]">
-                    <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#2a1010', color: '#f87171' }}>
-                      ❌ Bị từ chối bởi {getUserById(task.crossDeptRejectedBy)?.name ?? 'quản lý phòng đích'}
-                    </span>
-                    {task.crossDeptRejectedReason && (
-                      <p className="text-gray-500 text-xs text-right">Lý do: {task.crossDeptRejectedReason}</p>
-                    )}
-                  </div>
-
-                ) : task.status === 'completed' ? (
-                <span className="text-green-400 text-xs">✓ Hoàn thành</span>
-
-              // ) : task.status === 'submitted' && currentUser.role === 'manager' ? (
-              //   <div className="flex flex-col gap-1.5 items-end">
-              //     {task.submissionFileUrl && (
-              //       <a href={task.submissionFileUrl} target="_blank" rel="noopener noreferrer"
-              //         className="text-xs underline" style={{ color: '#60a5fa' }}>
-              //         📎 Xem file đã nộp
-              //       </a>
-              //     )}
-              ) : task.status === 'submitted' && currentUser.role === 'manager' ? (
-                <div className="flex flex-col gap-1.5 items-end">
-                  {task.submissionOwnFolderUrl && (
-                    <a href={task.submissionOwnFolderUrl} target="_blank" rel="noopener noreferrer"
-                      className="text-xs underline" style={{ color: '#a78bfa' }}>
-                      📁 Xem folder Drive của người tự tạo task
-                    </a>
                   )}
-                  {task.submissionFolderName && (
-                    <p className="text-gray-500 text-[11px] max-w-[200px] text-right">📂 Nhân viên tự đặt tên folder: {task.submissionFolderName}</p>
-                  )}
-                  {task.submissionFileUrl && (
-                    <a href={task.submissionFileUrl} target="_blank" rel="noopener noreferrer"
-                      className="text-xs underline" style={{ color: '#60a5fa' }}>
-                      📁 Xem file trên Google Drive
-                    </a>
-                  )}
-                  {task.submissionNote && <p className="text-gray-500 text-xs max-w-[200px] text-right">{task.submissionNote}</p>}
-                  <div className="flex gap-1.5">
-                    <button onClick={() => handleReject(task)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#2a1010', color: '#f87171' }}>
-                      Không chấp nhận
-                    </button>
-                    <button onClick={() => handleApprove(task)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#0f2a1a', color: '#34d399' }}>
-                      ✓ Duyệt
-                    </button>
-                  </div>
-                </div>
-
-              ) : task.status === 'submitted' && task.assignedTo.includes(currentUser.id) ? (
-                <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#1a1a40', color: '#a78bfa' }}>
-                  ⏳ Đang chờ quản lý duyệt
-                </span>
-
-              ) : isMyTask ? (
-                <div className="flex flex-col gap-1 items-end">
-                  <div className="flex gap-1.5">
-                    {task.status === 'open' && !task.crossDeptPending && isBeforeStartDate && (
-                      <span className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: '#1a1a40', color: '#6b7280' }}>
-                        🔒 Chưa tới ngày bắt đầu ({fmtDate(task.startDate!)})
-                      </span>
-                    )}
-                    {task.status === 'open' && !task.crossDeptPending && !isBeforeStartDate && (
-                      <button onClick={() => handleStart(task.id)}
-                        className="px-4 py-2 rounded-xl text-sm font-bold" style={{ background: '#1e293b', color: '#60a5fa' }}>
-                        Bắt đầu
-                      </button>
-                    )}
-                    {task.status === 'in-progress' && (
-                      <button onClick={() => setSubmittingTask(task)}
-                        className="px-4 py-2 rounded-xl text-sm font-bold" style={{ background: '#1e293b', color: '#34d399' }}>
-                        Nộp task ✓
-                      </button>
-                    )}
-                  </div>
-                  {task.status === 'in-progress' && task.rejectedReason && (
-                    <p className="text-red-400 text-xs mt-1 max-w-[200px] text-right">❌ Bị từ chối: {task.rejectedReason}</p>
-                  )}
-                </div>
-
-              ) : (
-                <span className="text-xs px-2 py-0.5 rounded" style={{ color: STATUS_CONFIG[task.status].color, background: '#12121a' }}>
-                  {STATUS_CONFIG[task.status].label}
-                </span>
-              )}
-            </div>
+              </div>
 
               {isTaskParticipant && (
                 <>
                   <button onClick={() => setOpenCommentsFor(openCommentsFor === task.id ? null : task.id)}
-                    className="text-gray-500 hover:text-violet-400 text-xs flex items-center gap-1 mt-3">
+                    className="hover:text-violet-400 text-xs flex items-center gap-1 mt-3" style={{ color: 'var(--text-muted)' }}>
                     💬 Thảo luận {openCommentsFor === task.id ? '▲' : '▼'}
                   </button>
                   {openCommentsFor === task.id && (
@@ -7250,7 +7117,7 @@ const handleSaveTask = async () => {
       </div>
 
       {visible.length === 0 && (
-        <div className="text-center py-16 text-gray-600">
+        <div className="text-center py-16" style={{ color: 'var(--text-muted)' }}>
           <div className="text-4xl mb-3">📭</div>
           <div className="text-sm">Không có task nào</div>
         </div>
@@ -7260,24 +7127,25 @@ const handleSaveTask = async () => {
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.8)' }}>
           <div className="w-full max-w-md rounded-2xl p-6 animate-slide-up max-h-[90vh] overflow-y-auto"
-            style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
+            style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
             <div className="flex justify-between items-center mb-5">
-              <h3 className="text-white font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+              <h3 className="font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
                 {editingTask ? '✏️ Chỉnh sửa Task' : isManager && !selfMode ? '📋 Giao Task Mới' : '🎯 Tạo Task Cá Nhân'}
               </h3>
-              <button onClick={() => { setShowModal(false); setEditingTask(null); setSelfMode(false) }} className="text-gray-500 hover:text-gray-300 text-2xl leading-none">×</button>
+              <button onClick={() => { setShowModal(false); setEditingTask(null); setSelfMode(false) }}
+                className="text-2xl leading-none hover:opacity-70" style={{ color: 'var(--text-muted)' }}>×</button>
             </div>
 
             {isManager && !editingTask && (
-              <div className="flex gap-1 p-1 rounded-xl mb-4" style={{ background: '#0a0a1a', border: '1px solid #1e1e3a' }}>
+              <div className="flex gap-1 p-1 rounded-xl mb-4" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
                 <button onClick={() => setSelfMode(false)}
                   className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
-                  style={{ background: !selfMode ? '#7c3aed' : 'transparent', color: !selfMode ? '#fff' : '#6b7280' }}>
+                  style={{ background: !selfMode ? '#7c3aed' : 'transparent', color: !selfMode ? '#fff' : 'var(--text-muted)' }}>
                   📋 Giao cho người khác
                 </button>
                 <button onClick={() => setSelfMode(true)}
                   className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
-                  style={{ background: selfMode ? '#7c3aed' : 'transparent', color: selfMode ? '#fff' : '#6b7280' }}>
+                  style={{ background: selfMode ? '#7c3aed' : 'transparent', color: selfMode ? '#fff' : 'var(--text-muted)' }}>
                   🎯 Tự tạo cho tôi
                 </button>
               </div>
@@ -7285,99 +7153,77 @@ const handleSaveTask = async () => {
 
             <div className="space-y-3.5">
               <div>
-                <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Tên task *</label>
+                <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Tên task *</label>
                 <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
                   placeholder="Mô tả ngắn gọn task..."
-                  className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
-                  style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
               </div>
 
               <div>
-                <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Mô tả</label>
+                <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Mô tả</label>
                 <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
                   placeholder="Yêu cầu và mục tiêu cụ thể..." rows={2}
-                  className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none resize-none"
-                  style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none resize-none placeholder-[color:var(--text-muted)]"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
               </div>
-
-              {/* <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">EXP thưởng</label>
-                  <input type="number" value={form.expReward}
-                    min={PRIORITY_EXP_LIMITS[form.priority].min} max={PRIORITY_EXP_LIMITS[form.priority].max}
-                    onChange={e => setForm({ ...form, expReward: parseInt(e.target.value) || 0 })}
-                    onBlur={() => setForm(f => {
-                      const { min, max } = PRIORITY_EXP_LIMITS[f.priority]
-                      return { ...f, expReward: Math.min(Math.max(f.expReward, min), max) }
-                    })}
-                    className="w-full px-3 py-2.5 rounded-lg text-amber-400 text-sm outline-none font-bold"
-                    style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
-                  <p className="text-gray-600 text-[10px] mt-1.5 leading-relaxed">{PRIORITY_EXP_LIMITS[form.priority].hint}</p>
-                </div>
-                <div>
-                  <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Deadline</label>
-                  <input type="date" value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })}
-                    className="w-full px-3 py-2.5 rounded-lg text-white text-sm outline-none"
-                    style={{ background: '#14143a', border: '1px solid #2a2a5a', colorScheme: 'dark' }} />
-                </div>
-              </div> */}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Ngày bắt đầu</label>
+                  <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Ngày bắt đầu</label>
                   <input type="date" value={form.startDate}
                     onChange={e => {
                       const startDate = e.target.value
                       setForm(f => ({ ...f, startDate, expReward: suggestExp(f.priority, startDate, f.dueDate, f.important, f.urgent) }))
                     }}
-                    className="w-full px-3 py-2.5 rounded-lg text-white text-sm outline-none"
-                    style={{ background: '#14143a', border: '1px solid #2a2a5a', colorScheme: 'dark' }} />
+                    className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                    style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
                 </div>
                 <div>
-                  <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Hạn hoàn thành</label>
+                  <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Hạn hoàn thành</label>
                   <input type="date" value={form.dueDate} min={form.startDate || undefined}
                     onChange={e => {
                       const dueDate = e.target.value
                       setForm(f => ({ ...f, dueDate, expReward: suggestExp(f.priority, f.startDate, dueDate, f.important, f.urgent) }))
                     }}
-                    className="w-full px-3 py-2.5 rounded-lg text-white text-sm outline-none"
-                    style={{ background: '#14143a', border: '1px solid #2a2a5a', colorScheme: 'dark' }} />
+                    className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                    style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
                 </div>
               </div>
 
-<div>
-  <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">EXP thưởng</label>
-  <input type="number" value={form.expReward}
-  onChange={e => setForm({ ...form, expReward: parseInt(e.target.value) || 0 })}
-  className="w-full px-3 py-2.5 rounded-lg text-amber-400 text-sm outline-none font-bold"
-  style={{
-    background: '#14143a',
-    border: `1px solid ${form.expReward < getExpRange(form.priority, form.important, form.urgent).min || form.expReward > getExpRange(form.priority, form.important, form.urgent).max ? '#f87171' : '#2a2a5a'}`,
-  }} />
-<p className="text-[10px] mt-1.5 leading-relaxed"
-  style={{ color: form.expReward < getExpRange(form.priority, form.important, form.urgent).min || form.expReward > getExpRange(form.priority, form.important, form.urgent).max ? '#f87171' : '#6b7280' }}>
-  💡 Gợi ý theo độ khó + Quan trọng/Gấp: {getExpRange(form.priority, form.important, form.urgent).min}–{getExpRange(form.priority, form.important, form.urgent).max} EXP
-</p>
-</div>
+              <div>
+                <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>EXP thưởng</label>
+                <input type="number" value={form.expReward}
+                  onChange={e => setForm({ ...form, expReward: parseInt(e.target.value) || 0 })}
+                  className="w-full px-3 py-2.5 rounded-lg text-amber-500 text-sm outline-none font-bold"
+                  style={{
+                    background: 'var(--bg-card-alt)',
+                    border: `1px solid ${form.expReward < getExpRange(form.priority, form.important, form.urgent).min || form.expReward > getExpRange(form.priority, form.important, form.urgent).max ? '#f87171' : 'var(--border)'}`,
+                  }} />
+                <p className="text-[10px] mt-1.5 leading-relaxed"
+                  style={{ color: form.expReward < getExpRange(form.priority, form.important, form.urgent).min || form.expReward > getExpRange(form.priority, form.important, form.urgent).max ? '#dc2626' : 'var(--text-muted)' }}>
+                  💡 Gợi ý theo độ khó + Quan trọng/Gấp: {getExpRange(form.priority, form.important, form.urgent).min}–{getExpRange(form.priority, form.important, form.urgent).max} EXP
+                </p>
+              </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Danh mục</label>
+                  <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Danh mục</label>
                   <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}
-                    className="w-full px-3 py-2.5 rounded-lg text-white text-sm outline-none"
-                    style={{ background: '#14143a', border: '1px solid #2a2a5a' }}>
+                    className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                    style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
                     {Object.keys(CATEGORY_COLORS).map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Ưu tiên</label>
+                  <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Ưu tiên</label>
                   <select value={form.priority}
                     onChange={e => {
                       const newPriority = e.target.value as TaskPriority
                       setForm(f => ({ ...f, priority: newPriority, expReward: suggestExp(newPriority, f.startDate, f.dueDate, f.important, f.urgent) }))
                     }}
-                    className="w-full px-3 py-2.5 rounded-lg text-white text-sm outline-none"
-                    style={{ background: '#14143a', border: '1px solid #2a2a5a' }}>
+                    className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                    style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
                     <option value="low">Thấp</option>
                     <option value="medium">Trung bình</option>
                     <option value="high">Cao</option>
@@ -7387,27 +7233,27 @@ const handleSaveTask = async () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Mức độ quan trọng</label>
+                  <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Mức độ quan trọng</label>
                   <select value={form.important ? '1' : '0'}
                     onChange={e => {
                       const important = e.target.value === '1'
                       setForm(f => ({ ...f, important, expReward: suggestExp(f.priority, f.startDate, f.dueDate, important, f.urgent) }))
                     }}
-                    className="w-full px-3 py-2.5 rounded-lg text-white text-sm outline-none"
-                    style={{ background: '#14143a', border: '1px solid #2a2a5a' }}>
+                    className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                    style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
                     <option value="0">Không quan trọng</option>
                     <option value="1">Quan trọng</option>
                   </select>
                 </div>
                 <div>
-                  <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Mức độ gấp</label>
+                  <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Mức độ gấp</label>
                   <select value={form.urgent ? '1' : '0'}
                     onChange={e => {
                       const urgent = e.target.value === '1'
                       setForm(f => ({ ...f, urgent, expReward: suggestExp(f.priority, f.startDate, f.dueDate, f.important, urgent) }))
                     }}
-                    className="w-full px-3 py-2.5 rounded-lg text-white text-sm outline-none"
-                    style={{ background: '#14143a', border: '1px solid #2a2a5a' }}>
+                    className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                    style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
                     <option value="0">Không gấp</option>
                     <option value="1">Gấp</option>
                   </select>
@@ -7415,14 +7261,14 @@ const handleSaveTask = async () => {
               </div>
 
               {isManager && (
-                <div className="p-3 rounded-lg" style={{ background: '#0a1a2a', border: '1px solid #1a3a5a' }}>
+                <div className="p-3 rounded-lg" style={{ background: '#0ea5e914', border: '1px solid #0ea5e930' }}>
                   <label className="flex items-center gap-2.5 cursor-pointer select-none">
                     <input type="checkbox" checked={form.isTeamProject}
                       onChange={e => setForm({ ...form, isTeamProject: e.target.checked })}
                       className="w-4 h-4 rounded accent-cyan-500" />
-                    <span className="text-white text-sm font-medium">👥 Đây là dự án nhóm (Teamwork)</span>
+                    <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>👥 Đây là dự án nhóm (Teamwork)</span>
                   </label>
-                  <p className="text-gray-500 text-[10px] mt-1.5 leading-relaxed ml-6">
+                  <p className="text-[10px] mt-1.5 leading-relaxed ml-6" style={{ color: 'var(--text-muted)' }}>
                     💡 Tick vào nếu đây là công việc nhóm — Quản lý dự án (PM) sẽ luôn được nhận EXP dù chỉ giao cho 1 người phụ trách.
                   </p>
                 </div>
@@ -7452,21 +7298,21 @@ const handleSaveTask = async () => {
                     onToggle={uid => toggleFormArray('supporters', uid)}
                     placeholder="Chọn người hỗ trợ..." />
 
-                  <div className="p-3 rounded-lg" style={{ background: '#0a0a1a', border: '1px solid #1e1e3a' }}>
+                  <div className="p-3 rounded-lg" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
                     <label className="flex items-center gap-2.5 mb-2 cursor-pointer select-none">
                       <input type="checkbox" checked={form.driveFolderCreated}
                         onChange={e => setForm({ ...form, driveFolderCreated: e.target.checked })}
                         className="w-4 h-4 rounded accent-violet-500" />
-                      <span className="text-white text-sm font-medium">📁 Tôi đã tạo sẵn folder Drive cho task này</span>
+                      <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>📁 Tôi đã tạo sẵn folder Drive cho task này</span>
                     </label>
 
                     {form.driveFolderCreated ? (
                       <input value={form.driveFolderName} onChange={e => setForm({ ...form, driveFolderName: e.target.value })}
                         placeholder="Tên folder (VD: Nộp task - Nguyễn Văn A)"
-                        className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
-                        style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+                        className="w-full px-3 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
+                        style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
                     ) : (
-                      <p className="text-gray-600 text-[10px] leading-relaxed">
+                      <p className="text-[10px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
                         💡 Nếu không tick, nhân viên sẽ tự tạo folder trong Drive của bạn và tự đặt tên khi nộp.
                       </p>
                     )}
@@ -7476,8 +7322,8 @@ const handleSaveTask = async () => {
 
               <div className="flex gap-3 pt-1">
                 <button onClick={() => { setShowModal(false); setEditingTask(null); setSelfMode(false) }}
-                  className="flex-1 py-2.5 rounded-xl text-gray-400 text-sm"
-                  style={{ background: '#14143a', border: '1px solid #2a2a5a' }}>Hủy</button>
+                  className="flex-1 py-2.5 rounded-xl text-sm"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>Hủy</button>
                 <button onClick={handleSaveTask} disabled={!form.title.trim()}
                   className="flex-1 py-2.5 rounded-xl font-bold text-white text-sm disabled:opacity-40"
                   style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>{editingTask ? 'Lưu thay đổi' : 'Tạo Task'}</button>
