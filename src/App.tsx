@@ -8420,50 +8420,49 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
         {/* Left */}
         <div className="space-y-4">
           <div className="rounded-2xl p-6 text-center"
-            style={{ background: `linear-gradient(135deg, ${currentUser.avatar.outfitColor}18, #0e0e24)`, border: `1px solid ${currentUser.avatar.outfitColor}30` }}>
+            style={{ background: `linear-gradient(135deg, ${currentUser.avatar.outfitColor}18, var(--bg-panel))`, border: `1px solid ${currentUser.avatar.outfitColor}30` }}>
             <div className="w-28 h-36 mx-auto mb-3 rounded-2xl overflow-hidden flex items-end justify-center"
-              style={{ background: `${currentUser.avatar.outfitColor}20`, border: `2px solid ${currentUser.avatar.outfitColor}40`, boxShadow: `0 0 30px ${currentUser.avatar.outfitColor}40` }}>
+              style={{ background: `${currentUser.avatar.outfitColor}20`, border: `2px solid ${currentUser.avatar.outfitColor}40`, boxShadow: `0 0 30px ${currentUser.avatar.outfitColor}30` }}>
               <FullAvatar avatar={currentUser.avatar} size={100} />
             </div>
-            <h3 className="text-white font-bold text-xl mb-0.5" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{currentUser.name}</h3>
-            <p className="text-gray-500 text-sm mb-3">{currentUser.department}</p>
+            <h3 className="font-bold text-xl mb-0.5" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>{currentUser.name}</h3>
+            <p className="text-sm mb-3" style={{ color: 'var(--text-muted)' }}>{currentUser.department}</p>
             <div className="flex justify-center mb-3"><LevelBadge exp={currentUser.exp} /></div>
-            <div className="text-amber-400 text-2xl font-black mb-1" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{currentUser.exp.toLocaleString()} EXP</div>
-            <div className="text-gray-600 text-xs mb-3">Cần {needed} EXP → Lv.{level + 1}</div>
-            <div className="h-2 rounded-full overflow-hidden" style={{ background: '#1a1a3a' }}>
+            <div className="text-amber-500 text-2xl font-black mb-1" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{currentUser.exp.toLocaleString()} EXP</div>
+            <div className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>Cần {needed} EXP → Lv.{level + 1}</div>
+            <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
               <div className="h-full rounded-full" style={{ width: `${progress}%`, background: 'linear-gradient(90deg,#7c3aed,#f59e0b)' }} />
             </div>
             <button onClick={() => { setDraftAvatar(currentUser.avatar); setDraftName(currentUser.name); setEditing(!editing) }}
               className="mt-4 w-full py-2 rounded-lg text-sm font-medium transition-all"
-              style={{ background: editing ? '#7c3aed' : '#14143a', color: editing ? '#fff' : '#6b7280', border: '1px solid #2a2a5a' }}>
+              style={{ background: editing ? '#7c3aed' : 'var(--bg-card-alt)', color: editing ? '#fff' : 'var(--text-muted)', border: '1px solid var(--border)' }}>
               {editing ? '↑ Đóng' : '🎭 Đổi tên & nhân vật'}
             </button>
           </div>
 
           {/* Stats */}
-          <div className="rounded-xl p-4" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
-            <h4 className="text-white font-bold mb-3 text-sm" style={{ fontFamily: 'Rajdhani, sans-serif' }}>📊 Thống kê</h4>
+          <div className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+            <h4 className="font-bold mb-3 text-sm" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>📊 Thống kê</h4>
             {[
               ['Task hoàn thành', myDone.length],
               ['Đang làm', tasks.filter(t => t.status === 'in-progress' && t.assignedTo.includes(currentUser.id)).length],
               ['Task tự tạo', selfMade.length],
               ['Cấp độ', `Lv.${level}`],
             ].map(([lbl, val]) => (
-              <div key={lbl as string} className="flex justify-between items-center py-1.5" style={{ borderBottom: '1px solid #12121f' }}>
-                <span className="text-gray-500 text-xs">{lbl}</span>
-                <span className="text-white text-sm font-bold" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{val}</span>
+              <div key={lbl as string} className="flex justify-between items-center py-1.5" style={{ borderBottom: '1px solid var(--border)' }}>
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{lbl}</span>
+                <span className="text-sm font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>{val}</span>
               </div>
             ))}
           </div>
 
-          <div className="rounded-xl p-4" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
+          <div className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
             <div className="flex gap-2 flex-wrap">
-              <span className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: '#1a0a3a', color: '#a78bfa', border: '1px solid #3a1a6a' }}>
+              <span className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: '#a78bfa18', color: '#8b5cf6', border: '1px solid #a78bfa30' }}>
                 {currentUser.role === 'manager' ? '👑 Quản Lý' : '⚔️ Nhân Viên'}
               </span>
-              <span className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: '#0a1a3a', color: '#60a5fa', border: '1px solid #1a3a6a' }}>
-                
-                🏢 {TEAMS.find(t => t.id === currentUser.teamId)?.name ?? 'Chưa có team'}       
+              <span className="px-3 py-1.5 rounded-lg text-sm font-medium" style={{ background: '#60a5fa18', color: '#3b82f6', border: '1px solid #60a5fa30' }}>
+                🏢 {TEAMS.find(t => t.id === currentUser.teamId)?.name ?? 'Chưa có team'}
               </span>
             </div>
           </div>
@@ -8472,19 +8471,19 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
         {/* Right */}
         <div className="col-span-2 space-y-4">
           {currentUser.role === 'manager' && (
-            <div className="rounded-xl p-4" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
-              <h4 className="text-white font-bold mb-1 flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+            <div className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+              <h4 className="font-bold mb-1 flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
                 📁 Thư mục nộp task (Google Drive)
               </h4>
-              <p className="text-gray-500 text-xs mb-3 leading-relaxed">
+              <p className="text-xs mb-3 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
                 Nhân viên sẽ được dẫn tới link này để tải file kết quả lên khi nộp task cho bạn.
               </p>
               <input value={driveDraft} onChange={e => setDriveDraft(e.target.value)}
                 placeholder="https://drive.google.com/drive/folders/..."
-                className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none mb-2"
-                style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+                className="w-full px-3 py-2.5 rounded-lg text-sm outline-none mb-2"
+                style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
               <div className="flex items-center justify-between gap-2">
-                <p className="text-gray-600 text-[10px] leading-relaxed flex-1">
+                <p className="text-[10px] leading-relaxed flex-1" style={{ color: 'var(--text-muted)' }}>
                   💡 Bật chia sẻ "Bất kỳ ai có link đều chỉnh sửa được" cho thư mục này.
                 </p>
                 <button onClick={async () => {
@@ -8502,24 +8501,22 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
           )}
 
           {editing && (
-            <div className="rounded-xl p-4 animate-slide-up" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
-              <h4 className="text-white font-bold mb-4" style={{ fontFamily: 'Rajdhani, sans-serif' }}>🎭 Tùy chỉnh nhân vật</h4>
+            <div className="rounded-xl p-4 animate-slide-up" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+              <h4 className="font-bold mb-4" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>🎭 Tùy chỉnh nhân vật</h4>
 
               <div className="mb-4">
-                <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Tên hiển thị</label>
+                <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Tên hiển thị</label>
                 <input value={draftName} onChange={e => setDraftName(e.target.value)} maxLength={40}
                   placeholder="Nhập tên bạn muốn hiển thị..."
-                  className="w-full px-3 py-2.5 rounded-lg text-white text-sm outline-none"
-                  style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
               </div>
-
-              
 
               <AvatarCreator value={draftAvatar} onChange={setDraftAvatar} />
               <div className="flex gap-3 mt-4">
                 <button onClick={() => setEditing(false)}
-                  className="flex-1 py-2.5 rounded-lg text-gray-400 text-sm"
-                  style={{ background: '#14143a', border: '1px solid #2a2a5a' }}>Hủy</button>
+                  className="flex-1 py-2.5 rounded-lg text-sm"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>Hủy</button>
                 <button onClick={async () => {
                   const trimmed = draftName.trim() || currentUser.name
                   await supabase.from('profiles').update({ name: trimmed, avatar: draftAvatar }).eq('id', currentUser.id)
@@ -8532,16 +8529,16 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
             </div>
           )}
 
-          <div className="rounded-xl p-4" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
-            <h4 className="text-white font-bold mb-4" style={{ fontFamily: 'Rajdhani, sans-serif' }}>🏅 Thành Tích</h4>
-             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+            <h4 className="font-bold mb-4" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>🏅 Thành Tích</h4>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               {achievements.map(a => (
                 <div key={a.name} className="p-3 rounded-xl text-center"
-                  style={{ background: a.ok ? '#181808' : '#12121a', border: `1px solid ${a.ok ? '#f59e0b25' : '#1e1e3a'}`, opacity: a.ok ? 1 : 0.5 }}>
+                  style={{ background: a.ok ? '#f59e0b12' : 'var(--bg-card-alt)', border: `1px solid ${a.ok ? '#f59e0b30' : 'var(--border)'}`, opacity: a.ok ? 1 : 0.5 }}>
                   <div className="text-2xl mb-2" style={{ filter: a.ok ? 'none' : 'grayscale(1)' }}>{a.icon}</div>
-                  <div className="text-white text-xs font-bold mb-0.5">{a.name}</div>
-                  <div className="text-gray-600 text-[10px]">{a.desc}</div>
-                  {a.ok && <div className="mt-1.5 text-amber-400 text-[10px]">✓ Đạt được</div>}
+                  <div className="text-xs font-bold mb-0.5" style={{ color: 'var(--text-primary)' }}>{a.name}</div>
+                  <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{a.desc}</div>
+                  {a.ok && <div className="mt-1.5 text-amber-500 text-[10px]">✓ Đạt được</div>}
                 </div>
               ))}
             </div>
