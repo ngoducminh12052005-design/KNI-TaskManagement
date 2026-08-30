@@ -5965,46 +5965,46 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
   }
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-50 px-4" style={{ background: '#000000a0' }}>
-      <div className="w-full max-w-md rounded-2xl p-6 max-h-[90vh] overflow-y-auto" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
-        <h3 className="text-white font-bold text-lg mb-1" style={{ fontFamily: 'Rajdhani, sans-serif' }}>Nộp kết quả task</h3>
-        <p className="text-gray-500 text-sm mb-4">{task.title}</p>
+    <div className="fixed inset-0 flex items-center justify-center z-50 px-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
+      <div className="w-full max-w-md rounded-2xl p-6 max-h-[90vh] overflow-y-auto" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+        <h3 className="font-bold text-lg mb-1" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>Nộp kết quả task</h3>
+        <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>{task.title}</p>
 
         {task.selfCreated ? (
-          <div className="mb-4 p-3 rounded-lg" style={{ background: '#2a1a00', border: '1px solid #4a3a00' }}>
-            <p className="text-amber-300 text-xs leading-relaxed mb-3">
+          <div className="mb-4 p-3 rounded-lg" style={{ background: '#fbbf2414', border: '1px solid #fbbf2440' }}>
+            <p className="text-xs leading-relaxed mb-3" style={{ color: '#d97706' }}>
               🎯 Đây là task bạn tự tạo. Vui lòng dán link folder Drive của chính bạn, đồng thời <b>bật chia sẻ "Bất kỳ ai có link đều xem và chỉnh sửa được"</b> để quản lý có thể xem file kết quả.
             </p>
-            <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Link folder Drive của bạn *</label>
+            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Link folder Drive của bạn *</label>
             <input value={ownFolderUrl} onChange={e => setOwnFolderUrl(e.target.value)}
               placeholder="https://drive.google.com/drive/folders/..."
-              className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
-              style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+              className="w-full px-3 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
           </div>
         ) : hasNamedFolder ? (
-          <div className="mb-4 p-3 rounded-lg" style={{ background: '#1a0a3a', border: '1px solid #3a1a6a' }}>
-            <p className="text-violet-300 text-xs leading-relaxed mb-3">
+          <div className="mb-4 p-3 rounded-lg" style={{ background: '#a78bfa14', border: '1px solid #a78bfa40' }}>
+            <p className="text-xs leading-relaxed mb-3" style={{ color: '#8b5cf6' }}>
               📁 Quản lý đã tạo sẵn folder cho task này. Vào Drive của quản lý, tìm đúng folder tên <b>"{task.driveFolderName}"</b> và nộp file vào đó.
             </p>
             {pmsWithDrive.map(pm => (
               <a key={pm.id} href={pm.driveFolderUrl} target="_blank" rel="noopener noreferrer"
                 className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-all hover:scale-[1.01]"
-                style={{ background: '#14143a', border: '1px solid #2a2a5a', color: '#a78bfa' }}>
+                style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#8b5cf6' }}>
                 <CharAvatar user={pm} size={22} />
                 📁 Mở Drive của {pm.name}
               </a>
             ))}
           </div>
         ) : needsOwnFolderName && pmsWithDrive.length > 0 ? (
-          <div className="mb-4 p-3 rounded-lg" style={{ background: '#2a1a00', border: '1px solid #4a3a00' }}>
-            <p className="text-amber-300 text-xs leading-relaxed mb-3">
+          <div className="mb-4 p-3 rounded-lg" style={{ background: '#fbbf2414', border: '1px solid #fbbf2440' }}>
+            <p className="text-xs leading-relaxed mb-3" style={{ color: '#d97706' }}>
               ⚠️ Quản lý chưa tạo sẵn folder cho task này. Vào Drive bên dưới, tự tạo 1 folder mới, đặt tên tuỳ ý, rồi ghi lại tên đó ở ô bên dưới.
             </p>
             <div className="space-y-2">
               {pmsWithDrive.map(pm => (
                 <a key={pm.id} href={pm.driveFolderUrl} target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition-all hover:scale-[1.01]"
-                  style={{ background: '#14143a', border: '1px solid #2a2a5a', color: '#60a5fa' }}>
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#3b82f6' }}>
                   <CharAvatar user={pm} size={22} />
                   📁 Mở Drive của {pm.name}
                 </a>
@@ -6012,40 +6012,40 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
             </div>
           </div>
         ) : (
-          <div className="mb-4 p-3 rounded-lg text-xs" style={{ background: '#2a1a00', color: '#fbbf24' }}>
+          <div className="mb-4 p-3 rounded-lg text-xs" style={{ background: '#fbbf2414', color: '#d97706' }}>
             ⚠️ Quản lý dự án chưa thiết lập link Google Drive. Hãy liên hệ trực tiếp để xin link nộp file, sau đó dán vào ô bên dưới.
           </div>
         )}
 
         {needsOwnFolderName && (
           <>
-            <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Tên folder bạn đã tự tạo *</label>
+            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Tên folder bạn đã tự tạo *</label>
             <input value={folderName} onChange={e => setFolderName(e.target.value)}
               placeholder="VD: Nộp task - Nguyễn Văn A"
-              className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none mb-4"
-              style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+              className="w-full px-3 py-2.5 rounded-lg text-sm outline-none mb-4 placeholder-[color:var(--text-muted)]"
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
           </>
         )}
 
-        <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Dán link file/folder đã nộp *</label>
+        <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Dán link file/folder đã nộp *</label>
         <input value={driveLink} onChange={e => setDriveLink(e.target.value)}
           placeholder="https://drive.google.com/file/d/... hoặc /folders/..."
-          className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
-          style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
-        <p className="text-gray-600 text-[10px] mt-1.5 mb-4 leading-relaxed">
+          className="w-full px-3 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
+          style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+        <p className="text-[10px] mt-1.5 mb-4 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
           💡 Bấm chuột phải vào file/folder → "Chia sẻ" → bật quyền <b>"Bất kỳ ai có link đều xem và chỉnh sửa được"</b> → "Sao chép đường liên kết", rồi dán vào đây.
         </p>
 
-        <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Ghi chú (không bắt buộc)</label>
+        <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Ghi chú (không bắt buộc)</label>
         <textarea value={note} onChange={e => setNote(e.target.value)} rows={3}
           placeholder="Mô tả ngắn gọn kết quả đã làm..."
-          className="w-full px-4 py-2.5 mb-4 rounded-xl text-white placeholder-gray-600 text-sm outline-none resize-none"
-          style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+          className="w-full px-4 py-2.5 mb-4 rounded-xl text-sm outline-none resize-none placeholder-[color:var(--text-muted)]"
+          style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
 
-        {error && <p className="text-red-400 text-xs mb-3">{error}</p>}
+        {error && <p className="text-xs mb-3" style={{ color: '#dc2626' }}>{error}</p>}
 
         <div className="flex gap-2">
-          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl font-semibold text-sm text-gray-400" style={{ background: '#14143a' }}>
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl font-semibold text-sm" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
             Huỷ
           </button>
           <button onClick={handleSubmit} disabled={saving}
@@ -6101,7 +6101,6 @@ function CollaborationRequestModal({ currentUser, users, onClose }: {
     setSaving(false)
     if (insertError) { setError(insertError.message); return }
 
-    const targetManager = users.find(u => u.id === targetManagerId)
     await supabase.from('notifications').insert({
       message: `🤝 ${currentUser.name} (${TEAMS.find(t => t.id === currentUser.teamId)?.name ?? ''}) muốn nhờ bạn hỗ trợ: "${title.trim()}"`,
       target_user_id: targetManagerId,
@@ -6112,75 +6111,75 @@ function CollaborationRequestModal({ currentUser, users, onClose }: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.8)' }}>
       <div className="w-full max-w-md rounded-2xl p-6 animate-slide-up max-h-[90vh] overflow-y-auto"
-        style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
+        style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
         <div className="flex justify-between items-center mb-5">
-          <h3 className="text-white font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif' }}>🤝 Yêu cầu phối hợp phòng ban</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-2xl leading-none">×</button>
+          <h3 className="font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>🤝 Yêu cầu phối hợp phòng ban</h3>
+          <button onClick={onClose} className="text-2xl leading-none hover:opacity-70" style={{ color: 'var(--text-muted)' }}>×</button>
         </div>
 
         <div className="space-y-3.5">
           <div>
-            <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Tên dự án / công việc phối hợp *</label>
+            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Tên dự án / công việc phối hợp *</label>
             <input value={title} onChange={e => setTitle(e.target.value)}
               placeholder="VD: Chiến dịch truyền thông Q4"
-              className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
-              style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+              className="w-full px-3 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
           </div>
 
           <div>
-            <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Nhiệm vụ cần phối hợp *</label>
+            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Nhiệm vụ cần phối hợp *</label>
             <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3}
               placeholder="Mô tả cụ thể công việc cần bên hỗ trợ thực hiện..."
-              className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none resize-none"
-              style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+              className="w-full px-3 py-2.5 rounded-lg text-sm outline-none resize-none placeholder-[color:var(--text-muted)]"
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Ngày bắt đầu *</label>
+              <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Ngày bắt đầu *</label>
               <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-lg text-white text-sm outline-none"
-                style={{ background: '#14143a', border: '1px solid #2a2a5a', colorScheme: 'dark' }} />
+                className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
             </div>
             <div>
-              <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Ngày kết thúc *</label>
+              <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Ngày kết thúc *</label>
               <input type="date" value={endDate} min={startDate || undefined} onChange={e => setEndDate(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-lg text-white text-sm outline-none"
-                style={{ background: '#14143a', border: '1px solid #2a2a5a', colorScheme: 'dark' }} />
+                className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
             </div>
           </div>
 
           <div>
-            <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Điểm EXP thưởng cho người nhận việc *</label>
+            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Điểm EXP thưởng cho người nhận việc *</label>
             <input type="number" value={expReward} onChange={e => setExpReward(parseInt(e.target.value) || 0)}
-              className="w-full px-3 py-2.5 rounded-lg text-amber-400 text-sm outline-none font-bold"
-              style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+              className="w-full px-3 py-2.5 rounded-lg text-amber-500 text-sm outline-none font-bold"
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }} />
           </div>
 
-          <div className="p-3 rounded-lg" style={{ background: '#0a0a1a', border: '1px solid #1e1e3a' }}>
+          <div className="p-3 rounded-lg" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
             <label className="flex items-center gap-2.5 mb-2 cursor-pointer select-none">
               <input type="checkbox" checked={driveFolderCreated}
                 onChange={e => setDriveFolderCreated(e.target.checked)}
                 className="w-4 h-4 rounded accent-violet-500" />
-              <span className="text-white text-sm font-medium">📁 Tôi đã tạo sẵn folder Drive cho công việc này</span>
+              <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>📁 Tôi đã tạo sẵn folder Drive cho công việc này</span>
             </label>
             {driveFolderCreated ? (
               <input value={driveFolderName} onChange={e => setDriveFolderName(e.target.value)}
                 placeholder="Tên folder (VD: Phối hợp - Chiến dịch Q4)"
-                className="w-full px-3 py-2.5 rounded-lg text-white placeholder-gray-600 text-sm outline-none"
-                style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+                className="w-full px-3 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
+                style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
             ) : (
-              <p className="text-gray-600 text-[10px] leading-relaxed">
+              <p className="text-[10px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
                 💡 Nếu không tick, nhân viên được phân công sẽ tự tạo folder trong Drive của bạn và tự đặt tên khi nộp.
               </p>
             )}
           </div>
 
           <div>
-            <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Chọn phòng ban muốn nhờ hỗ trợ *</label>
+            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Chọn phòng ban muốn nhờ hỗ trợ *</label>
             <select value={targetTeamId} onChange={e => { setTargetTeamId(e.target.value); setTargetManagerId('') }}
-              className="w-full px-3 py-2.5 rounded-lg text-white text-sm outline-none"
-              style={{ background: '#14143a', border: '1px solid #2a2a5a' }}>
+              className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
               <option value="">-- Chọn phòng ban --</option>
               {otherTeams.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
             </select>
@@ -6188,13 +6187,13 @@ function CollaborationRequestModal({ currentUser, users, onClose }: {
 
           {targetTeamId && (
             <div>
-              <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Chọn quản lý muốn phối hợp *</label>
+              <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Chọn quản lý muốn phối hợp *</label>
               {managersInTargetTeam.length === 0 ? (
-                <p className="text-red-400 text-xs">Phòng ban này chưa có quản lý nào trong hệ thống.</p>
+                <p className="text-xs" style={{ color: '#dc2626' }}>Phòng ban này chưa có quản lý nào trong hệ thống.</p>
               ) : (
                 <select value={targetManagerId} onChange={e => setTargetManagerId(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-lg text-white text-sm outline-none"
-                  style={{ background: '#14143a', border: '1px solid #2a2a5a' }}>
+                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
                   <option value="">-- Chọn quản lý --</option>
                   {managersInTargetTeam.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                 </select>
@@ -6202,12 +6201,12 @@ function CollaborationRequestModal({ currentUser, users, onClose }: {
             </div>
           )}
 
-          {error && <p className="text-red-400 text-xs">{error}</p>}
+          {error && <p className="text-xs" style={{ color: '#dc2626' }}>{error}</p>}
 
           <div className="flex gap-3 pt-1">
             <button onClick={onClose}
-              className="flex-1 py-2.5 rounded-xl text-gray-400 text-sm"
-              style={{ background: '#14143a', border: '1px solid #2a2a5a' }}>Hủy</button>
+              className="flex-1 py-2.5 rounded-xl text-sm"
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>Hủy</button>
             <button onClick={handleSubmit} disabled={saving}
               className="flex-1 py-2.5 rounded-xl font-bold text-white text-sm disabled:opacity-40"
               style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
@@ -6219,6 +6218,7 @@ function CollaborationRequestModal({ currentUser, users, onClose }: {
     </div>
   )
 }
+
 
 function CollaborationsPanel({ currentUser, users, collaborations }: {
   currentUser: User; users: User[]; collaborations: Collaboration[]
@@ -6293,14 +6293,14 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
   }
 
   const statusBadge = (c: Collaboration) => {
-    if (c.status === 'pending') return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#2a1a00', color: '#fbbf24' }}>⏳ Chờ duyệt</span>
+    if (c.status === 'pending') return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#fbbf2422', color: '#d97706' }}>⏳ Chờ duyệt</span>
     if (c.status === 'rejected') return (
       <div className="flex flex-col items-end gap-0.5">
-        <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#2a1010', color: '#f87171' }}>❌ Bị từ chối</span>
-        {c.rejectedReason && <span className="text-gray-500 text-[10px] max-w-[200px] text-right">{c.rejectedReason}</span>}
+        <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#f8717122', color: '#dc2626' }}>❌ Bị từ chối</span>
+        {c.rejectedReason && <span className="text-[10px] max-w-[200px] text-right" style={{ color: 'var(--text-muted)' }}>{c.rejectedReason}</span>}
       </div>
     )
-    return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#0f2a1a', color: '#34d399' }}>✅ Đã phân công: {getUserById(c.assignedEmployeeId)?.name}</span>
+    return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#34d39922', color: '#059669' }}>✅ Đã phân công: {getUserById(c.assignedEmployeeId)?.name}</span>
   }
 
   if (sent.length === 0 && receivedPending.length === 0 && receivedProcessed.length === 0) return null
@@ -6308,39 +6308,39 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
   return (
     <div className="mb-6 space-y-4">
       {receivedPending.length > 0 && (
-        <div className="rounded-xl p-4" style={{ background: '#0e0e24', border: '1px solid #f59e0b30' }}>
-          <h3 className="text-white font-bold mb-3 text-sm flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+        <div className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid #f59e0b40' }}>
+          <h3 className="font-bold mb-3 text-sm flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
             🤝 Yêu cầu phối hợp cần bạn duyệt
-            <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: '#2a1a00', color: '#fbbf24' }}>{receivedPending.length}</span>
+            <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: '#fbbf2422', color: '#d97706' }}>{receivedPending.length}</span>
           </h3>
           <div className="space-y-3">
             {receivedPending.map(c => (
-              <div key={c.id} className="p-3 rounded-lg" style={{ background: '#12122a', border: '1px solid #1a1a3a' }}>
+              <div key={c.id} className="p-3 rounded-lg" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
                 <div className="mb-2">
-                  <div className="text-white text-sm font-semibold">{c.title}</div>
-                  <div className="text-gray-500 text-xs mt-0.5">
+                  <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{c.title}</div>
+                  <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
                     Từ: {getUserById(c.requestedBy)?.name} ({TEAMS.find(t => t.id === c.requestingTeamId)?.name})
                   </div>
-                  <div className="text-gray-600 text-xs mt-1">📅 {fmtDate(c.startDate)} → {fmtDate(c.endDate)}</div>
+                  <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>📅 {fmtDate(c.startDate)} → {fmtDate(c.endDate)}</div>
                   {c.expReward != null && (
-                    <div className="text-amber-400 text-xs mt-1 font-bold">+{c.expReward} EXP (do bên yêu cầu đề xuất)</div>
+                    <div className="text-amber-500 text-xs mt-1 font-bold">+{c.expReward} EXP (do bên yêu cầu đề xuất)</div>
                   )}
                 </div>
-                <p className="text-gray-400 text-xs mb-3 leading-relaxed">{c.description}</p>
+                <p className="text-xs mb-3 leading-relaxed" style={{ color: 'var(--text-muted)' }}>{c.description}</p>
 
                 {assigningId === c.id ? (
-                  <div className="space-y-2 p-2.5 rounded-lg" style={{ background: '#0a0a1a' }}>
-                    <label className="text-gray-500 text-[10px] uppercase tracking-wider block">Phân công nhân viên phòng bạn</label>
+                  <div className="space-y-2 p-2.5 rounded-lg" style={{ background: 'var(--bg-panel)' }}>
+                    <label className="text-[10px] uppercase tracking-wider block" style={{ color: 'var(--text-muted)' }}>Phân công nhân viên phòng bạn</label>
                     <select value={pickedEmployee} onChange={e => setPickedEmployee(e.target.value)}
-                      className="w-full px-2.5 py-2 rounded-lg text-white text-xs outline-none"
-                      style={{ background: '#14143a', border: '1px solid #2a2a5a' }}>
+                      className="w-full px-2.5 py-2 rounded-lg text-xs outline-none"
+                      style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
                       <option value="">-- Chọn nhân viên --</option>
                       {myTeamEmployees.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                     </select>
                     <div className="flex gap-2 pt-1">
-                      <button onClick={() => setAssigningId(null)} className="flex-1 py-1.5 rounded-lg text-xs text-gray-400" style={{ background: '#14143a' }}>Hủy</button>
+                      <button onClick={() => setAssigningId(null)} className="flex-1 py-1.5 rounded-lg text-xs" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>Hủy</button>
                       <button onClick={() => handleConfirmAssign(c)} disabled={!pickedEmployee}
-                        className="flex-1 py-1.5 rounded-lg text-xs font-bold disabled:opacity-40" style={{ background: '#0f2a1a', color: '#34d399' }}>
+                        className="flex-1 py-1.5 rounded-lg text-xs font-bold disabled:opacity-40" style={{ background: '#34d39922', color: '#059669' }}>
                         Xác nhận phân công
                       </button>
                     </div>
@@ -6348,11 +6348,11 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
                 ) : (
                   <div className="flex gap-2 justify-end">
                     <button onClick={() => handleReject(c)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#2a1010', color: '#f87171' }}>
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>
                       Từ chối
                     </button>
                     <button onClick={() => openAssign(c)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#0f2a1a', color: '#34d399' }}>
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#34d39922', color: '#059669' }}>
                       ✓ Duyệt
                     </button>
                   </div>
@@ -6364,14 +6364,14 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
       )}
 
       {receivedProcessed.length > 0 && (
-        <div className="rounded-xl p-4" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
-          <h3 className="text-white font-bold mb-3 text-sm" style={{ fontFamily: 'Rajdhani, sans-serif' }}>📋 Yêu cầu phối hợp đã xử lý</h3>
+        <div className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+          <h3 className="font-bold mb-3 text-sm" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>📋 Yêu cầu phối hợp đã xử lý</h3>
           <div className="space-y-2">
             {receivedProcessed.map(c => (
-              <div key={c.id} className="p-3 rounded-lg flex items-center justify-between gap-3" style={{ background: '#12122a', border: '1px solid #1a1a3a' }}>
+              <div key={c.id} className="p-3 rounded-lg flex items-center justify-between gap-3" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
                 <div>
-                  <div className="text-white text-sm font-medium">{c.title}</div>
-                  <div className="text-gray-500 text-xs">Từ: {getUserById(c.requestedBy)?.name}</div>
+                  <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{c.title}</div>
+                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Từ: {getUserById(c.requestedBy)?.name}</div>
                 </div>
                 {statusBadge(c)}
               </div>
@@ -6381,14 +6381,14 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
       )}
 
       {sent.length > 0 && (
-        <div className="rounded-xl p-4" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
-          <h3 className="text-white font-bold mb-3 text-sm" style={{ fontFamily: 'Rajdhani, sans-serif' }}>📨 Yêu cầu phối hợp đã gửi</h3>
+        <div className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+          <h3 className="font-bold mb-3 text-sm" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>📨 Yêu cầu phối hợp đã gửi</h3>
           <div className="space-y-2">
             {sent.map(c => (
-              <div key={c.id} className="p-3 rounded-lg flex items-center justify-between gap-3" style={{ background: '#12122a', border: '1px solid #1a1a3a' }}>
+              <div key={c.id} className="p-3 rounded-lg flex items-center justify-between gap-3" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
                 <div>
-                  <div className="text-white text-sm font-medium">{c.title}</div>
-                  <div className="text-gray-500 text-xs">Nhờ: {getUserById(c.targetManagerId)?.name ?? TEAMS.find(t => t.id === c.targetTeamId)?.name}</div>
+                  <div className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{c.title}</div>
+                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Nhờ: {getUserById(c.targetManagerId)?.name ?? TEAMS.find(t => t.id === c.targetTeamId)?.name}</div>
                 </div>
                 {statusBadge(c)}
               </div>
@@ -6417,30 +6417,30 @@ function MultiUserSelect({ label, options, selected, onToggle, placeholder = 'Ch
 
   return (
     <div ref={ref} className="relative">
-      <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">
-        {label} {selected.length > 0 && <span className="text-violet-400">({selected.length} được chọn)</span>}
+      <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+        {label} {selected.length > 0 && <span style={{ color: '#8b5cf6' }}>({selected.length} được chọn)</span>}
       </label>
       <button onClick={() => setOpen(!open)}
         className="w-full px-3 py-2.5 rounded-lg text-sm text-left flex items-center justify-between"
-        style={{ background: '#14143a', border: '1px solid #2a2a5a', color: selected.length > 0 ? '#e2e8f0' : '#6b7280' }}>
+        style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: selected.length > 0 ? 'var(--text-primary)' : 'var(--text-muted)' }}>
         <span>
           {selected.length === 0 ? placeholder
             : selected.map(sid => options.find(u => u.id === sid)?.name.split(' ').slice(-1)[0]).join(', ')}
         </span>
-        <span className="text-gray-500">{open ? '▲' : '▼'}</span>
+        <span style={{ color: 'var(--text-muted)' }}>{open ? '▲' : '▼'}</span>
       </button>
       {open && (
         <div className="absolute z-10 top-full left-0 right-0 mt-1 rounded-xl overflow-hidden max-h-60 overflow-y-auto"
-          style={{ background: '#14143a', border: '1px solid #2a2a5a', boxShadow: '0 8px 24px #00000060' }}>
+          style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.25)' }}>
           {options.map(u => (
             <label key={u.id}
-              className="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer transition-colors hover:bg-[#1e1e4a]">
+              className="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer transition-colors hover:bg-[color:var(--bg-panel)]">
               <input type="checkbox" checked={selected.includes(u.id)} onChange={() => onToggle(u.id)}
                 className="w-4 h-4 rounded accent-violet-500" />
               <CharAvatar user={u} size={24} />
-              <span className="text-white text-sm flex-1">{u.name}</span>
+              <span className="text-sm flex-1" style={{ color: 'var(--text-primary)' }}>{u.name}</span>
               {badge && u.role === 'manager' && (
-                <span className="text-[9px] px-1 rounded" style={{ background: '#1a0a3a', color: '#a78bfa' }}>{badge}</span>
+                <span className="text-[9px] px-1 rounded" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>{badge}</span>
               )}
               <LevelBadge exp={u.exp} />
             </label>
@@ -6452,6 +6452,7 @@ function MultiUserSelect({ label, options, selected, onToggle, placeholder = 'Ch
 }
 
 
+//==================== TASKS COMMENTS =====================
 //==================== TASKS COMMENTS =====================
 function TaskCommentsPanel({ taskId, currentUser, users }: { taskId: string; currentUser: User; users: User[] }) {
   const [comments, setComments] = useState<{ id: string; userId: string; content: string; createdAt: string }[]>([])
@@ -6481,12 +6482,12 @@ function TaskCommentsPanel({ taskId, currentUser, users }: { taskId: string; cur
   }
 
   return (
-    <div className="mt-3 pt-3" style={{ borderTop: '1px solid #1e1e4a' }} onClick={e => e.stopPropagation()}>
+    <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }} onClick={e => e.stopPropagation()}>
       {loading ? (
-        <p className="text-gray-600 text-xs">Đang tải...</p>
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Đang tải...</p>
       ) : (
         <div className="space-y-2 max-h-52 overflow-y-auto mb-2">
-          {comments.length === 0 && <p className="text-gray-600 text-xs italic">Chưa có bình luận nào.</p>}
+          {comments.length === 0 && <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>Chưa có bình luận nào.</p>}
           {comments.map(c => {
             const u = users.find(x => x.id === c.userId)
             return (
@@ -6494,10 +6495,10 @@ function TaskCommentsPanel({ taskId, currentUser, users }: { taskId: string; cur
                 {u && <CharAvatar user={u} size={22} />}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline gap-1.5">
-                    <span className="text-gray-300 text-xs font-semibold">{u?.name ?? 'Ẩn danh'}</span>
-                    <span className="text-gray-700 text-[10px]">{fmtTime(c.createdAt)}</span>
+                    <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{u?.name ?? 'Ẩn danh'}</span>
+                    <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{fmtTime(c.createdAt)}</span>
                   </div>
-                  <p className="text-gray-400 text-xs break-words">{c.content}</p>
+                  <p className="text-xs break-words" style={{ color: 'var(--text-muted)' }}>{c.content}</p>
                 </div>
               </div>
             )
@@ -6508,8 +6509,8 @@ function TaskCommentsPanel({ taskId, currentUser, users }: { taskId: string; cur
         <input value={input} onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && send()}
           placeholder="Viết bình luận..."
-          className="flex-1 min-w-0 px-3 py-1.5 rounded-lg text-white placeholder-gray-600 text-xs outline-none"
-          style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
+          className="flex-1 min-w-0 px-3 py-1.5 rounded-lg text-xs outline-none placeholder-[color:var(--text-muted)]"
+          style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
         <button onClick={send} disabled={!input.trim()}
           className="px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-40 flex-shrink-0"
           style={{ background: '#7c3aed', color: '#fff' }}>
