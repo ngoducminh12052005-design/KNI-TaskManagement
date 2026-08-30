@@ -7661,21 +7661,22 @@ function RedemptionHistoryPanel({ users }: { users: User[] }) {
     }
     return true // 'all'
   })
+
   const exportExcel = () => {
-  const rows = filtered.map(r => {
-  const u = users.find(x => x.id === r.userId)
-  const team = TEAMS.find(t => t.id === u?.teamId)
-  return {
-    'Nhân viên': u?.name ?? '(đã xoá)',
-    'Email': u?.email ?? '',
-    'Phòng ban': team?.name ?? '',
-    'Phần thưởng': r.rewardName,
-    'Điểm đã dùng': r.cost,
-    'Ngày đổi': new Date(r.redeemedAt).toLocaleString('vi-VN'),
-  }
-})
-const ws = XLSX.utils.json_to_sheet(rows)
-ws['!cols'] = [{ wch: 22 }, { wch: 26 }, { wch: 28 }, { wch: 25 }, { wch: 14 }, { wch: 20 }]
+    const rows = filtered.map(r => {
+      const u = users.find(x => x.id === r.userId)
+      const team = TEAMS.find(t => t.id === u?.teamId)
+      return {
+        'Nhân viên': u?.name ?? '(đã xoá)',
+        'Email': u?.email ?? '',
+        'Phòng ban': team?.name ?? '',
+        'Phần thưởng': r.rewardName,
+        'Điểm đã dùng': r.cost,
+        'Ngày đổi': new Date(r.redeemedAt).toLocaleString('vi-VN'),
+      }
+    })
+    const ws = XLSX.utils.json_to_sheet(rows)
+    ws['!cols'] = [{ wch: 22 }, { wch: 26 }, { wch: 28 }, { wch: 25 }, { wch: 14 }, { wch: 20 }]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Lich su doi qua')
     const label = range === 'week' ? 'tuan-nay' : range === 'month' ? 'thang-nay' : range === 'custom' ? `${customFrom || 'batdau'}_${customTo || 'ketthuc'}` : 'tatca'
@@ -7690,9 +7691,9 @@ ws['!cols'] = [{ wch: 22 }, { wch: 26 }, { wch: 28 }, { wch: 25 }, { wch: 14 }, 
   ]
 
   return (
-    <div className="mt-8 rounded-xl p-5" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
+    <div className="mt-8 rounded-xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-        <h3 className="text-white font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+        <h3 className="font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
           📋 Lịch sử đổi quà toàn công ty
         </h3>
         <button onClick={exportExcel} disabled={filtered.length === 0}
@@ -7706,38 +7707,38 @@ ws['!cols'] = [{ wch: 22 }, { wch: 26 }, { wch: 28 }, { wch: 25 }, { wch: 14 }, 
         {RANGE_OPTIONS.map(opt => (
           <button key={opt.id} onClick={() => setRange(opt.id)}
             className="px-3 py-1.5 rounded-lg text-xs font-semibold"
-            style={{ background: range === opt.id ? '#7c3aed' : '#14143a', color: range === opt.id ? '#fff' : '#6b7280' }}>
+            style={{ background: range === opt.id ? '#7c3aed' : 'var(--bg-card-alt)', color: range === opt.id ? '#fff' : 'var(--text-muted)' }}>
             {opt.label}
           </button>
         ))}
         {range === 'custom' && (
           <>
             <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
-              className="px-2 py-1.5 rounded-lg text-xs text-white outline-none"
-              style={{ background: '#14143a', border: '1px solid #2a2a5a', colorScheme: 'dark' }} />
-            <span className="text-gray-600 text-xs">đến</span>
+              className="px-2 py-1.5 rounded-lg text-xs outline-none"
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>đến</span>
             <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
-              className="px-2 py-1.5 rounded-lg text-xs text-white outline-none"
-              style={{ background: '#14143a', border: '1px solid #2a2a5a', colorScheme: 'dark' }} />
+              className="px-2 py-1.5 rounded-lg text-xs outline-none"
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
           </>
         )}
       </div>
 
       {loading ? (
-        <p className="text-gray-500 text-sm">Đang tải...</p>
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Đang tải...</p>
       ) : filtered.length === 0 ? (
-        <p className="text-gray-500 text-sm">Không có dữ liệu trong khoảng thời gian này.</p>
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Không có dữ liệu trong khoảng thời gian này.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-gray-500 text-left" style={{ borderBottom: '1px solid #1e1e4a' }}>
-                <th className="py-2 pr-4">Nhân viên</th>
-                <th className="py-2 pr-4">Email</th>
-                <th className="py-2 pr-4">Phòng ban</th>
-                <th className="py-2 pr-4">Phần thưởng</th>
-                <th className="py-2 pr-4">Điểm</th>
-                <th className="py-2 pr-4">Ngày đổi</th>
+              <tr className="text-left" style={{ borderBottom: '1px solid var(--border)' }}>
+                <th className="py-2 pr-4" style={{ color: 'var(--text-muted)' }}>Nhân viên</th>
+                <th className="py-2 pr-4" style={{ color: 'var(--text-muted)' }}>Email</th>
+                <th className="py-2 pr-4" style={{ color: 'var(--text-muted)' }}>Phòng ban</th>
+                <th className="py-2 pr-4" style={{ color: 'var(--text-muted)' }}>Phần thưởng</th>
+                <th className="py-2 pr-4" style={{ color: 'var(--text-muted)' }}>Điểm</th>
+                <th className="py-2 pr-4" style={{ color: 'var(--text-muted)' }}>Ngày đổi</th>
               </tr>
             </thead>
             <tbody>
@@ -7745,15 +7746,15 @@ ws['!cols'] = [{ wch: 22 }, { wch: 26 }, { wch: 28 }, { wch: 25 }, { wch: 14 }, 
                 const u = users.find(x => x.id === r.userId)
                 const team = TEAMS.find(t => t.id === u?.teamId)
                 return (
-                  <tr key={r.id} style={{ borderBottom: '1px solid #14142a' }}>
-                    <td className="py-2 pr-4 text-gray-300">{u?.name ?? '(đã xoá)'}</td>
-                    <td className="py-2 pr-4 text-gray-500 text-xs">{u?.email ?? ''}</td>
-                    <td className="py-2 pr-4 text-gray-500 text-xs">{team?.name ?? ''}</td>
-                    <td className="py-2 pr-4 text-gray-300">{r.rewardName}</td>
-                    <td className="py-2 pr-4 text-amber-400">{r.cost}</td>
-                    <td className="py-2 pr-4 text-gray-500">{new Date(r.redeemedAt).toLocaleDateString('vi-VN')}</td>
+                  <tr key={r.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td className="py-2 pr-4" style={{ color: 'var(--text-primary)' }}>{u?.name ?? '(đã xoá)'}</td>
+                    <td className="py-2 pr-4 text-xs" style={{ color: 'var(--text-muted)' }}>{u?.email ?? ''}</td>
+                    <td className="py-2 pr-4 text-xs" style={{ color: 'var(--text-muted)' }}>{team?.name ?? ''}</td>
+                    <td className="py-2 pr-4" style={{ color: 'var(--text-primary)' }}>{r.rewardName}</td>
+                    <td className="py-2 pr-4 text-amber-500">{r.cost}</td>
+                    <td className="py-2 pr-4" style={{ color: 'var(--text-muted)' }}>{new Date(r.redeemedAt).toLocaleDateString('vi-VN')}</td>
                   </tr>
-                ) 
+                )
               })}
             </tbody>
           </table>
