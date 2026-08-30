@@ -7846,56 +7846,36 @@ function RewardsView({ currentUser, redemptions, users }: { currentUser: User; r
   const [notice, setNotice] = useState('')
 
   const handleRedeem = async (r: Reward) => {
-  if (availablePoints < r.cost || redeemed.includes(r.id)) return
-  const { error } = await supabase.from('redemptions').insert({
-    user_id: currentUser.id, reward_id: r.id, reward_name: r.name, cost: r.cost,
-  })
-  if (error) { setNotice('❌ Lỗi: ' + error.message); setTimeout(() => setNotice(''), 3500); return }
+    if (availablePoints < r.cost || redeemed.includes(r.id)) return
+    const { error } = await supabase.from('redemptions').insert({
+      user_id: currentUser.id, reward_id: r.id, reward_name: r.name, cost: r.cost,
+    })
+    if (error) { setNotice('❌ Lỗi: ' + error.message); setTimeout(() => setNotice(''), 3500); return }
 
-  await supabase.from('notifications').insert({
-    message: `🎁 ${currentUser.name} vừa dùng ${r.cost} điểm đổi lấy: ${r.name}`,
-  })
+    await supabase.from('notifications').insert({
+      message: `🎁 ${currentUser.name} vừa dùng ${r.cost} điểm đổi lấy: ${r.name}`,
+    })
 
-  setNotice(`🎉 Đổi thành công: ${r.name}!`)
-  setTimeout(() => setNotice(''), 3500)
-}
-//   const handleRedeem = async (r: Reward) => {
-//   if (availablePoints < r.cost || redeemed.includes(r.id)) return
-//   const { error } = await supabase.from('redemptions').insert({
-//     user_id: currentUser.id, reward_id: r.id, reward_name: r.name, cost: r.cost,
-//   })
-//   if (error) { setNotice('❌ Lỗi: ' + error.message); setTimeout(() => setNotice(''), 3500); return }
+    setNotice(`🎉 Đổi thành công: ${r.name}!`)
+    setTimeout(() => setNotice(''), 3500)
+  }
 
-//   const notifMessage = `🎁 ${currentUser.name} vừa dùng ${r.cost} điểm đổi lấy: ${r.name}`
-//   await supabase.from('notifications').insert({ message: notifMessage })
-
-//   const { data: pushData, error: pushError } =
-//   await supabase.functions.invoke('send-push', {
-//     body: { message: notifMessage }
-//   })
-
-// console.log('Push result:', pushData)
-// console.log('Push error:', pushError)
-
-//   setNotice(`🎉 Đổi thành công: ${r.name}!`)
-//   setTimeout(() => setNotice(''), 3500)
-// }
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-start justify-between mb-6">
         <div>
-          <h2 className="text-white text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif' }}>🎁 Cửa Hàng Phần Thưởng</h2>
-          <p className="text-gray-500 text-sm">Đổi EXP lấy phần thưởng xứng đáng</p>
+          <h2 className="text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>🎁 Cửa Hàng Phần Thưởng</h2>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Đổi EXP lấy phần thưởng xứng đáng</p>
         </div>
-        <div className="px-5 py-3 rounded-xl text-right" style={{ background: '#1a1200', border: '1px solid #3a2800' }}>
-          <div className="text-gray-500 text-xs mb-0.5">Điểm khả dụng</div>
-          <div className="text-amber-400 text-2xl font-black" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{availablePoints.toLocaleString()} ⚡</div>
+        <div className="px-5 py-3 rounded-xl text-right" style={{ background: '#f59e0b14', border: '1px solid #f59e0b30' }}>
+          <div className="text-xs mb-0.5" style={{ color: 'var(--text-muted)' }}>Điểm khả dụng</div>
+          <div className="text-amber-500 text-2xl font-black" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{availablePoints.toLocaleString()} ⚡</div>
         </div>
-        </div>
+      </div>
 
       {notice && (
-        <div className="mb-5 p-3 rounded-xl text-center text-green-400 text-sm font-medium animate-slide-up"
-          style={{ background: '#0a2a1a', border: '1px solid #10b98130' }}>{notice}</div>
+        <div className="mb-5 p-3 rounded-xl text-center text-sm font-medium animate-slide-up"
+          style={{ background: '#10b98114', border: '1px solid #10b98130', color: '#10b981' }}>{notice}</div>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -7904,21 +7884,28 @@ function RewardsView({ currentUser, redemptions, users }: { currentUser: User; r
           const done = redeemed.includes(r.id)
           return (
             <div key={r.id} className="rounded-xl p-5 flex flex-col transition-all hover:-translate-y-0.5"
-              style={{ background: '#0e0e24', border: `1px solid ${done ? '#10b98130' : can ? '#1e1e4a' : '#141420'}`, opacity: done ? 0.75 : 1 }}>
+              style={{
+                background: 'var(--bg-panel)',
+                border: `1px solid ${done ? '#10b98130' : can ? 'var(--border)' : 'var(--border)'}`,
+                opacity: done ? 0.75 : can ? 1 : 0.6,
+              }}>
               <div className="text-4xl text-center mb-3">{r.emoji}</div>
               <div className="flex-1 text-center">
-                <h3 className="text-white font-bold mb-1" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{r.name}</h3>
-                <p className="text-gray-500 text-xs mb-2">{r.description}</p>
-                <span className="text-xs px-2 py-0.5 rounded" style={{ background: '#0e0e28', color: '#4b5563' }}>{r.category}</span>
+                <h3 className="font-bold mb-1" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>{r.name}</h3>
+                <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>{r.description}</p>
+                <span className="text-xs px-2 py-0.5 rounded" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>{r.category}</span>
               </div>
               <div className="mt-4 text-center mb-2">
-                <span className="text-xl font-black" style={{ fontFamily: 'Rajdhani, sans-serif', color: can ? '#f59e0b' : '#4b5563' }}>
+                <span className="text-xl font-black" style={{ fontFamily: 'Rajdhani, sans-serif', color: can ? '#d97706' : 'var(--text-muted)' }}>
                   {r.cost.toLocaleString()} EXP
                 </span>
               </div>
               <button onClick={() => handleRedeem(r)} disabled={!can || done}
                 className="w-full py-2 rounded-lg font-bold text-sm disabled:cursor-not-allowed"
-                style={{ background: done ? '#0a2a1a' : can ? 'linear-gradient(135deg,#7c3aed,#f59e0b)' : '#141420', color: done ? '#10b981' : can ? '#fff' : '#3a3a5a' }}>
+                style={{
+                  background: done ? '#10b98118' : can ? 'linear-gradient(135deg,#7c3aed,#f59e0b)' : 'var(--bg-card-alt)',
+                  color: done ? '#10b981' : can ? '#fff' : 'var(--text-muted)',
+                }}>
                 {done ? '✓ Đã đổi' : can ? 'Đổi ngay' : 'Chưa đủ EXP'}
               </button>
             </div>
