@@ -7895,16 +7895,6 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
     return messages.some(m => m.channel === 'dm' && m.userId === partnerId && m.toUserId === currentUser.id && m.timestamp > seen)
   }
 
-  // const send = () => {
-  //   if (!input.trim()) return
-  //   setMessages([...messages, {
-  //     id: `m_${Date.now()}`, userId: currentUser.id, content: input.trim(),
-  //     timestamp: new Date().toISOString(),
-  //     channel: isDm ? 'dm' : channel,
-  //     ...(isDm ? { toUserId: dmUserId! } : {}),
-  //   }])
-  //   setInput('')
-  // }
   const mentionCandidates = mentionQuery === null ? [] : users
     .filter(u => u.id !== currentUser.id)
     .filter(u => u.name.toLowerCase().includes(mentionQuery.toLowerCase()))
@@ -7947,7 +7937,6 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
     setInput('')
     setMentionQuery(null)
 
-    // Báo cho những người bị @tag trong tin nhắn
     const mentioned = parseMentions(content, users)
     const notifiedIds = new Set<string>()
     const currentChannel = isDm ? 'dm' : channel
@@ -7969,12 +7958,6 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
   }
 
   const canPost = isDm || channel !== 'announcements' || currentUser.role === 'manager'
-
-  // const CHANNELS: { id: ChatChannel; label: string; desc: string }[] = [
-  //   { id: 'general', label: '# chung', desc: 'Tất cả' },
-  //   { id: 'team', label: '# team', desc: 'Nội bộ' },
-  //   { id: 'announcements', label: '📣 thông báo', desc: 'Manager' },
-  // ]
 
   const myTeam = TEAMS.find(t => t.id === currentUser.teamId)
 
@@ -8001,7 +7984,6 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
   const headerLabel = showMentions ? '🔔 Nhắc đến tôi' : isDm ? `@ ${dmPartner?.name ?? ''}` : CHANNELS.find(c => c.id === channel)?.label
   const headerDesc = showMentions ? 'Tất cả tin nhắn có tag bạn' : isDm ? 'Nhắn tin riêng' : CHANNELS.find(c => c.id === channel)?.desc
 
-  // Tối đa 3 thông báo mới nhất của Ban Giám đốc (BOD), được ghim ở đầu kênh "thông báo"
   const pinnedAnnouncements = (channel === 'announcements' && !isDm && !showMentions)
     ? [...messages]
         .filter(m => m.channel === 'announcements' && users.find(u => u.id === m.userId)?.isDirector)
@@ -8031,12 +8013,12 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
     <div className="flex" style={{ height: 'calc(100vh - 64px)' }}>
     {/* Sidebar */}
     <div className="w-16 md:w-48 flex-shrink-0 p-1.5 md:p-3 flex flex-col overflow-hidden"
-      style={{ background: '#060610', borderRight: '1px solid #1a1a3a' }}>
-        <p className="text-gray-700 text-[10px] uppercase tracking-widest px-2 mb-2">Kênh</p>
+      style={{ background: 'var(--bg-panel)', borderRight: '1px solid var(--border)' }}>
+        <p className="text-[10px] uppercase tracking-widest px-2 mb-2" style={{ color: 'var(--text-muted)' }}>Kênh</p>
         {CHANNELS.map(ch => (
           <button key={ch.id} onClick={() => openChannel(ch.id)} title={ch.label}
             className="relative w-full text-left px-2 py-2 rounded-lg mb-0.5 transition-all flex md:block items-center justify-center md:justify-start"
-            style={{ background: !isDm && !showMentions && channel === ch.id ? '#1a1a40' : 'transparent', color: !isDm && !showMentions && channel === ch.id ? '#e2e8f0' : '#6b7280' }}>
+            style={{ background: !isDm && !showMentions && channel === ch.id ? 'var(--bg-card-alt)' : 'transparent', color: !isDm && !showMentions && channel === ch.id ? 'var(--text-primary)' : 'var(--text-muted)' }}>
             <span className="text-lg md:hidden relative">
               {ch.icon}
               {channelUnread(ch.id) && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500" />}
@@ -8045,23 +8027,23 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
               <span className="truncate">{ch.label}</span>
               {channelUnread(ch.id) && <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />}
             </div>
-            <div className="text-[10px] opacity-50 hidden md:block">{ch.desc}</div>
+            <div className="text-[10px] opacity-60 hidden md:block">{ch.desc}</div>
           </button>
         ))}
 
-        <p className="text-gray-700 text-[10px] uppercase tracking-widest px-2 mt-4 mb-2">Online ({users.length})</p>
+        <p className="text-[10px] uppercase tracking-widest px-2 mt-4 mb-2" style={{ color: 'var(--text-muted)' }}>Online ({users.length})</p>
         <div className="space-y-1 overflow-y-auto flex-1">
           {users.filter(u => u.id !== currentUser.id).map(u => (
             <button key={u.id} onClick={() => openDm(u.id)}
               className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all"
-              style={{ background: isDm && !showMentions && dmUserId === u.id ? '#1a1a40' : 'transparent' }}>
+              style={{ background: isDm && !showMentions && dmUserId === u.id ? 'var(--bg-card-alt)' : 'transparent' }}>
               <div className="relative flex-shrink-0">
                 <CharAvatar user={u} size={20} />
                 <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-400"
-                  style={{ border: '1.5px solid #060610' }} />
+                  style={{ border: '1.5px solid var(--bg-panel)' }} />
               </div>
-              <span className="text-gray-300 text-[11px] truncate flex-1 text-left">{u.name.split(' ').slice(-1)[0]}</span>
-              {u.role === 'manager' && <span className="text-[9px] text-purple-400">QL</span>}
+              <span className="text-[11px] truncate flex-1 text-left" style={{ color: 'var(--text-muted)' }}>{u.name.split(' ').slice(-1)[0]}</span>
+              {u.role === 'manager' && <span className="text-[9px]" style={{ color: '#8b5cf6' }}>QL</span>}
               {dmUnread(u.id) && <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />}
             </button>
           ))}
@@ -8069,19 +8051,19 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
       </div>
 
       {/* Chat */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="px-5 py-3 flex items-center gap-2 flex-shrink-0" style={{ borderBottom: '1px solid #1a1a3a' }}>
+      <div className="flex-1 flex flex-col overflow-hidden" style={{ background: 'var(--bg-app)' }}>
+        <div className="px-5 py-3 flex items-center gap-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
           {isDm && dmPartner && <CharAvatar user={dmPartner} size={24} />}
-          <span className="text-white font-bold" style={{ fontFamily: 'Rajdhani, sans-serif' }}>
+          <span className="font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
             {headerLabel}
           </span>
-          <span className="text-gray-600 text-xs">— {headerDesc}</span>
-          <span className="ml-auto text-gray-600 text-xs">{filtered.length} tin nhắn</span>
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>— {headerDesc}</span>
+          <span className="ml-auto text-xs" style={{ color: 'var(--text-muted)' }}>{filtered.length} tin nhắn</span>
         </div>
 
         {pinnedAnnouncements.length > 0 && (
-          <div className="px-4 pt-3 pb-1 flex-shrink-0 space-y-2" style={{ background: '#120d00', borderBottom: '1px solid #3a2e00' }}>
-            <p className="text-amber-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+          <div className="px-4 pt-3 pb-1 flex-shrink-0 space-y-2" style={{ background: '#fbbf2410', borderBottom: '1px solid #fbbf2440' }}>
+            <p className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1" style={{ color: '#d97706' }}>
               📌 Thông báo mới nhất
             </p>
             {pinnedAnnouncements.map(msg => {
@@ -8089,23 +8071,23 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
               if (!sender) return null
               return (
                 <div key={msg.id} onClick={() => jumpToMessage(msg.id)}
-                  className="flex items-start gap-2 p-2.5 rounded-lg mb-2 group transition-all hover:brightness-110"
-                  style={{ background: '#1e1600', border: '1px solid #4a3a00', cursor: 'pointer' }}>
+                  className="flex items-start gap-2 p-2.5 rounded-lg mb-2 group transition-all hover:brightness-105"
+                  style={{ background: '#fbbf2418', border: '1px solid #fbbf2440', cursor: 'pointer' }}>
                   <CharAvatar user={sender} size={26} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-amber-300 text-xs font-bold">👑 BOD · {sender.name}</span>
-                      <span className="text-gray-600 text-[10px]">{fmtTime(msg.timestamp)}</span>
+                      <span className="text-xs font-bold" style={{ color: '#d97706' }}>👑 BOD · {sender.name}</span>
+                      <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{fmtTime(msg.timestamp)}</span>
                     </div>
-                    <p className="text-amber-100/90 text-xs mt-0.5 leading-relaxed break-words">
+                    <p className="text-xs mt-0.5 leading-relaxed break-words" style={{ color: 'var(--text-primary)' }}>
                       {renderMessageContent(msg.content, users, setProfileUser)}
                     </p>
                   </div>
                   {currentUser.isDirector && (
                     <button onClick={e => { e.stopPropagation(); handleUnpin(msg.id) }}
                       title="Gỡ khỏi ghim (đã hoàn thành / hết hạn)"
-                      className="flex-shrink-0 opacity-0 group-hover:opacity-100 text-amber-400/70 hover:text-red-400 text-xs px-2 py-1 rounded-lg transition-all"
-                      style={{ background: '#0000002a' }}>
+                      className="flex-shrink-0 opacity-0 group-hover:opacity-100 hover:text-red-500 text-xs px-2 py-1 rounded-lg transition-all"
+                      style={{ background: 'rgba(0,0,0,0.06)', color: '#d97706' }}>
                       🗑 Gỡ
                     </button>
                   )}
@@ -8126,23 +8108,23 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
             return (
               <div key={msg.id} ref={el => { messageRefs.current[msg.id] = el }}
                 className={`flex gap-3 ${isMe ? 'flex-row-reverse' : ''}`}
-                style={{ transition: 'background 0.4s ease', borderRadius: 12, background: isHighlighted ? '#7c3aed22' : 'transparent' }}>
+                style={{ transition: 'background 0.4s ease', borderRadius: 12, background: isHighlighted ? '#7c3aed1a' : 'transparent' }}>
                 <CharAvatar user={sender} size={36} />
                 <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[75%]`}>
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
                     {!isMe && (
-                      <span className="text-xs font-semibold flex items-center gap-1" style={{ color: isManagerMsg ? '#fbbf24' : sender.avatar.outfitColor }}>
+                      <span className="text-xs font-semibold flex items-center gap-1" style={{ color: isManagerMsg ? '#d97706' : sender.avatar.outfitColor }}>
                         {isManagerMsg && '👑'} {sender.name}
                       </span>
                     )}
-                    <span className="text-gray-700 text-[10px]">{fmtTime(msg.timestamp)}</span>
+                    <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{fmtTime(msg.timestamp)}</span>
                     {mentionsMe && (
-                      <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: '#3a2e00', color: '#facc15' }}>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: '#fbbf2422', color: '#d97706' }}>
                         Bạn được tag
                       </span>
                     )}
                     {showMentions && (
-                      <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#1e1e4a', color: '#9ca3af' }}>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
                         {msg.channel === 'dm'
                           ? `DM với ${(msg.userId === currentUser.id ? users.find(u => u.id === msg.toUserId) : users.find(u => u.id === msg.userId))?.name ?? '?'}`
                           : msg.channel === 'team' ? '# team' : msg.channel === 'announcements' ? '📣 thông báo' : '# chung'}
@@ -8151,11 +8133,11 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
                   </div>
                   <div className="px-4 py-2.5 text-sm leading-relaxed"
                     style={{
-                      background: isMe ? 'linear-gradient(135deg,#7c3aed,#5b21b6)' : mentionsMe ? '#241d05' : isManagerMsg ? '#1e1600' : '#0e0e24',
-                      color: isMe ? '#fff' : '#d1d5db',
+                      background: isMe ? 'linear-gradient(135deg,#7c3aed,#5b21b6)' : mentionsMe ? '#fbbf2414' : isManagerMsg ? '#fbbf2410' : 'var(--bg-panel)',
+                      color: isMe ? '#fff' : 'var(--text-primary)',
                       borderRadius: isMe ? '18px 4px 18px 18px' : '4px 18px 18px 18px',
-                      border: isMe ? 'none' : mentionsMe ? '1px solid #facc15' : isManagerMsg ? '1px solid #4a3a00' : '1px solid #1e1e4a',
-                      boxShadow: mentionsMe ? '0 0 12px #facc1530' : 'none',
+                      border: isMe ? 'none' : mentionsMe ? '1px solid #facc1560' : isManagerMsg ? '1px solid #fbbf2440' : '1px solid var(--border)',
+                      boxShadow: mentionsMe ? '0 0 12px #facc1520' : 'none',
                     }}>
                     {renderMessageContent(msg.content, users, setProfileUser)}
                   </div>
@@ -8164,7 +8146,7 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
             )
           })}
           {filtered.length === 0 && (
-            <div className="text-center py-16 text-gray-700">
+            <div className="text-center py-16" style={{ color: 'var(--text-muted)' }}>
               <div className="text-3xl mb-2">💬</div>
               <div className="text-sm">
                 {isDm ? `Chưa có tin nhắn nào với ${dmPartner?.name}. Hãy bắt đầu!` : 'Chưa có tin nhắn nào. Hãy bắt đầu cuộc trò chuyện!'}
@@ -8174,9 +8156,9 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
           <div ref={endRef} />
         </div>
 
-        <div className="p-4 flex-shrink-0" style={{ borderTop: '1px solid #1a1a3a' }}>
+        <div className="p-4 flex-shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
           {showMentions ? (
-            <div className="text-center text-gray-600 text-sm py-2">
+            <div className="text-center text-sm py-2" style={{ color: 'var(--text-muted)' }}>
               💬 Bấm vào kênh tương ứng bên trên tin nhắn để trả lời
             </div>
           ) : canPost ? (
@@ -8185,12 +8167,12 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
               <div className="relative flex-1 min-w-0">
                 {mentionQuery !== null && mentionCandidates.length > 0 && (
                   <div className="absolute bottom-full left-0 mb-2 w-64 rounded-xl overflow-hidden z-20"
-                    style={{ background: '#14143a', border: '1px solid #2a2a5a', boxShadow: '0 8px 24px #00000060' }}>
+                    style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.25)' }}>
                     {mentionCandidates.map(u => (
                       <button key={u.id} onClick={() => selectMention(u)}
-                        className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-[#1e1e4a] transition-colors">
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-[color:var(--bg-panel)] transition-colors">
                         <CharAvatar user={u} size={22} />
-                        <span className="text-white text-sm">{u.name}</span>
+                        <span className="text-sm" style={{ color: 'var(--text-primary)' }}>{u.name}</span>
                       </button>
                     ))}
                   </div>
@@ -8208,8 +8190,8 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
                     if (e.key === 'Escape') setMentionQuery(null)
                   }}
                   placeholder={isDm ? `Nhắn riêng cho ${dmPartner?.name}... (gõ @ để tag, Enter để gửi)` : `Nhắn vào ${CHANNELS.find(c => c.id === channel)?.label}... (gõ @ để tag, Enter để gửi)`}
-                  className="w-full px-4 py-2.5 rounded-xl text-white placeholder-gray-600 text-sm outline-none"
-                  style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }} />
+                  className="w-full px-4 py-2.5 rounded-xl text-sm outline-none placeholder-[color:var(--text-muted)]"
+                  style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
               </div>
               <button onClick={send} disabled={!input.trim()}
                 className="flex-shrink-0 px-4 py-2.5 rounded-xl font-bold text-sm disabled:opacity-40 transition-all hover:scale-105"
@@ -8218,7 +8200,7 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
               </button>
             </div>
           ) : (
-            <div className="text-center text-gray-600 text-sm py-2">
+            <div className="text-center text-sm py-2" style={{ color: 'var(--text-muted)' }}>
               📣 Chỉ Manager mới có thể đăng vào kênh thông báo
             </div>
           )}
@@ -8435,7 +8417,7 @@ function NotificationBell({ notifications, onNotificationClick }: {
 
   return (
     <div className="relative">
-      <button onClick={toggle} className="relative w-9 h-9 rounded-lg flex items-center justify-center hover:bg-[#1a1a40]">
+      <button onClick={toggle} className="relative w-9 h-9 rounded-lg flex items-center justify-center hover:bg-[color:var(--bg-card-alt)]">
         <span className="text-lg">🔔</span>
         {unread > 0 && (
           <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center font-bold">
@@ -8445,26 +8427,27 @@ function NotificationBell({ notifications, onNotificationClick }: {
       </button>
       {open && (
         <div className="absolute right-0 top-full mt-2 w-80 max-h-96 overflow-y-auto rounded-xl z-50"
-          style={{ background: '#0e0e24', border: '1px solid #1e1e4a', boxShadow: '0 8px 24px #00000060' }}>
-          <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid #1e1e4a' }}>
-            <span className="text-white font-bold text-sm">Thông báo</span>
+          style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.25)' }}>
+          <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
+            <span className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>Thông báo</span>
             {notifications.length > 0 && (
-              <button onClick={deleteAll} className="text-[10px] text-red-400 hover:underline">Xoá tất cả</button>
+              <button onClick={deleteAll} className="text-[10px] hover:underline" style={{ color: '#dc2626' }}>Xoá tất cả</button>
             )}
           </div>
           {notifications.length === 0 ? (
-            <p className="text-gray-600 text-sm text-center py-6">Chưa có thông báo nào</p>
+            <p className="text-sm text-center py-6" style={{ color: 'var(--text-muted)' }}>Chưa có thông báo nào</p>
           ) : (
             notifications.map(n => (
               <div key={n.id}
                 onClick={() => { if (n.linkChannel || n.linkTaskId) { onNotificationClick?.(n); setOpen(false) } }}
-                className="px-4 py-3 flex items-start justify-between gap-2 group" style={{ borderBottom: '1px solid #14142a', cursor: (n.linkChannel || n.linkTaskId) ? 'pointer' : 'default' }}>
+                className="px-4 py-3 flex items-start justify-between gap-2 group" style={{ borderBottom: '1px solid var(--border)', cursor: (n.linkChannel || n.linkTaskId) ? 'pointer' : 'default' }}>
                 <div className="flex-1">
-                  <p className="text-sm text-gray-300">{n.message}</p>
-                  <p className="text-gray-600 text-[10px] mt-1">{fmtTime(n.createdAt)}</p>
+                  <p className="text-sm" style={{ color: 'var(--text-primary)' }}>{n.message}</p>
+                  <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>{fmtTime(n.createdAt)}</p>
                 </div>
                 <button onClick={e => { e.stopPropagation(); deleteOne(n.id) }}
-                  className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400 text-xs flex-shrink-0">
+                  className="opacity-0 group-hover:opacity-100 hover:text-red-500 text-xs flex-shrink-0"
+                  style={{ color: 'var(--text-muted)' }}>
                   ✕
                 </button>
               </div>
@@ -8473,8 +8456,7 @@ function NotificationBell({ notifications, onNotificationClick }: {
         </div>
       )}
     </div>
-  )
-}
+  )}
 
 function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, messages, setMessages, redemptions, notifications, collaborations }: {
   currentUser: User; setCurrentUser: (u: User) => void; allUsers: User[]
