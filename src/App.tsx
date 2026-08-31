@@ -8062,8 +8062,8 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
         </div>
 
         {pinnedAnnouncements.length > 0 && (
-          <div className="px-4 pt-3 pb-1 flex-shrink-0 space-y-2" style={{ background: '#fbbf2410', borderBottom: '1px solid #fbbf2440' }}>
-            <p className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1" style={{ color: '#d97706' }}>
+          <div className="px-4 pt-3 pb-1 flex-shrink-0 space-y-2" style={{ background: '#fbbf2422', borderBottom: '1px solid #fbbf2460' }}>
+            <p className="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1" style={{ color: '#b45309' }}>
               📌 Thông báo mới nhất
             </p>
             {pinnedAnnouncements.map(msg => {
@@ -8072,12 +8072,12 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
               return (
                 <div key={msg.id} onClick={() => jumpToMessage(msg.id)}
                   className="flex items-start gap-2 p-2.5 rounded-lg mb-2 group transition-all hover:brightness-105"
-                  style={{ background: '#fbbf2418', border: '1px solid #fbbf2440', cursor: 'pointer' }}>
+                  style={{ background: '#fef3c7', border: '1px solid #f59e0b50', boxShadow: '0 1px 3px rgba(245,158,11,0.15)', cursor: 'pointer' }}>
                   <CharAvatar user={sender} size={26} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-bold" style={{ color: '#d97706' }}>👑 BOD · {sender.name}</span>
-                      <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{fmtTime(msg.timestamp)}</span>
+                      <span className="text-xs font-bold" style={{ color: '#b45309' }}>👑 BOD · {sender.name}</span>
+                      <span className="text-[10px]" style={{ color: '#92400e' }}>{fmtTime(msg.timestamp)}</span>
                     </div>
                     <p className="text-xs mt-0.5 leading-relaxed break-words" style={{ color: 'var(--text-primary)' }}>
                       {renderMessageContent(msg.content, users, setProfileUser)}
