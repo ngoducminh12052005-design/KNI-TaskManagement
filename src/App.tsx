@@ -7622,29 +7622,29 @@ function BodLogView({ tasks, users }: { tasks: Task[]; users: User[] }) {
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <div className="text-center mb-6">
-        <h2 className="text-white text-3xl font-black mb-1" style={{ fontFamily: 'Rajdhani, sans-serif' }}>📊 Nhật ký BOD</h2>
-        <p className="text-gray-500 text-sm">Theo dõi task đã duyệt và phần thưởng đã đổi toàn công ty</p>
+        <h2 className="text-3xl font-black mb-1" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>📊 Nhật ký BOD</h2>
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Theo dõi task đã duyệt và phần thưởng đã đổi toàn công ty</p>
       </div>
 
-      <div className="flex p-1 rounded-xl mb-6 max-w-md mx-auto" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
+      <div className="flex p-1 rounded-xl mb-6 max-w-md mx-auto" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
         {[['tasks', '📋 Task đã duyệt'], ['rewards', '🎁 Phần thưởng đã đổi']].map(([id, lbl]) => (
           <button key={id} onClick={() => setTab(id as typeof tab)}
             className="flex-1 py-2 rounded-lg text-sm font-medium transition-all"
-            style={{ background: tab === id ? '#7c3aed' : 'transparent', color: tab === id ? '#fff' : '#6b7280' }}>
+            style={{ background: tab === id ? '#7c3aed' : 'transparent', color: tab === id ? '#fff' : 'var(--text-muted)' }}>
             {lbl}
           </button>
         ))}
       </div>
 
       {tab === 'tasks' ? (
-        <div className="rounded-xl overflow-hidden" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
+        <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
           {approvedTasks.length === 0 ? (
-            <p className="text-gray-500 text-sm text-center py-10">Chưa có task nào được duyệt.</p>
+            <p className="text-sm text-center py-10" style={{ color: 'var(--text-muted)' }}>Chưa có task nào được duyệt.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-gray-500 text-left" style={{ borderBottom: '1px solid #1e1e4a' }}>
+                  <tr className="text-left" style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
                     <th className="py-2.5 px-4">Task</th>
                     <th className="py-2.5 px-4">Người phụ trách</th>
                     <th className="py-2.5 px-4">Phòng ban</th>
@@ -7659,17 +7659,17 @@ function BodLogView({ tasks, users }: { tasks: Task[]; users: User[] }) {
                     const approver = getUserById(t.approvedBy)
                     const team = TEAMS.find(team => team.id === assignee?.teamId)
                     return (
-                      <tr key={t.id} style={{ borderBottom: '1px solid #14142a' }}>
-                        <td className="py-2.5 px-4 text-white font-medium">{t.title}</td>
-                        <td className="py-2.5 px-4 text-gray-300">
+                      <tr key={t.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                        <td className="py-2.5 px-4 font-medium" style={{ color: 'var(--text-primary)' }}>{t.title}</td>
+                        <td className="py-2.5 px-4" style={{ color: 'var(--text-primary)' }}>
                           {t.assignedTo.map(id => getUserById(id)?.name).filter(Boolean).join(', ') || '—'}
                         </td>
-                        <td className="py-2.5 px-4 text-gray-500 text-xs">{team?.name ?? '—'}</td>
-                        <td className="py-2.5 px-4 text-gray-300">{approver?.name ?? '—'}</td>
-                        <td className="py-2.5 px-4 text-gray-500 text-xs">
+                        <td className="py-2.5 px-4 text-xs" style={{ color: 'var(--text-muted)' }}>{team?.name ?? '—'}</td>
+                        <td className="py-2.5 px-4" style={{ color: 'var(--text-primary)' }}>{approver?.name ?? '—'}</td>
+                        <td className="py-2.5 px-4 text-xs" style={{ color: 'var(--text-muted)' }}>
                           {t.approvedAt ? new Date(t.approvedAt).toLocaleString('vi-VN') : '—'}
                         </td>
-                        <td className="py-2.5 px-4 text-amber-400 font-bold">+{t.expReward}</td>
+                        <td className="py-2.5 px-4 font-bold text-amber-500">+{t.expReward}</td>
                       </tr>
                     )
                   })}
@@ -7772,24 +7772,24 @@ function RewardsView({ currentUser, redemptions, users }: { currentUser: User; r
 function UserProfileCard({ user, onClose, onMessage }: { user: User; onClose: () => void; onMessage?: () => void }) {
   const { progress, needed, level } = getExpProgress(user.exp)
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-50 px-4" style={{ background: '#000000a0' }} onClick={onClose}>
+    <div className="fixed inset-0 flex items-center justify-center z-50 px-4" style={{ background: 'rgba(0,0,0,0.7)' }} onClick={onClose}>
       <div className="relative w-full max-w-xs rounded-2xl p-6 text-center animate-slide-up"
         onClick={e => e.stopPropagation()}
-        style={{ background: `linear-gradient(135deg, ${user.avatar.outfitColor}18, #0e0e24)`, border: `1px solid ${user.avatar.outfitColor}35` }}>
-        <button onClick={onClose} className="absolute top-3 right-3 text-gray-500 hover:text-gray-300 text-xl leading-none">×</button>
+        style={{ background: `linear-gradient(135deg, ${user.avatar.outfitColor}18, var(--bg-panel))`, border: `1px solid ${user.avatar.outfitColor}35` }}>
+        <button onClick={onClose} className="absolute top-3 right-3 text-xl leading-none hover:opacity-70" style={{ color: 'var(--text-muted)' }}>×</button>
         <div className="w-24 h-32 mx-auto mb-3 rounded-2xl overflow-hidden flex items-end justify-center"
           style={{ background: `${user.avatar.outfitColor}20`, border: `2px solid ${user.avatar.outfitColor}40`, boxShadow: `0 0 24px ${user.avatar.outfitColor}40` }}>
           <FullAvatar avatar={user.avatar} size={86} />
         </div>
-        <h3 className="text-white font-bold text-lg mb-0.5" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{user.name}</h3>
-        <p className="text-gray-500 text-xs mb-3">{TEAMS.find(t => t.id === user.teamId)?.name ?? user.department}</p>
+        <h3 className="font-bold text-lg mb-0.5" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>{user.name}</h3>
+        <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>{TEAMS.find(t => t.id === user.teamId)?.name ?? user.department}</p>
         <div className="flex justify-center mb-3"><LevelBadge exp={user.exp} /></div>
-        <div className="text-amber-400 text-xl font-black mb-1" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{user.exp.toLocaleString()} EXP</div>
-        <div className="text-gray-600 text-[11px] mb-3">Cần {needed} EXP → Lv.{level + 1}</div>
-        <div className="h-1.5 rounded-full overflow-hidden mb-4" style={{ background: '#1a1a3a' }}>
+        <div className="text-amber-500 text-xl font-black mb-1" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{user.exp.toLocaleString()} EXP</div>
+        <div className="text-[11px] mb-3" style={{ color: 'var(--text-muted)' }}>Cần {needed} EXP → Lv.{level + 1}</div>
+        <div className="h-1.5 rounded-full overflow-hidden mb-4" style={{ background: 'var(--border)' }}>
           <div className="h-full rounded-full" style={{ width: `${progress}%`, background: 'linear-gradient(90deg,#7c3aed,#f59e0b)' }} />
         </div>
-        <span className="inline-block px-3 py-1 rounded-lg text-xs font-medium" style={{ background: '#1a0a3a', color: '#a78bfa', border: '1px solid #3a1a6a' }}>
+        <span className="inline-block px-3 py-1 rounded-lg text-xs font-medium" style={{ background: '#a78bfa18', color: '#8b5cf6', border: '1px solid #a78bfa30' }}>
           {user.role === 'manager' ? '👑 Quản Lý' : '⚔️ Nhân Viên'}
         </span>
         {onMessage && (
