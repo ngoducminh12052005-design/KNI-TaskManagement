@@ -5056,7 +5056,13 @@ function renderMessageContent(content: string, users: User[], onMentionClick?: (
       nodes.push(
         <span key={idx}
           onClick={e => { e.stopPropagation(); onMentionClick?.(t.user) }}
-          style={{ color: '#facc15', fontWeight: 600, cursor: onMentionClick ? 'pointer' : 'default', textDecoration: 'underline', textUnderlineOffset: '2px' }}>
+          style={{
+            color: isMe ? '#fff' : '#b45309',
+            fontWeight: 700,
+            cursor: onMentionClick ? 'pointer' : 'default',
+            textDecoration: 'underline',
+            textUnderlineOffset: '2px',
+          }}>
           {content.slice(t.start, t.end)}
         </span>
       )
