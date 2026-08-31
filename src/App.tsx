@@ -5039,7 +5039,7 @@ function parseLinks(content: string): { start: number; end: number; url: string 
 }
 
 // Render nội dung tin nhắn: tô màu @tag (bấm để xem hồ sơ) và biến link thành đường dẫn bấm được
-function renderMessageContent(content: string, users: User[], onMentionClick?: (u: User) => void) {
+function renderMessageContent(content: string, users: User[], onMentionClick?: (u: User) => void, isMe?: boolean) {
   type Token = { start: number; end: number; type: 'mention'; user: User } | { start: number; end: number; type: 'link'; url: string }
   const mentionTokens: Token[] = parseMentions(content, users).map(m => ({ ...m, type: 'mention' as const }))
   const linkTokens: Token[] = parseLinks(content).map(l => ({ ...l, type: 'link' as const }))
@@ -5064,7 +5064,13 @@ function renderMessageContent(content: string, users: User[], onMentionClick?: (
       nodes.push(
         <a key={idx} href={t.url} target="_blank" rel="noopener noreferrer"
           onClick={e => e.stopPropagation()}
-          style={{ color: '#60a5fa', textDecoration: 'underline', textUnderlineOffset: '2px', wordBreak: 'break-all' }}>
+          style={{
+            color: isMe ? '#fff' : '#1d4ed8',
+            fontWeight: 600,
+            textDecoration: 'underline',
+            textUnderlineOffset: '2px',
+            wordBreak: 'break-all',
+          }}>
           {content.slice(t.start, t.end)}
         </a>
       )
@@ -8139,7 +8145,7 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
                       border: isMe ? 'none' : mentionsMe ? '1px solid #facc1560' : isManagerMsg ? '1px solid #fbbf2440' : '1px solid var(--border)',
                       boxShadow: mentionsMe ? '0 0 12px #facc1520' : 'none',
                     }}>
-                    {renderMessageContent(msg.content, users, setProfileUser)}
+                    {renderMessageContent(msg.content, users, setProfileUser, isMe)}
                   </div>
                 </div>
               </div>
