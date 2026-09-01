@@ -8563,41 +8563,46 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
       </div>
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden order-first md:order-none">
-        {/* Topbar */}
-        <div className="h-16 flex items-center justify-between px-5 flex-shrink-0" style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
-          <div className="flex items-center gap-2.5">
-            <img src={companyLogo} alt="KNI" className="w-8 h-8 rounded-md object-contain md:hidden" />
-            <h1 className="font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
+                {/* Topbar */}
+        <div className="h-16 flex items-center justify-between px-3 sm:px-5 flex-shrink-0" style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <img src={companyLogo} alt="KNI" className="w-8 h-8 rounded-md object-contain md:hidden flex-shrink-0" />
+            <h1 className="font-bold text-base sm:text-lg truncate" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
               {navItems.find(n => n.id === view)?.icon} {navItems.find(n => n.id === view)?.label}
             </h1>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 md:gap-4 flex-shrink-0">
             <button onClick={toggleTheme}
               title={theme === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'}
-              className="w-9 h-9 rounded-lg flex items-center justify-center text-lg transition-all"
+              className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center text-base sm:text-lg transition-all flex-shrink-0"
               style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
               {theme === 'dark' ? '☀️' : '🌙'}
             </button>
-            <div className="flex items-center gap-2.5">
+
+            <div className="hidden md:flex items-center gap-2.5">
               <span className="text-amber-400 text-xs font-bold" style={{ fontFamily: 'JetBrains Mono, monospace' }}>Lv.{level}</span>
               <div className="w-28"><ExpBarMini exp={currentUser.exp} /></div>
               <span className="text-gray-600 text-xs" style={{ fontFamily: 'JetBrains Mono, monospace' }}>{currentUser.exp}</span>
             </div>
+            <span className="md:hidden text-amber-400 text-[11px] font-bold flex-shrink-0" style={{ fontFamily: 'JetBrains Mono, monospace' }}>Lv.{level}</span>
+
             <NotificationBell notifications={notifications} onNotificationClick={handleNotificationClick} />
-            <div className="flex items-center gap-2 cursor-pointer" onClick={() => setView('profile')}>
-              <CharAvatar user={currentUser} size={36} />
-              <div>
-                <div className="text-sm font-medium leading-tight" style={{ color: 'var(--text-primary)' }}>{currentUser.name.split(' ').slice(-1)[0]}</div>
+
+            <div className="flex items-center gap-2 cursor-pointer flex-shrink-0" onClick={() => setView('profile')}>
+              <CharAvatar user={currentUser} size={32} />
+              <div className="hidden sm:block">
+                <div className="text-sm font-medium leading-tight truncate max-w-[100px]" style={{ color: 'var(--text-primary)' }}>{currentUser.name.split(' ').slice(-1)[0]}</div>
                 <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{currentUser.role === 'manager' ? '👑 Quản lý' : '⚔️ Nhân viên'}</div>
               </div>
             </div>
+
             <button
               onClick={async () => {
                 if (!window.confirm('Đăng xuất khỏi tài khoản?')) return
                 await supabase.auth.signOut()
               }}
               title="Đăng xuất"
-              className="w-9 h-9 rounded-lg flex items-center justify-center text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-all text-sm">
+              className="hidden sm:flex w-8 h-8 sm:w-9 sm:h-9 rounded-lg items-center justify-center text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-all text-sm flex-shrink-0">
               🚪
             </button>
           </div>
