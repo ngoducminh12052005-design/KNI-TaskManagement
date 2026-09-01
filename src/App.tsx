@@ -8044,7 +8044,7 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
                       <span className="text-xs font-bold" style={{ color: '#b45309' }}>👑 BOD · {sender.name}</span>
                       <span className="text-[10px]" style={{ color: '#92400e' }}>{fmtTime(msg.timestamp)}</span>
                     </div>
-                    <p className="text-xs mt-0.5 leading-relaxed break-words" style={{ color: 'var(--text-primary)' }}>
+                    <p className="text-xs mt-0.5 leading-relaxed break-words" style={{ color: '#451a03' }}>
                       {renderMessageContent(msg.content, users, setProfileUser)}
                     </p>
                   </div>
