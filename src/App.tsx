@@ -4487,6 +4487,7 @@ interface AvatarConfig {
   outfitColor: string
   accessory: number
   photoUrl?: string
+  dicebearSeed?: string
 }
 
 interface User {
@@ -4590,8 +4591,13 @@ const OUTFIT_COLORS = ['#4f46e5', '#059669', '#dc2626', '#d97706', '#0891b2', '#
 const HAIR_STYLE_LABELS = ['Ngắn', 'Vừa', 'Dài', 'Xoăn', 'Afro', 'Đuôi ngựa']
 const ACCESSORY_LABELS = ['Không', 'Kính tròn', 'Kính mát', 'Mũ', 'Băng đầu']
 
+function randomDicebearSeed() {
+  return 'kni-' + Math.random().toString(36).slice(2, 10)
+}
+
 const DEFAULT_AVATAR: AvatarConfig = {
   type: 'custom', skinTone: '#E8A87C', hairStyle: 1, hairColor: '#1a1a1a', outfitColor: '#4f46e5', accessory: 0,
+  dicebearSeed: 'kni-default',
 }
 
 function darkenColor(hex: string, f = 0.2): string {
@@ -4772,6 +4778,12 @@ function CharacterSVG({ config, w = 100, h = 120, vb = '0 0 100 120' }: {
   )
 }
 
+// Sinh URL avatar từ DiceBear (style Notionists) dựa theo seed lưu trong hồ sơ
+function buildDicebearUrl(avatar: AvatarConfig) {
+  const seed = avatar.dicebearSeed || 'kni-default'
+  return `https://api.dicebear.com/9.x/notionists/svg?seed=${encodeURIComponent(seed)}&backgroundColor=transparent`
+}
+
 // Compact avatar (head crop) used in cards, chat, lists
 function CharAvatar({ user, size = 40 }: { user: User; size?: number }) {
   if (user.avatar.type === 'photo' && user.avatar.photoUrl) {
@@ -4783,15 +4795,15 @@ function CharAvatar({ user, size = 40 }: { user: User; size?: number }) {
   return (
     <div style={{
       width: size, height: size, borderRadius: '50%', overflow: 'hidden', flexShrink: 0,
-      border: '2px solid rgba(255,255,255,0.1)', background: `${user.avatar.outfitColor}18`,
+      border: `2px solid ${user.avatar.outfitColor}40`, background: `${user.avatar.outfitColor}18`,
     }}>
-      {/* Show head area only */}
-      <CharacterSVG config={user.avatar} vb="24 4 52 52" w={size} h={size} />
+      <img src={buildDicebearUrl(user.avatar)} alt={user.name}
+        style={{ width: '100%', height: '100%', display: 'block', objectFit: 'cover' }} />
     </div>
   )
 }
 
-// Large avatar (full body) used in profile/login preview
+// Large avatar used in profile/login preview
 function FullAvatar({ avatar, size = 120 }: { avatar: AvatarConfig; size?: number }) {
   if (avatar.type === 'photo' && avatar.photoUrl) {
     return (
@@ -4799,7 +4811,10 @@ function FullAvatar({ avatar, size = 120 }: { avatar: AvatarConfig; size?: numbe
         style={{ width: size, height: size, borderRadius: '12px', objectFit: 'cover', border: '2px solid rgba(255,255,255,0.12)', display: 'block' }} />
     )
   }
-  return <CharacterSVG config={avatar} vb="0 0 100 120" w={size} h={size * 1.2} />
+  return (
+    <img src={buildDicebearUrl(avatar)} alt="avatar"
+      style={{ width: size, height: size, display: 'block' }} />
+  )
 }
 
 // ==================== AVATAR CREATOR ====================
@@ -4823,7 +4838,7 @@ function AvatarCreator({ value, onChange }: { value: AvatarConfig; onChange: (a:
     <div>
       {/* Tab switcher */}
       <div className="flex gap-1 p-0.5 rounded-xl mb-4" style={{ background: '#0a0a1a', border: '1px solid #1e1e3a' }}>
-        {[['custom', '🎨 Tự tạo nhân vật'], ['photo', '📷 Tải ảnh lên']].map(([id, label]) => (
+        {[['custom', '🧑 Nhân vật'], ['photo', '📷 Tải ảnh lên']].map(([id, label]) => (
           <button key={id} onClick={() => setTab(id as 'custom' | 'photo')}
             className="flex-1 py-2 rounded-lg text-sm font-medium transition-all"
             style={{ background: tab === id ? '#7c3aed' : 'transparent', color: tab === id ? '#fff' : '#6b7280' }}>
@@ -4836,14 +4851,14 @@ function AvatarCreator({ value, onChange }: { value: AvatarConfig; onChange: (a:
         {/* Preview */}
         <div className="flex-shrink-0 flex flex-col items-center gap-2">
           <div
-            className="rounded-2xl overflow-hidden flex items-end justify-center"
+            className="rounded-2xl overflow-hidden flex items-center justify-center"
             style={{
-              width: 110, height: 140,
-              background: `linear-gradient(160deg, ${value.outfitColor}22, #10102a)`,
-              border: `2px solid ${value.outfitColor}40`,
+              width: 110, height: 110,
+              background: `${value.outfitColor}22`,
+              border: `2px solid ${value.outfitColor}50`,
             }}
           >
-            <FullAvatar avatar={value} size={100} />
+            <FullAvatar avatar={value} size={96} />
           </div>
           <span className="text-gray-600 text-[10px]">Xem trước</span>
         </div>
@@ -4852,88 +4867,26 @@ function AvatarCreator({ value, onChange }: { value: AvatarConfig; onChange: (a:
         <div className="flex-1 space-y-3.5 min-w-0">
           {tab === 'custom' ? (
             <>
-              {/* Skin */}
               <div>
-                <p className="text-gray-500 text-[10px] uppercase tracking-widest mb-1.5">Màu da</p>
-                <div className="flex gap-2">
-                  {SKIN_TONES.map(c => (
-                    <button key={c} onClick={() => update({ skinTone: c })}
-                      className="w-7 h-7 rounded-full transition-all hover:scale-110"
-                      style={{
-                        background: c,
-                        outline: value.skinTone === c ? `3px solid ${c}` : '3px solid transparent',
-                        outlineOffset: '2px',
-                        border: value.skinTone === c ? '2px solid white' : '2px solid transparent',
-                      }} />
-                  ))}
-                </div>
+                <p className="text-gray-500 text-[10px] uppercase tracking-widest mb-2">Nhân vật</p>
+                <button onClick={() => update({ dicebearSeed: randomDicebearSeed() })}
+                  className="w-full py-2.5 rounded-lg text-sm font-semibold transition-all hover:scale-[1.02]"
+                  style={{ background: '#14143a', border: '1px solid #2a2a5a', color: '#a78bfa' }}>
+                  🎲 Đổi nhân vật ngẫu nhiên
+                </button>
               </div>
 
-              {/* Hair style */}
               <div>
-                <p className="text-gray-500 text-[10px] uppercase tracking-widest mb-1.5">Kiểu tóc</p>
-                <div className="flex flex-wrap gap-1">
-                  {HAIR_STYLE_LABELS.map((lbl, i) => (
-                    <button key={i} onClick={() => update({ hairStyle: i })}
-                      className="px-2.5 py-1 rounded-lg text-xs transition-all"
-                      style={{
-                        background: value.hairStyle === i ? '#7c3aed' : '#14143a',
-                        color: value.hairStyle === i ? '#fff' : '#6b7280',
-                        border: `1px solid ${value.hairStyle === i ? '#7c3aed' : '#1e1e4a'}`,
-                      }}>
-                      {lbl}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Hair color */}
-              <div>
-                <p className="text-gray-500 text-[10px] uppercase tracking-widest mb-1.5">Màu tóc</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {HAIR_COLORS.map(c => (
-                    <button key={c} onClick={() => update({ hairColor: c })}
-                      className="w-5 h-5 rounded-full transition-all hover:scale-110"
-                      style={{
-                        background: c,
-                        border: `2px solid ${value.hairColor === c ? 'white' : '#1e1e4a'}`,
-                        boxShadow: value.hairColor === c ? `0 0 6px ${c}` : 'none',
-                      }} />
-                  ))}
-                </div>
-              </div>
-
-              {/* Outfit */}
-              <div>
-                <p className="text-gray-500 text-[10px] uppercase tracking-widest mb-1.5">Trang phục</p>
+                <p className="text-gray-500 text-[10px] uppercase tracking-widest mb-1.5">Màu viền / chủ đạo</p>
                 <div className="flex flex-wrap gap-1.5">
                   {OUTFIT_COLORS.map(c => (
                     <button key={c} onClick={() => update({ outfitColor: c })}
-                      className="w-5 h-5 rounded-full transition-all hover:scale-110"
+                      className="w-6 h-6 rounded-full transition-all hover:scale-110"
                       style={{
                         background: c,
                         border: `2px solid ${value.outfitColor === c ? 'white' : '#1e1e4a'}`,
                         boxShadow: value.outfitColor === c ? `0 0 6px ${c}` : 'none',
                       }} />
-                  ))}
-                </div>
-              </div>
-
-              {/* Accessory */}
-              <div>
-                <p className="text-gray-500 text-[10px] uppercase tracking-widest mb-1.5">Phụ kiện</p>
-                <div className="flex flex-wrap gap-1">
-                  {ACCESSORY_LABELS.map((lbl, i) => (
-                    <button key={i} onClick={() => update({ accessory: i })}
-                      className="px-2 py-1 rounded-lg text-xs transition-all"
-                      style={{
-                        background: value.accessory === i ? '#f59e0b' : '#14143a',
-                        color: value.accessory === i ? '#1a0f00' : '#6b7280',
-                        border: `1px solid ${value.accessory === i ? '#f59e0b' : '#1e1e4a'}`,
-                        fontWeight: value.accessory === i ? '600' : '400',
-                      }}>
-                      {lbl}
-                    </button>
                   ))}
                 </div>
               </div>
@@ -4966,7 +4919,7 @@ function AvatarCreator({ value, onChange }: { value: AvatarConfig; onChange: (a:
                   {value.type === 'photo' && value.photoUrl ? 'Đổi ảnh' : 'Chọn ảnh'}
                 </button>
                 {value.type === 'photo' && value.photoUrl && (
-                  <button onClick={() => onChange({ ...DEFAULT_AVATAR })}
+                  <button onClick={() => onChange({ ...DEFAULT_AVATAR, dicebearSeed: randomDicebearSeed() })}
                     className="px-3 py-2 rounded-lg text-xs text-gray-500"
                     style={{ background: '#14143a', border: '1px solid #1e1e4a' }}>
                     Dùng nhân vật
@@ -5387,7 +5340,7 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [step] = useState<'setup'>('setup')
   const [role, setRole] = useState<Role>('employee')
   const [name, setName] = useState('')
-  const [avatar, setAvatar] = useState<AvatarConfig>({ ...DEFAULT_AVATAR })
+  const [avatar, setAvatar] = useState<AvatarConfig>({ ...DEFAULT_AVATAR, dicebearSeed: randomDicebearSeed() })
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
