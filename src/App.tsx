@@ -8535,7 +8535,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
         <div className="flex-1" />
         <button onClick={() => setView('profile')} className="mb-1">
           <div style={{ width: 40, height: 40, borderRadius: '50%', overflow: 'hidden', border: view === 'profile' ? `2px solid ${currentUser.avatar.outfitColor}` : '2px solid rgba(255,255,255,0.08)', background: `${currentUser.avatar.outfitColor}20` }}>
-            <CharacterSVG config={currentUser.avatar} vb="24 4 52 52" w={40} h={40} />
+            <CharAvatar user={currentUser} size={40} />
           </div>
         </button>
       </div>
