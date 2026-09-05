@@ -4550,6 +4550,15 @@ interface Message {
   toUserId?: string // chỉ dùng khi channel === 'dm': id của người nhận
   proposalId?: string
 }
+interface ProposalApproval {
+  id: string
+  proposalId: string
+  approverId: string
+  action: 'approved' | 'rejected' | 'forwarded'
+  note?: string
+  createdAt: string
+}
+
 
 type ProposalStatus = 'pending' | 'approved' | 'rejected'
 
@@ -8335,11 +8344,64 @@ function ProposalModal({ currentUser, users, onClose }: { currentUser: User; use
   )
 }
 
-function ProposalsView({ currentUser, users, proposals, onJoinDiscussion }: {
-  currentUser: User; users: User[]; proposals: Proposal[]
+function ForwardApprovalModal({ proposal, currentUser, users, onClose }: {
+  proposal: Proposal; currentUser: User; users: User[]; onClose: () => void
+}) {
+  const [nextApproverId, setNextApproverId] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const candidates = users.filter(u => u.id !== currentUser.id && u.id !== proposal.recipientId)
+
+  const handleForward = async () => {
+    if (!nextApproverId) return
+    setSaving(true)
+    await supabase.from('proposals').update({
+      recipient_id: nextApproverId,
+      status: 'pending',
+      participants: proposal.participants.includes(nextApproverId)
+        ? proposal.participants
+        : [...proposal.participants, nextApproverId],
+    }).eq('id', proposal.id)
+
+    await supabase.from('notifications').insert({
+      message: `📜 ${currentUser.name} chuyển tờ trình "${proposal.title}" cho bạn duyệt tiếp theo`,
+      target_user_id: nextApproverId,
+    })
+    setSaving(false)
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
+      <div className="w-full max-w-sm rounded-2xl p-6" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+        <h3 className="font-bold text-lg mb-4" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
+          📤 Mời người duyệt tiếp theo
+        </h3>
+        <select value={nextApproverId} onChange={e => setNextApproverId(e.target.value)}
+          className="w-full px-3 py-2.5 rounded-lg text-sm outline-none mb-4"
+          style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+          <option value="">-- Chọn người duyệt tiếp --</option>
+          {candidates.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+        </select>
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>Hủy</button>
+          <button onClick={handleForward} disabled={!nextApproverId || saving}
+            className="flex-1 py-2.5 rounded-xl font-bold text-white text-sm disabled:opacity-40"
+            style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
+            {saving ? 'Đang gửi...' : 'Chuyển tiếp'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ProposalsView({ currentUser, users, proposals, proposalApprovals, onJoinDiscussion }: {
+  currentUser: User; users: User[]; proposals: Proposal[]; proposalApprovals: ProposalApproval[]
   onJoinDiscussion: (p: Proposal) => void
 }) {
   const [showModal, setShowModal] = useState(false)
+  const [forwardingProposal, setForwardingProposal] = useState<Proposal | null>(null)
   const getUserById = (id?: string) => users.find(u => u.id === id)
 
   const received = proposals.filter(p => p.recipientId === currentUser.id)
@@ -8347,6 +8409,9 @@ function ProposalsView({ currentUser, users, proposals, onJoinDiscussion }: {
 
   const handleApprove = async (p: Proposal) => {
     await supabase.from('proposals').update({ status: 'approved' }).eq('id', p.id)
+    await supabase.from('proposal_approvals').insert({
+      proposal_id: p.id, approver_id: currentUser.id, action: 'approved',
+    })
     await supabase.from('notifications').insert({
       message: `✅ ${currentUser.name} đã duyệt tờ trình "${p.title}"`,
       target_user_id: p.submittedBy,
@@ -8356,6 +8421,9 @@ function ProposalsView({ currentUser, users, proposals, onJoinDiscussion }: {
   const handleReject = async (p: Proposal) => {
     const reason = window.prompt('Lý do từ chối:') ?? ''
     await supabase.from('proposals').update({ status: 'rejected', rejected_reason: reason }).eq('id', p.id)
+    await supabase.from('proposal_approvals').insert({
+      proposal_id: p.id, approver_id: currentUser.id, action: 'rejected', note: reason || null,
+    })
     await supabase.from('notifications').insert({
       message: `❌ ${currentUser.name} đã từ chối tờ trình "${p.title}"${reason ? `: ${reason}` : ''}`,
       target_user_id: p.submittedBy,
@@ -8366,6 +8434,23 @@ function ProposalsView({ currentUser, users, proposals, onJoinDiscussion }: {
     if (p.status === 'pending') return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#fbbf2422', color: '#d97706' }}>⏳ Chờ duyệt</span>
     if (p.status === 'rejected') return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#f8717122', color: '#dc2626' }}>❌ Bị từ chối</span>
     return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#34d39922', color: '#059669' }}>✅ Đã duyệt</span>
+  }
+
+  const ApprovalHistory = ({ p }: { p: Proposal }) => {
+    const history = proposalApprovals.filter(a => a.proposalId === p.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    if (history.length === 0) return null
+    return (
+      <div className="mt-2 pt-2 space-y-1" style={{ borderTop: '1px solid var(--border)' }}>
+        <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Lịch sử duyệt</p>
+        {history.map(a => (
+          <div key={a.id} className="text-xs flex items-center gap-1.5">
+            <span>{a.action === 'approved' ? '✅' : '❌'}</span>
+            <span style={{ color: 'var(--text-primary)' }}>{getUserById(a.approverId)?.name}</span>
+            <span style={{ color: 'var(--text-muted)' }}>· {new Date(a.createdAt).toLocaleDateString('vi-VN')}</span>
+          </div>
+        ))}
+      </div>
+    )
   }
 
   const ProposalCard = ({ p, showActions }: { p: Proposal; showActions?: boolean }) => (
@@ -8388,7 +8473,7 @@ function ProposalsView({ currentUser, users, proposals, onJoinDiscussion }: {
           className="text-xs underline" style={{ color: '#3b82f6' }}>
           📁 Xem tờ trình trên Drive
         </a>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button onClick={() => onJoinDiscussion(p)}
             className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>
             💬 Tham gia thảo luận
@@ -8405,8 +8490,15 @@ function ProposalsView({ currentUser, users, proposals, onJoinDiscussion }: {
               </button>
             </>
           )}
+          {p.submittedBy === currentUser.id && p.status === 'approved' && (
+            <button onClick={() => setForwardingProposal(p)}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#3b82f622', color: '#2563eb' }}>
+              📤 Mời người duyệt tiếp theo
+            </button>
+          )}
         </div>
       </div>
+      <ApprovalHistory p={p} />
     </div>
   )
 
@@ -8446,6 +8538,9 @@ function ProposalsView({ currentUser, users, proposals, onJoinDiscussion }: {
       )}
 
       {showModal && <ProposalModal currentUser={currentUser} users={users} onClose={() => setShowModal(false)} />}
+      {forwardingProposal && (
+        <ForwardApprovalModal proposal={forwardingProposal} currentUser={currentUser} users={users} onClose={() => setForwardingProposal(null)} />
+      )}
     </div>
   )
 }
@@ -8687,7 +8782,7 @@ function NotificationBell({ notifications, onNotificationClick }: {
     </div>
   )}
 
-function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, messages, setMessages, redemptions, notifications, collaborations, proposals }: {
+function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, messages, setMessages, redemptions, notifications, collaborations, proposals, proposalApprovals }: {
   currentUser: User; setCurrentUser: (u: User) => void; allUsers: User[]
   tasks: Task[]; setTasks: (t: Task[]) => void
   messages: Message[]; setMessages: (m: Message[]) => void
@@ -8695,6 +8790,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   notifications: { id: string; message: string; createdAt: string }[]
   collaborations: Collaboration[]
   proposals: Proposal[]
+  proposalApprovals: ProposalApproval[]
 }) {
   const [view, setView] = useState<View>('dashboard')
   const [theme, setTheme] = useState<ThemeMode>(() => (localStorage.getItem('themeMode') as ThemeMode) || 'dark')
@@ -8776,7 +8872,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
           proposals={proposals} />
       )
       case 'profile': return <ProfileView currentUser={currentUser} setCurrentUser={setCurrentUser} tasks={tasks} />
-      case 'proposals': return <ProposalsView currentUser={currentUser} users={users} proposals={proposals} onJoinDiscussion={handleJoinProposal} />
+      case 'proposals': return <ProposalsView currentUser={currentUser} users={users} proposals={proposals} proposalApprovals={proposalApprovals} onJoinDiscussion={handleJoinProposal} />
           case 'bodlog': return currentUser.isDirector ? <BodLogView tasks={tasks} users={users} /> : <DashboardView {...sharedProps} />
     }
   }
@@ -8927,6 +9023,7 @@ export default function App() {
   const [notifications, setNotifications] = useState<{ id: string; message: string; createdAt: string; targetUserId?: string; linkChannel?: string; linkDmUserId?: string; linkTaskId?: string }[]>([])
   const [collaborations, setCollaborations] = useState<Collaboration[]>([])
   const [proposals, setProposals] = useState<Proposal[]>([])
+  const [proposalApprovals, setProposalApprovals] = useState<ProposalApproval[]>([])
 
   function mapProfileToUser(p: any): User {
   return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email, isDirector: p.is_director ?? false, driveFolderUrl: p.drive_folder_url ?? undefined }
@@ -8969,6 +9066,12 @@ function mapDbProposal(p: any): Proposal {
     rejectedReason: p.rejected_reason ?? undefined,
     participants: p.participants ?? [],
     createdAt: p.created_at,
+  }
+}
+function mapDbProposalApproval(a: any): ProposalApproval {
+  return {
+    id: a.id, proposalId: a.proposal_id, approverId: a.approver_id,
+    action: a.action, note: a.note ?? undefined, createdAt: a.created_at,
   }
 }
 function mapDbCollaboration(c: any): Collaboration {
@@ -9138,6 +9241,17 @@ useEffect(() => {
 }, [session])
 
 
+useEffect(() => {
+  if (!session) return
+  supabase.from('proposal_approvals').select('*').then(({ data }) => data && setProposalApprovals(data.map(mapDbProposalApproval)))
+
+  const channel = supabase.channel('proposal-approvals-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'proposal_approvals' }, () => {
+      supabase.from('proposal_approvals').select('*').then(({ data }) => data && setProposalApprovals(data.map(mapDbProposalApproval)))
+    }).subscribe()
+  return () => { supabase.removeChannel(channel) }
+}, [session])
+
   // Khi allUsers cập nhật (real-time), đồng bộ luôn currentProfile nếu có thay đổi
 useEffect(() => {
   if (!currentProfile) return
@@ -9224,6 +9338,7 @@ useEffect(() => {
       notifications={notifications}
       collaborations={collaborations}
       proposals={proposals}
+      proposalApprovals={proposalApprovals}
     />
   )
 }
