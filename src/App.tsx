@@ -8274,6 +8274,7 @@ function ProposalModal({ currentUser, users, onClose }: { currentUser: User; use
     await supabase.from('notifications').insert({
       message: `📜 ${currentUser.name} vừa trình tờ trình "${title.trim()}" cho bạn`,
       target_user_id: recipientId,
+      link_proposal_id: data?.id,
     })
     onClose()
   }
@@ -8380,6 +8381,7 @@ function ForwardApprovalModal({ proposal, currentUser, users, onClose }: {
     await supabase.from('notifications').insert({
       message: `📜 ${currentUser.name} chuyển tờ trình "${proposal.title}" cho bạn duyệt tiếp theo`,
       target_user_id: nextApproverId,
+      link_proposal_id: proposal.id,
     })
     setSaving(false)
     onClose()
@@ -8434,6 +8436,11 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, onJoi
 
   const received = proposals.filter(p => p.recipientId === currentUser.id)
   const sent = proposals.filter(p => p.submittedBy === currentUser.id)
+  const processedByMe = proposals.filter(p =>
+    p.recipientId !== currentUser.id &&
+    p.submittedBy !== currentUser.id &&
+    proposalApprovals.some(a => a.proposalId === p.id && a.approverId === currentUser.id)
+  )
 
   const handleApprove = async (p: Proposal) => {
     await supabase.from('proposals').update({ status: 'approved' }).eq('id', p.id)
@@ -8443,6 +8450,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, onJoi
     await supabase.from('notifications').insert({
       message: `✅ ${currentUser.name} đã duyệt tờ trình "${p.title}"`,
       target_user_id: p.submittedBy,
+      link_proposal_id: p.id,
     })
   }
 
@@ -8455,6 +8463,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, onJoi
     await supabase.from('notifications').insert({
       message: `❌ ${currentUser.name} đã từ chối tờ trình "${p.title}"${reason ? `: ${reason}` : ''}`,
       target_user_id: p.submittedBy,
+      link_proposal_id: p.id,
     })
   }
 
@@ -8554,13 +8563,20 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, onJoi
       )}
 
       {sent.length > 0 && (
-        <div>
+        <div className="mb-6">
           <h3 className="font-bold mb-3 text-sm" style={{ color: 'var(--text-muted)' }}>📨 Đã gửi</h3>
           <div className="space-y-3">{sent.map(p => <ProposalCard key={p.id} p={p} />)}</div>
         </div>
       )}
 
-      {received.length === 0 && sent.length === 0 && (
+      {processedByMe.length > 0 && (
+        <div>
+          <h3 className="font-bold mb-3 text-sm" style={{ color: 'var(--text-muted)' }}>✅ Đã xử lý (đã chuyển tiếp)</h3>
+          <div className="space-y-3">{processedByMe.map(p => <ProposalCard key={p.id} p={p} />)}</div>
+        </div>
+      )}
+
+      {received.length === 0 && sent.length === 0 && processedByMe.length === 0 && (
         <div className="text-center py-16" style={{ color: 'var(--text-muted)' }}>
           <div className="text-4xl mb-3">📜</div>
           <div className="text-sm">Chưa có tờ trình nào</div>
@@ -8743,8 +8759,8 @@ const NAV = [
   { id: 'profile', label: 'Hồ sơ', icon: '👤' },
 ]
 function NotificationBell({ notifications, onNotificationClick }: {
-  notifications: { id: string; message: string; createdAt: string; linkChannel?: string; linkDmUserId?: string; linkTaskId?: string }[]
-  onNotificationClick?: (n: { linkChannel?: string; linkDmUserId?: string; linkTaskId?: string }) => void
+  notifications: { id: string; message: string; createdAt: string; linkChannel?: string; linkDmUserId?: string; linkTaskId?: string; linkProposalId?: string }[]
+  onNotificationClick?: (n: { linkChannel?: string; linkDmUserId?: string; linkTaskId?: string; linkProposalId?: string }) => void
 }) {
   const [open, setOpen] = useState(false)
   const [lastSeen, setLastSeen] = useState(() => localStorage.getItem('lastSeenNotif') || '')
@@ -8793,8 +8809,8 @@ function NotificationBell({ notifications, onNotificationClick }: {
           ) : (
             notifications.map(n => (
               <div key={n.id}
-                onClick={() => { if (n.linkChannel || n.linkTaskId) { onNotificationClick?.(n); setOpen(false) } }}
-                className="px-4 py-3 flex items-start justify-between gap-2 group" style={{ borderBottom: '1px solid var(--border)', cursor: (n.linkChannel || n.linkTaskId) ? 'pointer' : 'default' }}>
+                onClick={() => { if (n.linkChannel || n.linkTaskId || n.linkProposalId) { onNotificationClick?.(n); setOpen(false) } }}
+                className="px-4 py-3 flex items-start justify-between gap-2 group" style={{ borderBottom: '1px solid var(--border)', cursor: (n.linkChannel || n.linkTaskId || n.linkProposalId) ? 'pointer' : 'default' }}>
                 <div className="flex-1">
                   <p className="text-sm" style={{ color: 'var(--text-primary)' }}>{n.message}</p>
                   <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>{fmtTime(n.createdAt)}</p>
@@ -8850,7 +8866,11 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   }
   const navItems = currentUser.isDirector ? [...NAV, { id: 'bodlog', icon: '📊', label: 'Log BOD' }] : NAV
 
-  const handleNotificationClick = (n: { linkChannel?: string; linkDmUserId?: string; linkTaskId?: string }) => {
+  const handleNotificationClick = (n: { linkChannel?: string; linkDmUserId?: string; linkTaskId?: string; linkProposalId?: string }) => {
+    if (n.linkProposalId) {
+      setView('proposals')
+      return
+    }
     if (n.linkTaskId) {
       setView('tasks')
       setHighlightTaskId(n.linkTaskId)
@@ -9050,7 +9070,7 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([])
   const [checkingSession, setCheckingSession] = useState(true)
   const [redemptions, setRedemptions] = useState<{ id: string; userId: string; rewardId: string; cost: number }[]>([])
-  const [notifications, setNotifications] = useState<{ id: string; message: string; createdAt: string; targetUserId?: string; linkChannel?: string; linkDmUserId?: string; linkTaskId?: string }[]>([])
+  const [notifications, setNotifications] = useState<{ id: string; message: string; createdAt: string; targetUserId?: string; linkChannel?: string; linkDmUserId?: string; linkTaskId?: string; linkProposalId?: string }[]>([])
   const [collaborations, setCollaborations] = useState<Collaboration[]>([])
   const [proposals, setProposals] = useState<Proposal[]>([])
   const [proposalApprovals, setProposalApprovals] = useState<ProposalApproval[]>([])
@@ -9157,6 +9177,7 @@ useEffect(() => {
         linkChannel: n.link_channel ?? undefined,
         linkDmUserId: n.link_dm_user_id ?? undefined,
         linkTaskId: n.link_task_id ?? undefined,
+        linkProposalId: n.link_proposal_id ?? undefined,
       }))))
 
   const notifChannel = supabase.channel('notifications-changes')
@@ -9170,6 +9191,7 @@ useEffect(() => {
         linkChannel: n.link_channel ?? undefined,
         linkDmUserId: n.link_dm_user_id ?? undefined,
         linkTaskId: n.link_task_id ?? undefined,
+        linkProposalId: n.link_proposal_id ?? undefined,
       }, ...prev])
     })
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'notifications' }, payload => {
