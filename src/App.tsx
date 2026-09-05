@@ -8347,10 +8347,24 @@ function ProposalModal({ currentUser, users, onClose }: { currentUser: User; use
 function ForwardApprovalModal({ proposal, currentUser, users, onClose }: {
   proposal: Proposal; currentUser: User; users: User[]; onClose: () => void
 }) {
+  const [teamId, setTeamId] = useState('')
   const [nextApproverId, setNextApproverId] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const candidates = users.filter(u => u.id !== currentUser.id && u.id !== proposal.recipientId)
+  // Chỉ liệt kê những phòng ban thực sự có ít nhất 1 quản lý (khác chính mình)
+  const teamsWithManagers = TEAMS.filter(t =>
+    users.some(u => u.role === 'manager' && u.teamId === t.id && u.id !== currentUser.id)
+  )
+
+  // Sau khi chọn phòng ban, chỉ liệt kê quản lý của đúng phòng ban đó
+  const managerCandidates = users.filter(u =>
+    u.role === 'manager' && u.teamId === teamId && u.id !== currentUser.id
+  )
+
+  const handleTeamChange = (id: string) => {
+    setTeamId(id)
+    setNextApproverId('') // đổi phòng ban thì phải chọn lại quản lý
+  }
 
   const handleForward = async () => {
     if (!nextApproverId) return
@@ -8377,12 +8391,26 @@ function ForwardApprovalModal({ proposal, currentUser, users, onClose }: {
         <h3 className="font-bold text-lg mb-4" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
           📤 Mời người duyệt tiếp theo
         </h3>
-        <select value={nextApproverId} onChange={e => setNextApproverId(e.target.value)}
+
+        <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Phòng ban</label>
+        <select value={teamId} onChange={e => handleTeamChange(e.target.value)}
           className="w-full px-3 py-2.5 rounded-lg text-sm outline-none mb-4"
           style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-          <option value="">-- Chọn người duyệt tiếp --</option>
-          {candidates.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+          <option value="">-- Chọn phòng ban --</option>
+          {teamsWithManagers.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
         </select>
+
+        <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Quản lý</label>
+        <select value={nextApproverId} onChange={e => setNextApproverId(e.target.value)} disabled={!teamId}
+          className="w-full px-3 py-2.5 rounded-lg text-sm outline-none mb-4 disabled:opacity-40"
+          style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+          <option value="">{teamId ? '-- Chọn quản lý --' : 'Chọn phòng ban trước'}</option>
+          {managerCandidates.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+        </select>
+        {teamId && managerCandidates.length === 0 && (
+          <p className="text-xs mb-4" style={{ color: '#f87171' }}>Phòng ban này chưa có quản lý khác để chọn.</p>
+        )}
+
         <div className="flex gap-3">
           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>Hủy</button>
           <button onClick={handleForward} disabled={!nextApproverId || saving}
@@ -8445,7 +8473,9 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, onJoi
         {history.map(a => (
           <div key={a.id} className="text-xs flex items-center gap-1.5">
             <span>{a.action === 'approved' ? '✅' : '❌'}</span>
-            <span style={{ color: 'var(--text-primary)' }}>{getUserById(a.approverId)?.name}</span>
+            <span style={{ color: 'var(--text-primary)' }}>
+              {getUserById(a.approverId)?.name} ({TEAMS.find(t => t.id === getUserById(a.approverId)?.teamId)?.name})
+            </span>
             <span style={{ color: 'var(--text-muted)' }}>· {new Date(a.createdAt).toLocaleDateString('vi-VN')}</span>
           </div>
         ))}
