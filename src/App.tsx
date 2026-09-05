@@ -4474,10 +4474,10 @@ import * as XLSX from 'xlsx'
 // ==================== TYPES ====================
 
 type Role = 'manager' | 'employee'
-type View = 'dashboard' | 'tasks' | 'leaderboard' | 'rewards' | 'social' | 'profile' | 'bodlog'
+type View = 'dashboard' | 'tasks' | 'leaderboard' | 'rewards' | 'social' | 'profile' | 'proposals' | 'bodlog'
 type TaskStatus = 'open' | 'in-progress' | 'submitted' | 'completed'
 type TaskPriority = 'low' | 'medium' | 'high'
-type ChatChannel = 'general' | 'team' | 'announcements' | 'dm'
+type ChatChannel = 'general' | 'team' | 'announcements' | 'dm' | 'proposal'
 
 interface AvatarConfig {
   type: 'custom' | 'photo'
@@ -4548,6 +4548,22 @@ interface Message {
   timestamp: string
   channel: ChatChannel
   toUserId?: string // chỉ dùng khi channel === 'dm': id của người nhận
+  proposalId?: string
+}
+
+type ProposalStatus = 'pending' | 'approved' | 'rejected'
+
+interface Proposal {
+  id: string
+  title: string
+  description: string
+  driveUrl: string
+  submittedBy: string
+  recipientId: string
+  status: ProposalStatus
+  rejectedReason?: string
+  participants: string[]
+  createdAt: string
 }
 
 type CollaborationStatus = 'pending' | 'assigned' | 'rejected'
@@ -7770,13 +7786,15 @@ function UserProfileCard({ user, onClose, onMessage }: { user: User; onClose: ()
 }
 // ==================== SOCIAL ====================
 
-function SocialView({ currentUser, users, messages, setMessages, showMentions, setShowMentions, markMentionsSeen, navigateTarget, clearNavigateTarget }: {
+function SocialView({ currentUser, users, messages, setMessages, showMentions, setShowMentions, markMentionsSeen, navigateTarget, clearNavigateTarget, proposals }: {
   currentUser: User; users: User[]; messages: Message[]; setMessages: (m: Message[]) => void
   showMentions: boolean; setShowMentions: (v: boolean) => void; markMentionsSeen: () => void
-  navigateTarget?: { channel: ChatChannel; dmUserId?: string } | null
+  navigateTarget?: { channel: ChatChannel; dmUserId?: string; proposalId?: string } | null
   clearNavigateTarget?: () => void
+  proposals: Proposal[]
 }) {
   const [channel, setChannel] = useState<ChatChannel>('general')
+  const [proposalId, setProposalId] = useState<string | null>(null)
   const [dmUserId, setDmUserId] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
@@ -7801,19 +7819,25 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
   useEffect(() => { markSeen('channel:general') }, [])
 
   useEffect(() => {
-    if (!navigateTarget) return
-    setShowMentions(false)
-    if (navigateTarget.channel === 'dm' && navigateTarget.dmUserId) {
-      setChannel('dm')
-      setDmUserId(navigateTarget.dmUserId)
-      markSeen(`dm:${navigateTarget.dmUserId}`)
-    } else {
-      setChannel(navigateTarget.channel)
-      setDmUserId(null)
-      markSeen(`channel:${navigateTarget.channel}`)
-    }
-    clearNavigateTarget?.()
-  }, [navigateTarget])
+  if (!navigateTarget) return
+  setShowMentions(false)
+  if (navigateTarget.channel === 'proposal' && navigateTarget.proposalId) {
+    setChannel('proposal')
+    setDmUserId(null)
+    setProposalId(navigateTarget.proposalId)
+  } else if (navigateTarget.channel === 'dm' && navigateTarget.dmUserId) {
+    setChannel('dm')
+    setDmUserId(navigateTarget.dmUserId)
+    setProposalId(null)
+    markSeen(`dm:${navigateTarget.dmUserId}`)
+  } else {
+    setChannel(navigateTarget.channel)
+    setDmUserId(null)
+    setProposalId(null)
+    markSeen(`channel:${navigateTarget.channel}`)
+  }
+  clearNavigateTarget?.()
+}, [navigateTarget])
 
   useEffect(() => {
     if (showMentions) markMentionsSeen()
@@ -7827,8 +7851,12 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
     parseMentions(m.content, users).some(x => x.user.id === currentUser.id)
   )
 
+  const isProposal = channel === 'proposal' && proposalId !== null
+  const currentProposal = isProposal ? proposals.find(p => p.id === proposalId) : undefined
   const filtered = showMentions
     ? mentionMessages
+    : isProposal
+    ? messages.filter(m => m.channel === 'proposal' && m.proposalId === proposalId)
     : isDm
     ? messages.filter(m => m.channel === 'dm' &&
         ((m.userId === currentUser.id && m.toUserId === dmUserId) ||
@@ -7897,6 +7925,7 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
       to_user_id: isDm ? dmUserId : null,
       content,
       channel: isDm ? 'dm' : channel,
+      proposal_id: isProposal ? proposalId : null,
     })
     if (error) { console.error(error); return }
     setInput('')
@@ -7922,7 +7951,7 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
     }
   }
 
-  const canPost = isDm || channel !== 'announcements' || currentUser.role === 'manager'
+  const canPost = isProposal || isDm || channel !== 'announcements' || currentUser.role === 'manager'
 
   const myTeam = TEAMS.find(t => t.id === currentUser.teamId)
 
@@ -7946,8 +7975,8 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
     markSeen(`dm:${userId}`)
   }
 
-  const headerLabel = showMentions ? '🔔 Nhắc đến tôi' : isDm ? `@ ${dmPartner?.name ?? ''}` : CHANNELS.find(c => c.id === channel)?.label
-  const headerDesc = showMentions ? 'Tất cả tin nhắn có tag bạn' : isDm ? 'Nhắn tin riêng' : CHANNELS.find(c => c.id === channel)?.desc
+  const headerLabel = showMentions ? '🔔 Nhắc đến tôi' : isProposal ? `📜 ${currentProposal?.title ?? ''}` : isDm ? `@ ${dmPartner?.name ?? ''}` : CHANNELS.find(c => c.id === channel)?.label
+  const headerDesc = showMentions ? 'Tất cả tin nhắn có tag bạn' : isProposal ? `${currentProposal?.participants.length ?? 0} người tham gia` : isDm ? 'Nhắn tin riêng' : CHANNELS.find(c => c.id === channel)?.desc
 
   const pinnedAnnouncements = (channel === 'announcements' && !isDm && !showMentions)
     ? [...messages]
@@ -7995,6 +8024,22 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
             <div className="text-[10px] opacity-60 hidden md:block">{ch.desc}</div>
           </button>
         ))}
+
+        {proposals.filter(p => p.participants.includes(currentUser.id)).length > 0 && (
+          <>
+            <p className="text-[10px] uppercase tracking-widest px-2 mt-4 mb-2" style={{ color: 'var(--text-muted)' }}>Tờ trình</p>
+            {proposals.filter(p => p.participants.includes(currentUser.id)).map(p => (
+              <button key={p.id}
+                onClick={() => { setChannel('proposal'); setDmUserId(null); setProposalId(p.id); setShowMentions(false) }}
+                title={p.title}
+                className="w-full text-left px-2 py-2 rounded-lg mb-0.5 transition-all"
+                style={{ background: isProposal && proposalId === p.id ? 'var(--bg-card-alt)' : 'transparent', color: isProposal && proposalId === p.id ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                <div className="text-lg md:hidden text-center">📜</div>
+                <div className="text-sm hidden md:block truncate">📜 {p.title}</div>
+              </button>
+            ))}
+          </>
+        )}
 
         <p className="text-[10px] uppercase tracking-widest px-2 mt-4 mb-2" style={{ color: 'var(--text-muted)' }}>Online ({users.length})</p>
         <div className="space-y-1 overflow-y-auto flex-1">
@@ -8186,6 +8231,224 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
 // }) {
 //   const [editing, setEditing] = useState(false)
 //   const [draftAvatar, setDraftAvatar] = useState<AvatarConfig>(currentUser.avatar)
+function ProposalModal({ currentUser, users, onClose }: { currentUser: User; users: User[]; onClose: () => void }) {
+  const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
+  const [driveUrl, setDriveUrl] = useState('')
+  const [recipientId, setRecipientId] = useState('')
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const recipients = currentUser.role === 'manager'
+    ? users.filter(u => u.isDirector)
+    : users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)
+
+  const handleSubmit = async () => {
+    if (!title.trim() || !description.trim() || !driveUrl.trim() || !recipientId) {
+      setError('Vui lòng điền đầy đủ các trường bắt buộc.')
+      return
+    }
+    if (!/^https?:\/\//i.test(driveUrl.trim())) {
+      setError('Link Drive không hợp lệ.')
+      return
+    }
+    setError('')
+    setSaving(true)
+    const { data, error: insertError } = await supabase.from('proposals').insert({
+      title: title.trim(), description: description.trim(), drive_url: driveUrl.trim(),
+      submitted_by: currentUser.id, recipient_id: recipientId, status: 'pending',
+      participants: [currentUser.id, recipientId],
+    }).select('id').single()
+    setSaving(false)
+    if (insertError) { setError(insertError.message); return }
+
+    await supabase.from('notifications').insert({
+      message: `📜 ${currentUser.name} vừa trình tờ trình "${title.trim()}" cho bạn`,
+      target_user_id: recipientId,
+    })
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
+      <div className="w-full max-w-md rounded-2xl p-6 max-h-[90vh] overflow-y-auto" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+        <div className="flex justify-between items-center mb-5">
+          <h3 className="font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>📜 Trình tờ trình mới</h3>
+          <button onClick={onClose} className="text-2xl leading-none hover:opacity-70" style={{ color: 'var(--text-muted)' }}>×</button>
+        </div>
+
+        <div className="space-y-3.5">
+          <div>
+            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Tiêu đề tờ trình *</label>
+            <input value={title} onChange={e => setTitle(e.target.value)}
+              placeholder="VD: Đề xuất ngân sách marketing Q4"
+              className="w-full px-3 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+          </div>
+
+          <div>
+            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Nội dung tóm tắt *</label>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3}
+              placeholder="Mô tả ngắn gọn nội dung tờ trình..."
+              className="w-full px-3 py-2.5 rounded-lg text-sm outline-none resize-none placeholder-[color:var(--text-muted)]"
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+          </div>
+
+          <div>
+            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Link Google Drive tờ trình *</label>
+            <input value={driveUrl} onChange={e => setDriveUrl(e.target.value)}
+              placeholder="https://drive.google.com/file/d/..."
+              className="w-full px-3 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+            <p className="text-[10px] mt-1.5 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+              💡 Nhớ bật chia sẻ "Bất kỳ ai có link đều xem được" trước khi dán vào đây.
+            </p>
+          </div>
+
+          <div>
+            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+              Trình lên ai *
+            </label>
+            <select value={recipientId} onChange={e => setRecipientId(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+              <option value="">-- Chọn người nhận --</option>
+              {recipients.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+          </div>
+
+          {error && <p className="text-xs" style={{ color: '#dc2626' }}>{error}</p>}
+
+          <div className="flex gap-3 pt-1">
+            <button onClick={onClose}
+              className="flex-1 py-2.5 rounded-xl text-sm"
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>Hủy</button>
+            <button onClick={handleSubmit} disabled={saving}
+              className="flex-1 py-2.5 rounded-xl font-bold text-white text-sm disabled:opacity-40"
+              style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
+              {saving ? 'Đang gửi...' : 'Gửi tờ trình'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ProposalsView({ currentUser, users, proposals, onJoinDiscussion }: {
+  currentUser: User; users: User[]; proposals: Proposal[]
+  onJoinDiscussion: (p: Proposal) => void
+}) {
+  const [showModal, setShowModal] = useState(false)
+  const getUserById = (id?: string) => users.find(u => u.id === id)
+
+  const received = proposals.filter(p => p.recipientId === currentUser.id)
+  const sent = proposals.filter(p => p.submittedBy === currentUser.id)
+
+  const handleApprove = async (p: Proposal) => {
+    await supabase.from('proposals').update({ status: 'approved' }).eq('id', p.id)
+    await supabase.from('notifications').insert({
+      message: `✅ ${currentUser.name} đã duyệt tờ trình "${p.title}"`,
+      target_user_id: p.submittedBy,
+    })
+  }
+
+  const handleReject = async (p: Proposal) => {
+    const reason = window.prompt('Lý do từ chối:') ?? ''
+    await supabase.from('proposals').update({ status: 'rejected', rejected_reason: reason }).eq('id', p.id)
+    await supabase.from('notifications').insert({
+      message: `❌ ${currentUser.name} đã từ chối tờ trình "${p.title}"${reason ? `: ${reason}` : ''}`,
+      target_user_id: p.submittedBy,
+    })
+  }
+
+  const statusBadge = (p: Proposal) => {
+    if (p.status === 'pending') return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#fbbf2422', color: '#d97706' }}>⏳ Chờ duyệt</span>
+    if (p.status === 'rejected') return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#f8717122', color: '#dc2626' }}>❌ Bị từ chối</span>
+    return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#34d39922', color: '#059669' }}>✅ Đã duyệt</span>
+  }
+
+  const ProposalCard = ({ p, showActions }: { p: Proposal; showActions?: boolean }) => (
+    <div className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <div>
+          <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{p.title}</h3>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+            {getUserById(p.submittedBy)?.name} → {getUserById(p.recipientId)?.name}
+          </p>
+        </div>
+        {statusBadge(p)}
+      </div>
+      <p className="text-xs mb-3 leading-relaxed" style={{ color: 'var(--text-muted)' }}>{p.description}</p>
+      {p.status === 'rejected' && p.rejectedReason && (
+        <p className="text-xs mb-3" style={{ color: '#dc2626' }}>Lý do: {p.rejectedReason}</p>
+      )}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <a href={p.driveUrl} target="_blank" rel="noopener noreferrer"
+          className="text-xs underline" style={{ color: '#3b82f6' }}>
+          📁 Xem tờ trình trên Drive
+        </a>
+        <div className="flex gap-2">
+          <button onClick={() => onJoinDiscussion(p)}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>
+            💬 Tham gia thảo luận
+          </button>
+          {showActions && p.status === 'pending' && (
+            <>
+              <button onClick={() => handleReject(p)}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>
+                Từ chối
+              </button>
+              <button onClick={() => handleApprove(p)}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#34d39922', color: '#059669' }}>
+                ✓ Duyệt
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="p-6 max-w-4xl mx-auto">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>📜 Tờ trình</h2>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{proposals.length} tờ trình</p>
+        </div>
+        <button onClick={() => setShowModal(true)}
+          className="px-4 py-2.5 rounded-xl font-bold text-white text-sm"
+          style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', boxShadow: '0 0 20px #7c3aed40' }}>
+          + Trình tờ trình mới
+        </button>
+      </div>
+
+      {received.length > 0 && (
+        <div className="mb-6">
+          <h3 className="font-bold mb-3 text-sm" style={{ color: 'var(--text-muted)' }}>📥 Cần bạn duyệt</h3>
+          <div className="space-y-3">{received.map(p => <ProposalCard key={p.id} p={p} showActions />)}</div>
+        </div>
+      )}
+
+      {sent.length > 0 && (
+        <div>
+          <h3 className="font-bold mb-3 text-sm" style={{ color: 'var(--text-muted)' }}>📨 Đã gửi</h3>
+          <div className="space-y-3">{sent.map(p => <ProposalCard key={p.id} p={p} />)}</div>
+        </div>
+      )}
+
+      {received.length === 0 && sent.length === 0 && (
+        <div className="text-center py-16" style={{ color: 'var(--text-muted)' }}>
+          <div className="text-4xl mb-3">📜</div>
+          <div className="text-sm">Chưa có tờ trình nào</div>
+        </div>
+      )}
+
+      {showModal && <ProposalModal currentUser={currentUser} users={users} onClose={() => setShowModal(false)} />}
+    </div>
+  )
+}
 function ProfileView({ currentUser, setCurrentUser, tasks }: {
   currentUser: User; setCurrentUser: (u: User) => void; tasks: Task[]
 }) {
@@ -8346,12 +8609,13 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
 // ==================== APP SHELL ====================
 
 const NAV = [
-  { id: 'dashboard', icon: '🏠', label: 'Dashboard' },
-  { id: 'tasks', icon: '📋', label: 'Task' },
-  { id: 'leaderboard', icon: '🏆', label: 'Xếp hạng' },
-  { id: 'rewards', icon: '🎁', label: 'Quà' },
-  { id: 'social', icon: '💬', label: 'Social' },
-  { id: 'profile', icon: '👤', label: 'Hồ sơ' },
+  { id: 'dashboard', label: 'Dashboard', icon: '🏠' },
+  { id: 'tasks', label: 'Task', icon: '📋' },
+  { id: 'proposals', label: 'Tờ trình', icon: '📜' },
+  { id: 'leaderboard', label: 'Xếp hạng', icon: '🏆' },
+  { id: 'rewards', label: 'Quà', icon: '🎁' },
+  { id: 'social', label: 'Social', icon: '💬' },
+  { id: 'profile', label: 'Hồ sơ', icon: '👤' },
 ]
 function NotificationBell({ notifications, onNotificationClick }: {
   notifications: { id: string; message: string; createdAt: string; linkChannel?: string; linkDmUserId?: string; linkTaskId?: string }[]
@@ -8423,13 +8687,14 @@ function NotificationBell({ notifications, onNotificationClick }: {
     </div>
   )}
 
-function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, messages, setMessages, redemptions, notifications, collaborations }: {
+function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, messages, setMessages, redemptions, notifications, collaborations, proposals }: {
   currentUser: User; setCurrentUser: (u: User) => void; allUsers: User[]
   tasks: Task[]; setTasks: (t: Task[]) => void
   messages: Message[]; setMessages: (m: Message[]) => void
   redemptions: { id: string; userId: string; rewardId: string; cost: number }[]
   notifications: { id: string; message: string; createdAt: string }[]
   collaborations: Collaboration[]
+  proposals: Proposal[]
 }) {
   const [view, setView] = useState<View>('dashboard')
   const [theme, setTheme] = useState<ThemeMode>(() => (localStorage.getItem('themeMode') as ThemeMode) || 'dark')
@@ -8444,8 +8709,19 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   const { level } = getExpProgress(currentUser.exp)
   const [showMentions, setShowMentions] = useState(false)
   const [lastSeenMention, setLastSeenMention] = useState(() => localStorage.getItem('lastSeenMention') || '')
-  const [socialTarget, setSocialTarget] = useState<{ channel: ChatChannel; dmUserId?: string } | null>(null)
+  const [socialTarget, setSocialTarget] = useState<{ channel: ChatChannel; dmUserId?: string; proposalId?: string } | null>(null)
   const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null)
+
+  const handleJoinProposal = async (proposal: Proposal) => {
+    if (!proposal.participants.includes(currentUser.id)) {
+      await supabase.from('proposals').update({
+        participants: [...proposal.participants, currentUser.id],
+      }).eq('id', proposal.id)
+    }
+    setView('social')
+    setShowMentions(false)
+    setSocialTarget({ channel: 'proposal', proposalId: proposal.id })
+  }
   const navItems = currentUser.isDirector ? [...NAV, { id: 'bodlog', icon: '📊', label: 'Log BOD' }] : NAV
 
   const handleNotificationClick = (n: { linkChannel?: string; linkDmUserId?: string; linkTaskId?: string }) => {
@@ -8496,9 +8772,11 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
       case 'social': return (
         <SocialView currentUser={currentUser} users={users} messages={messages} setMessages={setMessages}
           showMentions={showMentions} setShowMentions={setShowMentions} markMentionsSeen={markMentionsSeen}
-          navigateTarget={socialTarget} clearNavigateTarget={() => setSocialTarget(null)} />
+          navigateTarget={socialTarget} clearNavigateTarget={() => setSocialTarget(null)}
+          proposals={proposals} />
       )
       case 'profile': return <ProfileView currentUser={currentUser} setCurrentUser={setCurrentUser} tasks={tasks} />
+      case 'proposals': return <ProposalsView currentUser={currentUser} users={users} proposals={proposals} onJoinDiscussion={handleJoinProposal} />
           case 'bodlog': return currentUser.isDirector ? <BodLogView tasks={tasks} users={users} /> : <DashboardView {...sharedProps} />
     }
   }
@@ -8648,13 +8926,14 @@ export default function App() {
   const [redemptions, setRedemptions] = useState<{ id: string; userId: string; rewardId: string; cost: number }[]>([])
   const [notifications, setNotifications] = useState<{ id: string; message: string; createdAt: string; targetUserId?: string; linkChannel?: string; linkDmUserId?: string; linkTaskId?: string }[]>([])
   const [collaborations, setCollaborations] = useState<Collaboration[]>([])
+  const [proposals, setProposals] = useState<Proposal[]>([])
 
   function mapProfileToUser(p: any): User {
   return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email, isDirector: p.is_director ?? false, driveFolderUrl: p.drive_folder_url ?? undefined }
 }
 
   function mapDbMessage(m: any): Message {
-    return { id: m.id, userId: m.user_id, toUserId: m.to_user_id ?? undefined, content: m.content, channel: m.channel, timestamp: m.created_at }
+    return { id: m.id, userId: m.user_id, toUserId: m.to_user_id ?? undefined, content: m.content, channel: m.channel, timestamp: m.created_at, proposalId: m.proposal_id ?? undefined }
   }
   function mapDbTask(t: any): Task {
   return {
@@ -8681,6 +8960,15 @@ export default function App() {
     driveFolderOwnerId: t.drive_folder_owner_id ?? undefined,
     approvedBy: t.approved_by ?? undefined,
     approvedAt: t.approved_at ?? undefined,
+  }
+}
+function mapDbProposal(p: any): Proposal {
+  return {
+    id: p.id, title: p.title, description: p.description, driveUrl: p.drive_url,
+    submittedBy: p.submitted_by, recipientId: p.recipient_id, status: p.status,
+    rejectedReason: p.rejected_reason ?? undefined,
+    participants: p.participants ?? [],
+    createdAt: p.created_at,
   }
 }
 function mapDbCollaboration(c: any): Collaboration {
@@ -8838,6 +9126,17 @@ useEffect(() => {
   return () => { supabase.removeChannel(channel) }
 }, [session])
 
+useEffect(() => {
+  if (!session) return
+  supabase.from('proposals').select('*').then(({ data }) => data && setProposals(data.map(mapDbProposal)))
+
+  const channel = supabase.channel('proposals-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'proposals' }, () => {
+      supabase.from('proposals').select('*').then(({ data }) => data && setProposals(data.map(mapDbProposal)))
+    }).subscribe()
+  return () => { supabase.removeChannel(channel) }
+}, [session])
+
 
   // Khi allUsers cập nhật (real-time), đồng bộ luôn currentProfile nếu có thay đổi
 useEffect(() => {
@@ -8924,6 +9223,7 @@ useEffect(() => {
       redemptions={redemptions}
       notifications={notifications}
       collaborations={collaborations}
+      proposals={proposals}
     />
   )
 }
