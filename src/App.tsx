@@ -8240,11 +8240,13 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
 // }) {
 //   const [editing, setEditing] = useState(false)
 //   const [draftAvatar, setDraftAvatar] = useState<AvatarConfig>(currentUser.avatar)
-function ProposalModal({ currentUser, users, onClose }: { currentUser: User; users: User[]; onClose: () => void }) {
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [driveUrl, setDriveUrl] = useState('')
-  const [recipientId, setRecipientId] = useState('')
+function ProposalModal({ currentUser, users, editingProposal, onClose }: {
+  currentUser: User; users: User[]; editingProposal?: Proposal | null; onClose: () => void
+}) {
+  const [title, setTitle] = useState(editingProposal?.title ?? '')
+  const [description, setDescription] = useState(editingProposal?.description ?? '')
+  const [driveUrl, setDriveUrl] = useState(editingProposal?.driveUrl ?? '')
+  const [recipientId, setRecipientId] = useState(editingProposal?.recipientId ?? '')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -8254,7 +8256,7 @@ function ProposalModal({ currentUser, users, onClose }: { currentUser: User; use
 
   const handleSubmit = async () => {
     if (!title.trim() || !description.trim() || !driveUrl.trim() || !recipientId) {
-      setError('Vui lòng điền đầy đủ các trường bắt buộc.')
+      setError('Vui lòng điền đầy đủ tất cả các trường bắt buộc.')
       return
     }
     if (!/^https?:\/\//i.test(driveUrl.trim())) {
@@ -8263,19 +8265,39 @@ function ProposalModal({ currentUser, users, onClose }: { currentUser: User; use
     }
     setError('')
     setSaving(true)
-    const { data, error: insertError } = await supabase.from('proposals').insert({
-      title: title.trim(), description: description.trim(), drive_url: driveUrl.trim(),
-      submitted_by: currentUser.id, recipient_id: recipientId, status: 'pending',
-      participants: [currentUser.id, recipientId],
-    }).select('id').single()
-    setSaving(false)
-    if (insertError) { setError(insertError.message); return }
 
-    await supabase.from('notifications').insert({
-      message: `📜 ${currentUser.name} vừa trình tờ trình "${title.trim()}" cho bạn`,
-      target_user_id: recipientId,
-      link_proposal_id: data?.id,
-    })
+    if (editingProposal) {
+      // Sửa & gửi lại: cập nhật nội dung, reset trạng thái về chờ duyệt
+      const { error: updateError } = await supabase.from('proposals').update({
+        title: title.trim(), description: description.trim(), drive_url: driveUrl.trim(),
+        recipient_id: recipientId, status: 'pending', rejected_reason: null,
+        participants: editingProposal.participants.includes(recipientId)
+          ? editingProposal.participants
+          : [...editingProposal.participants, recipientId],
+      }).eq('id', editingProposal.id)
+      setSaving(false)
+      if (updateError) { setError(updateError.message); return }
+
+      await supabase.from('notifications').insert({
+        message: `📜 ${currentUser.name} đã chỉnh sửa và gửi lại tờ trình "${title.trim()}" cho bạn`,
+        target_user_id: recipientId,
+        link_proposal_id: editingProposal.id,
+      })
+    } else {
+      const { data, error: insertError } = await supabase.from('proposals').insert({
+        title: title.trim(), description: description.trim(), drive_url: driveUrl.trim(),
+        submitted_by: currentUser.id, recipient_id: recipientId, status: 'pending',
+        participants: [currentUser.id, recipientId],
+      }).select('id').single()
+      setSaving(false)
+      if (insertError) { setError(insertError.message); return }
+
+      await supabase.from('notifications').insert({
+        message: `📜 ${currentUser.name} vừa trình tờ trình "${title.trim()}" cho bạn`,
+        target_user_id: recipientId,
+        link_proposal_id: data?.id,
+      })
+    }
     onClose()
   }
 
@@ -8283,9 +8305,17 @@ function ProposalModal({ currentUser, users, onClose }: { currentUser: User; use
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
       <div className="w-full max-w-md rounded-2xl p-6 max-h-[90vh] overflow-y-auto" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
         <div className="flex justify-between items-center mb-5">
-          <h3 className="font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>📜 Trình tờ trình mới</h3>
+          <h3 className="font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
+            {editingProposal ? '✏️ Chỉnh sửa & Gửi lại tờ trình' : '📜 Trình tờ trình mới'}
+          </h3>
           <button onClick={onClose} className="text-2xl leading-none hover:opacity-70" style={{ color: 'var(--text-muted)' }}>×</button>
         </div>
+
+        {editingProposal?.rejectedReason && (
+          <div className="mb-4 p-3 rounded-lg text-xs" style={{ background: '#f8717114', color: '#dc2626' }}>
+            ❌ Lý do bị từ chối trước đó: {editingProposal.rejectedReason}
+          </div>
+        )}
 
         <div className="space-y-3.5">
           <div>
@@ -8336,7 +8366,7 @@ function ProposalModal({ currentUser, users, onClose }: { currentUser: User; use
             <button onClick={handleSubmit} disabled={saving}
               className="flex-1 py-2.5 rounded-xl font-bold text-white text-sm disabled:opacity-40"
               style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
-              {saving ? 'Đang gửi...' : 'Gửi tờ trình'}
+              {saving ? 'Đang gửi...' : editingProposal ? 'Gửi lại' : 'Gửi tờ trình'}
             </button>
           </div>
         </div>
@@ -8432,6 +8462,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, onJoi
 }) {
   const [showModal, setShowModal] = useState(false)
   const [forwardingProposal, setForwardingProposal] = useState<Proposal | null>(null)
+  const [editingProposal, setEditingProposal] = useState<Proposal | null>(null)
   const getUserById = (id?: string) => users.find(u => u.id === id)
 
   const received = proposals.filter(p => p.recipientId === currentUser.id)
@@ -8535,6 +8566,12 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, onJoi
               📤 Mời người duyệt tiếp theo
             </button>
           )}
+          {p.submittedBy === currentUser.id && p.status === 'rejected' && (
+            <button onClick={() => setEditingProposal(p)}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#f59e0b22', color: '#b45309' }}>
+              ✏️ Chỉnh sửa & Gửi lại
+            </button>
+          )}
         </div>
       </div>
       <ApprovalHistory p={p} />
@@ -8584,6 +8621,9 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, onJoi
       )}
 
       {showModal && <ProposalModal currentUser={currentUser} users={users} onClose={() => setShowModal(false)} />}
+      {editingProposal && (
+        <ProposalModal currentUser={currentUser} users={users} editingProposal={editingProposal} onClose={() => setEditingProposal(null)} />
+      )}
       {forwardingProposal && (
         <ForwardApprovalModal proposal={forwardingProposal} currentUser={currentUser} users={users} onClose={() => setForwardingProposal(null)} />
       )}
