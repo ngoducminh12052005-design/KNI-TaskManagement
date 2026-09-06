@@ -4558,7 +4558,13 @@ interface ProposalApproval {
   note?: string
   createdAt: string
 }
-
+interface ProposalRevision {
+  id: string
+  proposalId: string
+  editedBy: string
+  note: string
+  createdAt: string
+}
 
 type ProposalStatus = 'pending' | 'approved' | 'rejected'
 
@@ -8240,13 +8246,15 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
 // }) {
 //   const [editing, setEditing] = useState(false)
 //   const [draftAvatar, setDraftAvatar] = useState<AvatarConfig>(currentUser.avatar)
-function ProposalModal({ currentUser, users, editingProposal, onClose }: {
-  currentUser: User; users: User[]; editingProposal?: Proposal | null; onClose: () => void
-}) {
+function mapDbProposalRevision(r: any): ProposalRevision {
+  return { id: r.id, proposalId: r.proposal_id, editedBy: r.edited_by, note: r.note, createdAt: r.created_at }
+}
+function ProposalModal({ currentUser, users, editingProposal, onClose }: { currentUser: User; users: User[]; editingProposal?: Proposal | null; onClose: () => void }) {
   const [title, setTitle] = useState(editingProposal?.title ?? '')
   const [description, setDescription] = useState(editingProposal?.description ?? '')
   const [driveUrl, setDriveUrl] = useState(editingProposal?.driveUrl ?? '')
   const [recipientId, setRecipientId] = useState(editingProposal?.recipientId ?? '')
+  const [revisionNote, setRevisionNote] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -8254,9 +8262,13 @@ function ProposalModal({ currentUser, users, editingProposal, onClose }: {
     ? users.filter(u => u.isDirector)
     : users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)
 
-  const handleSubmit = async () => {
+    const handleSubmit = async () => {
     if (!title.trim() || !description.trim() || !driveUrl.trim() || !recipientId) {
-      setError('Vui lòng điền đầy đủ tất cả các trường bắt buộc.')
+      setError('Vui lòng điền đầy đủ các trường bắt buộc.')
+      return
+    }
+    if (editingProposal && !revisionNote.trim()) {
+      setError('Vui lòng ghi rõ nội dung đã bổ sung/chỉnh sửa so với lần trước.')
       return
     }
     if (!/^https?:\/\//i.test(driveUrl.trim())) {
@@ -8275,8 +8287,15 @@ function ProposalModal({ currentUser, users, editingProposal, onClose }: {
           ? editingProposal.participants
           : [...editingProposal.participants, recipientId],
       }).eq('id', editingProposal.id)
+      if (updateError) { setSaving(false); setError(updateError.message); return }
+
+      // Lưu lại nội dung đã bổ sung/chỉnh sửa để hiện trong lịch sử
+      await supabase.from('proposal_revisions').insert({
+        proposal_id: editingProposal.id,
+        edited_by: currentUser.id,
+        note: revisionNote.trim(),
+      })
       setSaving(false)
-      if (updateError) { setError(updateError.message); return }
 
       await supabase.from('notifications').insert({
         message: `📜 ${currentUser.name} đã chỉnh sửa và gửi lại tờ trình "${title.trim()}" cho bạn`,
@@ -8456,8 +8475,9 @@ function ForwardApprovalModal({ proposal, currentUser, users, onClose }: {
   )
 }
 
-function ProposalsView({ currentUser, users, proposals, proposalApprovals, onJoinDiscussion }: {
+function ProposalsView({ currentUser, users, proposals, proposalApprovals, proposalRevisions, onJoinDiscussion }: {
   currentUser: User; users: User[]; proposals: Proposal[]; proposalApprovals: ProposalApproval[]
+  proposalRevisions: ProposalRevision[]
   onJoinDiscussion: (p: Proposal) => void
 }) {
   const [showModal, setShowModal] = useState(false)
@@ -8505,20 +8525,41 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, onJoi
   }
 
   const ApprovalHistory = ({ p }: { p: Proposal }) => {
-    const history = proposalApprovals.filter(a => a.proposalId === p.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-    if (history.length === 0) return null
+    const approvals = proposalApprovals.filter(a => a.proposalId === p.id)
+    const revisions = proposalRevisions.filter(r => r.proposalId === p.id)
+    const timeline = [
+      ...approvals.map(a => ({ type: 'approval' as const, at: a.createdAt, data: a })),
+      ...revisions.map(r => ({ type: 'revision' as const, at: r.createdAt, data: r })),
+    ].sort((a, b) => a.at.localeCompare(b.at))
+    if (timeline.length === 0) return null
     return (
-      <div className="mt-2 pt-2 space-y-1" style={{ borderTop: '1px solid var(--border)' }}>
+      <div className="mt-2 pt-2 space-y-1.5" style={{ borderTop: '1px solid var(--border)' }}>
         <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Lịch sử duyệt</p>
-        {history.map(a => (
-          <div key={a.id} className="text-xs flex items-center gap-1.5">
-            <span>{a.action === 'approved' ? '✅' : '❌'}</span>
-            <span style={{ color: 'var(--text-primary)' }}>
-              {getUserById(a.approverId)?.name} ({TEAMS.find(t => t.id === getUserById(a.approverId)?.teamId)?.name})
-            </span>
-            <span style={{ color: 'var(--text-muted)' }}>· {new Date(a.createdAt).toLocaleDateString('vi-VN')}</span>
-          </div>
-        ))}
+        {timeline.map(item => {
+          if (item.type === 'approval') {
+            const a = item.data
+            return (
+              <div key={a.id} className="text-xs flex items-center gap-1.5">
+                <span>{a.action === 'approved' ? '✅' : '❌'}</span>
+                <span style={{ color: 'var(--text-primary)' }}>
+                  {getUserById(a.approverId)?.name} ({TEAMS.find(t => t.id === getUserById(a.approverId)?.teamId)?.name})
+                </span>
+                <span style={{ color: 'var(--text-muted)' }}>· {new Date(a.createdAt).toLocaleDateString('vi-VN')}</span>
+              </div>
+            )
+          }
+          const r = item.data
+          return (
+            <div key={r.id} className="text-xs p-2 rounded-lg" style={{ background: '#f59e0b10' }}>
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <span>📝</span>
+                <span className="font-medium" style={{ color: '#b45309' }}>{getUserById(r.editedBy)?.name}</span>
+                <span style={{ color: 'var(--text-muted)' }}>đã chỉnh sửa · {new Date(r.createdAt).toLocaleDateString('vi-VN')}</span>
+              </div>
+              <p style={{ color: 'var(--text-muted)' }}>{r.note}</p>
+            </div>
+          )
+        })}
       </div>
     )
   }
@@ -8868,7 +8909,7 @@ function NotificationBell({ notifications, onNotificationClick }: {
     </div>
   )}
 
-function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, messages, setMessages, redemptions, notifications, collaborations, proposals, proposalApprovals }: {
+function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, messages, setMessages, redemptions, notifications, collaborations, proposals, proposalApprovals, proposalRevisions }: {
   currentUser: User; setCurrentUser: (u: User) => void; allUsers: User[]
   tasks: Task[]; setTasks: (t: Task[]) => void
   messages: Message[]; setMessages: (m: Message[]) => void
@@ -8877,6 +8918,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   collaborations: Collaboration[]
   proposals: Proposal[]
   proposalApprovals: ProposalApproval[]
+  proposalRevisions: ProposalRevision[]
 }) {
   const [view, setView] = useState<View>('dashboard')
   const [theme, setTheme] = useState<ThemeMode>(() => (localStorage.getItem('themeMode') as ThemeMode) || 'dark')
@@ -8962,7 +9004,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
           proposals={proposals} />
       )
       case 'profile': return <ProfileView currentUser={currentUser} setCurrentUser={setCurrentUser} tasks={tasks} />
-      case 'proposals': return <ProposalsView currentUser={currentUser} users={users} proposals={proposals} proposalApprovals={proposalApprovals} onJoinDiscussion={handleJoinProposal} />
+      case 'proposals': return <ProposalsView currentUser={currentUser} users={users} proposals={proposals} proposalApprovals={proposalApprovals} proposalRevisions={proposalRevisions} onJoinDiscussion={handleJoinProposal} />
           case 'bodlog': return currentUser.isDirector ? <BodLogView tasks={tasks} users={users} /> : <DashboardView {...sharedProps} />
     }
   }
@@ -9114,6 +9156,7 @@ export default function App() {
   const [collaborations, setCollaborations] = useState<Collaboration[]>([])
   const [proposals, setProposals] = useState<Proposal[]>([])
   const [proposalApprovals, setProposalApprovals] = useState<ProposalApproval[]>([])
+  const [proposalRevisions, setProposalRevisions] = useState<ProposalRevision[]>([])
 
   function mapProfileToUser(p: any): User {
   return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email, isDirector: p.is_director ?? false, driveFolderUrl: p.drive_folder_url ?? undefined }
@@ -9344,6 +9387,19 @@ useEffect(() => {
   return () => { supabase.removeChannel(channel) }
 }, [session])
 
+
+useEffect(() => {
+  if (!session) return
+  supabase.from('proposal_revisions').select('*').then(({ data }) => data && setProposalRevisions(data.map(mapDbProposalRevision)))
+
+  const channel = supabase.channel('proposal-revisions-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'proposal_revisions' }, () => {
+      supabase.from('proposal_revisions').select('*').then(({ data }) => data && setProposalRevisions(data.map(mapDbProposalRevision)))
+    }).subscribe()
+  return () => { supabase.removeChannel(channel) }
+}, [session])
+
+
   // Khi allUsers cập nhật (real-time), đồng bộ luôn currentProfile nếu có thay đổi
 useEffect(() => {
   if (!currentProfile) return
@@ -9431,6 +9487,7 @@ useEffect(() => {
       collaborations={collaborations}
       proposals={proposals}
       proposalApprovals={proposalApprovals}
+      proposalRevisions={proposalRevisions}
     />
   )
 }
