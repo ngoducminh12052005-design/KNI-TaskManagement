@@ -4562,7 +4562,8 @@ interface ProposalRevision {
   id: string
   proposalId: string
   editedBy: string
-  note: string
+  addedNote?: string
+  editedNote?: string
   createdAt: string
 }
 
@@ -8247,14 +8248,18 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
 //   const [editing, setEditing] = useState(false)
 //   const [draftAvatar, setDraftAvatar] = useState<AvatarConfig>(currentUser.avatar)
 function mapDbProposalRevision(r: any): ProposalRevision {
-  return { id: r.id, proposalId: r.proposal_id, editedBy: r.edited_by, note: r.note, createdAt: r.created_at }
+  return { id: r.id, proposalId: r.proposal_id, editedBy: r.edited_by, addedNote: r.added_note ?? undefined, editedNote: r.edited_note ?? undefined, createdAt: r.created_at }
 }
 function ProposalModal({ currentUser, users, editingProposal, onClose }: { currentUser: User; users: User[]; editingProposal?: Proposal | null; onClose: () => void }) {
   const [title, setTitle] = useState(editingProposal?.title ?? '')
   const [description, setDescription] = useState(editingProposal?.description ?? '')
   const [driveUrl, setDriveUrl] = useState(editingProposal?.driveUrl ?? '')
   const [recipientId, setRecipientId] = useState(editingProposal?.recipientId ?? '')
-  const [revisionNote, setRevisionNote] = useState('')
+  const [resubmitTeamId, setResubmitTeamId] = useState(
+    editingProposal ? (users.find(u => u.id === editingProposal.recipientId)?.teamId ?? '') : ''
+  )
+  const [addedNote, setAddedNote] = useState('')
+  const [editedNote, setEditedNote] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -8262,13 +8267,15 @@ function ProposalModal({ currentUser, users, editingProposal, onClose }: { curre
     ? users.filter(u => u.isDirector)
     : users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)
 
-    const handleSubmit = async () => {
+  const managersInResubmitTeam = users.filter(u => u.role === 'manager' && u.teamId === resubmitTeamId)
+
+  const handleSubmit = async () => {
     if (!title.trim() || !description.trim() || !driveUrl.trim() || !recipientId) {
       setError('Vui lòng điền đầy đủ các trường bắt buộc.')
       return
     }
-    if (editingProposal && !revisionNote.trim()) {
-      setError('Vui lòng ghi rõ nội dung đã bổ sung/chỉnh sửa so với lần trước.')
+    if (editingProposal && !addedNote.trim() && !editedNote.trim()) {
+      setError('Vui lòng ghi rõ ít nhất một trong hai: nội dung đã bổ sung hoặc đã chỉnh sửa.')
       return
     }
     if (!/^https?:\/\//i.test(driveUrl.trim())) {
@@ -8293,7 +8300,8 @@ function ProposalModal({ currentUser, users, editingProposal, onClose }: { curre
       await supabase.from('proposal_revisions').insert({
         proposal_id: editingProposal.id,
         edited_by: currentUser.id,
-        note: revisionNote.trim(),
+        added_note: addedNote.trim() || null,
+        edited_note: editedNote.trim() || null,
       })
       setSaving(false)
 
@@ -8336,6 +8344,29 @@ function ProposalModal({ currentUser, users, editingProposal, onClose }: { curre
           </div>
         )}
 
+        {editingProposal && (
+          <div className="space-y-3 mb-4">
+            <div>
+              <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+                Nội dung đã bổ sung (nếu có)
+              </label>
+              <textarea value={addedNote} onChange={e => setAddedNote(e.target.value)} rows={2}
+                placeholder="VD: Đã bổ sung thêm báo giá của 3 nhà cung cấp..."
+                className="w-full px-3 py-2.5 rounded-lg text-sm outline-none resize-none placeholder-[color:var(--text-muted)]"
+                style={{ background: '#f59e0b14', border: '1px solid #f59e0b40', color: 'var(--text-primary)' }} />
+            </div>
+            <div>
+              <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+                Nội dung đã chỉnh sửa (nếu có)
+              </label>
+              <textarea value={editedNote} onChange={e => setEditedNote(e.target.value)} rows={2}
+                placeholder="VD: Đã giảm ngân sách đề xuất từ 10 triệu xuống còn 5 triệu..."
+                className="w-full px-3 py-2.5 rounded-lg text-sm outline-none resize-none placeholder-[color:var(--text-muted)]"
+                style={{ background: '#f59e0b14', border: '1px solid #f59e0b40', color: 'var(--text-primary)' }} />
+            </div>
+          </div>
+        )}
+
         <div className="space-y-3.5">
           <div>
             <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Tiêu đề tờ trình *</label>
@@ -8364,17 +8395,47 @@ function ProposalModal({ currentUser, users, editingProposal, onClose }: { curre
             </p>
           </div>
 
-          <div>
-            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
-              Trình lên ai *
-            </label>
-            <select value={recipientId} onChange={e => setRecipientId(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
-              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-              <option value="">-- Chọn người nhận --</option>
-              {recipients.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-            </select>
-          </div>
+          {editingProposal ? (
+            <>
+              <div>
+                <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Chọn phòng ban *</label>
+                <select value={resubmitTeamId} onChange={e => { setResubmitTeamId(e.target.value); setRecipientId('') }}
+                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                  <option value="">-- Chọn phòng ban --</option>
+                  {TEAMS.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
+                </select>
+              </div>
+
+              {resubmitTeamId && (
+                <div>
+                  <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Chọn quản lý *</label>
+                  {managersInResubmitTeam.length === 0 ? (
+                    <p className="text-xs" style={{ color: '#dc2626' }}>Phòng ban này chưa có quản lý nào trong hệ thống.</p>
+                  ) : (
+                    <select value={recipientId} onChange={e => setRecipientId(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                      style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                      <option value="">-- Chọn quản lý --</option>
+                      {managersInResubmitTeam.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    </select>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <div>
+              <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+                Trình lên ai *
+              </label>
+              <select value={recipientId} onChange={e => setRecipientId(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                <option value="">-- Chọn người nhận --</option>
+                {recipients.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            </div>
+          )}
 
           {error && <p className="text-xs" style={{ color: '#dc2626' }}>{error}</p>}
 
@@ -8550,13 +8611,14 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
           }
           const r = item.data
           return (
-            <div key={r.id} className="text-xs p-2 rounded-lg" style={{ background: '#f59e0b10' }}>
-              <div className="flex items-center gap-1.5 mb-0.5">
+            <div key={r.id} className="text-xs p-2 rounded-lg space-y-1" style={{ background: '#f59e0b10' }}>
+              <div className="flex items-center gap-1.5">
                 <span>📝</span>
                 <span className="font-medium" style={{ color: '#b45309' }}>{getUserById(r.editedBy)?.name}</span>
-                <span style={{ color: 'var(--text-muted)' }}>đã chỉnh sửa · {new Date(r.createdAt).toLocaleDateString('vi-VN')}</span>
+                <span style={{ color: 'var(--text-muted)' }}>đã gửi lại · {new Date(r.createdAt).toLocaleDateString('vi-VN')}</span>
               </div>
-              <p style={{ color: 'var(--text-muted)' }}>{r.note}</p>
+              {r.addedNote && <p style={{ color: 'var(--text-muted)' }}>➕ <b style={{ color: 'var(--text-primary)' }}>Đã bổ sung:</b> {r.addedNote}</p>}
+              {r.editedNote && <p style={{ color: 'var(--text-muted)' }}>✏️ <b style={{ color: 'var(--text-primary)' }}>Đã chỉnh sửa:</b> {r.editedNote}</p>}
             </div>
           )
         })}
