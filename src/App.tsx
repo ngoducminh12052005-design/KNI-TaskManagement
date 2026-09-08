@@ -4501,6 +4501,7 @@ interface User {
   email?: string
   isDirector?: boolean
   driveFolderUrl?: string
+  signatureUrl?: string
 }
 
 interface Task {
@@ -8250,10 +8251,172 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
 function mapDbProposalRevision(r: any): ProposalRevision {
   return { id: r.id, proposalId: r.proposal_id, editedBy: r.edited_by, addedNote: r.added_note ?? undefined, editedNote: r.edited_note ?? undefined, createdAt: r.created_at }
 }
+
+function SignDocumentModal({ currentUser, onClose }: { currentUser: User; onClose: () => void }) {
+  const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null)
+  const [pdfDoc, setPdfDoc] = useState<any>(null)
+  const [pageIndex, setPageIndex] = useState(0)
+  const [pageCount, setPageCount] = useState(0)
+  const [placement, setPlacement] = useState<{ x: number; y: number } | null>(null)
+  const [sigSize, setSigSize] = useState({ w: 130, h: 60 })
+  const [processing, setProcessing] = useState(false)
+  const [error, setError] = useState('')
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!currentUser.signatureUrl) return
+    const img = new Image()
+    img.onload = () => setSigSize({ w: 130, h: Math.round(130 * (img.naturalHeight / img.naturalWidth)) })
+    img.src = currentUser.signatureUrl
+  }, [currentUser.signatureUrl])
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.type !== 'application/pdf') { setError('Vui lòng chọn file PDF.'); return }
+    setError('')
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    setPdfBytes(bytes)
+    setPlacement(null)
+
+    const pdfjsLib = await import('pdfjs-dist')
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`
+    const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise
+    setPdfDoc(doc)
+    setPageCount(doc.numPages)
+    setPageIndex(0)
+  }
+
+  useEffect(() => {
+    if (!pdfDoc) return
+    (async () => {
+      const page = await pdfDoc.getPage(pageIndex + 1)
+      const viewport = page.getViewport({ scale: 1 })
+      const canvas = canvasRef.current
+      if (!canvas) return
+      canvas.width = viewport.width
+      canvas.height = viewport.height
+      const ctx = canvas.getContext('2d')
+      if (ctx) await page.render({ canvasContext: ctx, viewport }).promise
+    })()
+  }, [pdfDoc, pageIndex])
+
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width)
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height)
+    setPlacement({ x, y })
+  }
+
+  const handleExport = async () => {
+    if (!pdfBytes || !placement || !currentUser.signatureUrl) return
+    setProcessing(true)
+    setError('')
+    try {
+      const { PDFDocument } = await import('pdf-lib')
+      const doc = await PDFDocument.load(pdfBytes)
+      const page = doc.getPages()[pageIndex]
+      const { height: pageHeight } = page.getSize()
+
+      const sigRes = await fetch(currentUser.signatureUrl)
+      const sigBytes = new Uint8Array(await sigRes.arrayBuffer())
+      const isPng = currentUser.signatureUrl.includes('image/png')
+      const pngImage = isPng ? await doc.embedPng(sigBytes) : await doc.embedJpg(sigBytes)
+
+      page.drawImage(pngImage, {
+        x: placement.x,
+        y: pageHeight - placement.y - sigSize.h,
+        width: sigSize.w, height: sigSize.h,
+      })
+
+      const outBytes = await doc.save()
+      const blob = new Blob([outBytes as BlobPart], { type: 'application/pdf' })
+      window.open(URL.createObjectURL(blob), '_blank')
+    } catch (err: any) {
+      setError('Lỗi khi tạo file đã ký: ' + err.message)
+    }
+    setProcessing(false)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.75)' }}>
+      <div className="w-full max-w-3xl rounded-2xl p-6 max-h-[92vh] overflow-y-auto" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>🖊 Ký tờ trình</h3>
+          <button onClick={onClose} className="text-2xl leading-none hover:opacity-70" style={{ color: 'var(--text-muted)' }}>×</button>
+        </div>
+
+        {!currentUser.signatureUrl && (
+          <div className="mb-4 p-3 rounded-lg text-xs" style={{ background: '#fbbf2422', color: '#d97706' }}>
+            ⚠️ Bạn chưa lưu chữ ký. Vào Hồ sơ → mục "Chữ ký của tôi" để tải ảnh chữ ký lên trước.
+          </div>
+        )}
+
+        {!pdfBytes ? (
+          <div className="rounded-xl flex flex-col items-center justify-center gap-2 cursor-pointer py-14"
+            style={{ border: '1.5px dashed var(--border)', background: 'var(--bg-card-alt)' }}
+            onClick={() => fileInputRef.current?.click()}>
+            <span className="text-4xl">📄</span>
+            <p className="text-sm text-center" style={{ color: 'var(--text-muted)' }}>Bấm để chọn file PDF cần ký</p>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <button disabled={pageIndex === 0} onClick={() => setPageIndex(i => Math.max(0, i - 1))}
+                  className="px-2 py-1 rounded text-xs disabled:opacity-30" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-primary)' }}>‹ Trước</button>
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Trang {pageIndex + 1}/{pageCount}</span>
+                <button disabled={pageIndex >= pageCount - 1} onClick={() => setPageIndex(i => Math.min(pageCount - 1, i + 1))}
+                  className="px-2 py-1 rounded text-xs disabled:opacity-30" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-primary)' }}>Sau ›</button>
+              </div>
+              <button onClick={() => { setPdfBytes(null); setPdfDoc(null); setPlacement(null) }}
+                className="text-xs underline" style={{ color: 'var(--text-muted)' }}>Chọn file khác</button>
+            </div>
+
+            <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>💡 Nhấn vào vị trí trên tài liệu muốn đặt chữ ký.</p>
+
+            <div className="relative inline-block" style={{ maxWidth: '100%' }}>
+              <canvas ref={canvasRef} onClick={handleCanvasClick}
+                style={{ maxWidth: '100%', height: 'auto', cursor: 'crosshair', border: '1px solid var(--border)', display: 'block' }} />
+              {placement && currentUser.signatureUrl && canvasRef.current && (
+                <img src={currentUser.signatureUrl} alt="chữ ký"
+                  style={{
+                    position: 'absolute',
+                    left: `${(placement.x / canvasRef.current.width) * 100}%`,
+                    top: `${(placement.y / canvasRef.current.height) * 100}%`,
+                    width: `${(sigSize.w / canvasRef.current.width) * 100}%`,
+                    pointerEvents: 'none',
+                  }} />
+              )}
+            </div>
+          </>
+        )}
+
+        {error && <p className="text-xs mt-3" style={{ color: '#dc2626' }}>{error}</p>}
+
+        <div className="flex gap-3 mt-5">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>Đóng</button>
+          <button onClick={handleExport} disabled={!pdfBytes || !placement || !currentUser.signatureUrl || processing}
+            className="flex-1 py-2.5 rounded-xl font-bold text-white text-sm disabled:opacity-40"
+            style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
+            {processing ? 'Đang xử lý...' : '✅ Xác nhận & Mở file đã ký'}
+          </button>
+        </div>
+
+        <input ref={fileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleFile} />
+      </div>
+    </div>
+  )
+}
+
 function ProposalModal({ currentUser, users, editingProposal, onClose }: { currentUser: User; users: User[]; editingProposal?: Proposal | null; onClose: () => void }) {
   const [title, setTitle] = useState(editingProposal?.title ?? '')
   const [description, setDescription] = useState(editingProposal?.description ?? '')
   const [driveUrl, setDriveUrl] = useState(editingProposal?.driveUrl ?? '')
+  const [revisionNote, setRevisionNote] = useState('')
   const [recipientId, setRecipientId] = useState(editingProposal?.recipientId ?? '')
   const [resubmitTeamId, setResubmitTeamId] = useState(
     editingProposal ? (users.find(u => u.id === editingProposal.recipientId)?.teamId ?? '') : ''
@@ -8394,6 +8557,18 @@ function ProposalModal({ currentUser, users, editingProposal, onClose }: { curre
               💡 Nhớ bật chia sẻ "Bất kỳ ai có link đều xem được" trước khi dán vào đây.
             </p>
           </div>
+
+          {editingProposal && (
+            <div>
+              <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+                Nội dung đã bổ sung/chỉnh sửa so với lần trước *
+              </label>
+              <textarea value={revisionNote} onChange={e => setRevisionNote(e.target.value)} rows={3}
+                placeholder="VD: Đã bổ sung số liệu quý 3, chỉnh lại mục ngân sách..."
+                className="w-full px-3 py-2.5 rounded-lg text-sm outline-none resize-none placeholder-[color:var(--text-muted)]"
+                style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+            </div>
+          )}
 
           {editingProposal ? (
             <>
@@ -8544,6 +8719,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   const [showModal, setShowModal] = useState(false)
   const [forwardingProposal, setForwardingProposal] = useState<Proposal | null>(null)
   const [editingProposal, setEditingProposal] = useState<Proposal | null>(null)
+  const [signingProposal, setSigningProposal] = useState<Proposal | null>(null)
   const getUserById = (id?: string) => users.find(u => u.id === id)
 
   const received = proposals.filter(p => p.recipientId === currentUser.id)
@@ -8675,6 +8851,12 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
               ✏️ Chỉnh sửa & Gửi lại
             </button>
           )}
+          {p.recipientId === currentUser.id && p.status === 'pending' && (
+            <button onClick={() => setSigningProposal(p)}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#0891b222', color: '#0e7490' }}>
+              🖊 Ký tờ trình
+            </button>
+          )}
         </div>
       </div>
       <ApprovalHistory p={p} />
@@ -8729,6 +8911,9 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
       )}
       {forwardingProposal && (
         <ForwardApprovalModal proposal={forwardingProposal} currentUser={currentUser} users={users} onClose={() => setForwardingProposal(null)} />
+      )}
+      {signingProposal && (
+        <SignDocumentModal currentUser={currentUser} onClose={() => setSigningProposal(null)} />
       )}
     </div>
   )
@@ -8840,6 +9025,36 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
               </div>
             </div>
           )}
+
+          <div className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+            <h4 className="font-bold mb-1 flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
+              🖊 Chữ ký của tôi
+            </h4>
+            <p className="text-xs mb-3 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+              Tải ảnh chữ ký tay đã crop gọn (nền trắng) để dùng khi ký tờ trình.
+            </p>
+            {currentUser.signatureUrl && (
+              <div className="flex items-center gap-3 mb-3">
+                <img src={currentUser.signatureUrl} alt="chữ ký" className="h-14 rounded-lg"
+                  style={{ background: '#fff', border: '1px solid var(--border)', padding: 4 }} />
+                <button onClick={async () => {
+                  await supabase.from('profiles').update({ signature_url: null }).eq('id', currentUser.id)
+                  setCurrentUser({ ...currentUser, signatureUrl: undefined })
+                }} className="text-xs" style={{ color: '#dc2626' }}>Xoá chữ ký</button>
+              </div>
+            )}
+            <input type="file" accept="image/*" onChange={async e => {
+              const file = e.target.files?.[0]
+              if (!file) return
+              const reader = new FileReader()
+              reader.onload = async ev => {
+                const dataUrl = ev.target?.result as string
+                await supabase.from('profiles').update({ signature_url: dataUrl }).eq('id', currentUser.id)
+                setCurrentUser({ ...currentUser, signatureUrl: dataUrl })
+              }
+              reader.readAsDataURL(file)
+            }} className="text-xs" style={{ color: 'var(--text-muted)' }} />
+          </div>
 
           {editing && (
             <div className="rounded-xl p-4 animate-slide-up" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
@@ -9221,7 +9436,7 @@ export default function App() {
   const [proposalRevisions, setProposalRevisions] = useState<ProposalRevision[]>([])
 
   function mapProfileToUser(p: any): User {
-  return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email, isDirector: p.is_director ?? false, driveFolderUrl: p.drive_folder_url ?? undefined }
+  return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email, isDirector: p.is_director ?? false, driveFolderUrl: p.drive_folder_url ?? undefined, signatureUrl: p.signature_url ?? undefined }
 }
 
   function mapDbMessage(m: any): Message {
