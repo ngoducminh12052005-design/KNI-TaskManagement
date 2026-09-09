@@ -8258,7 +8258,7 @@ function SignDocumentModal({ currentUser, proposal, onClose }: { currentUser: Us
   const [pdfDoc, setPdfDoc] = useState<any>(null)
   const [pageIndex, setPageIndex] = useState(0)
   const [pageCount, setPageCount] = useState(0)
-  const [placement, setPlacement] = useState<{ x: number; y: number } | null>(null)
+  const [placement, setPlacement] = useState<{ page: number; x: number; y: number } | null>(null)
   const [sigSize, setSigSize] = useState({ w: 130, h: 60 })
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState('')
@@ -8312,17 +8312,21 @@ function SignDocumentModal({ currentUser, proposal, onClose }: { currentUser: Us
     const rect = canvas.getBoundingClientRect()
     const x = (e.clientX - rect.left) * (canvas.width / rect.width)
     const y = (e.clientY - rect.top) * (canvas.height / rect.height)
-    setPlacement({ x, y })
+    setPlacement({ page: pageIndex, x, y })
   }
 
   const handleExport = async () => {
     if (!pdfBytes || !placement || !currentUser.signatureUrl) return
+    if (placement.page !== pageIndex) {
+      setError(`Chữ ký đang được đặt ở trang ${placement.page + 1}, không phải trang bạn đang xem. Vui lòng quay lại đúng trang đó để xác nhận, hoặc bấm lại vị trí mới trên trang hiện tại.`)
+      return
+    }
     setProcessing(true)
     setError('')
     try {
       const { PDFDocument } = await import('pdf-lib')
       const doc = await PDFDocument.load(pdfBytes)
-      const page = doc.getPages()[pageIndex]
+      const page = doc.getPages()[placement.page]
       const { height: pageHeight } = page.getSize()
 
       const sigRes = await fetch(currentUser.signatureUrl)
@@ -8388,12 +8392,16 @@ function SignDocumentModal({ currentUser, proposal, onClose }: { currentUser: Us
                 className="text-xs underline" style={{ color: 'var(--text-muted)' }}>Chọn file khác</button>
             </div>
 
-            <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>💡 Nhấn vào vị trí trên tài liệu muốn đặt chữ ký.</p>
+            <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
+              {placement
+                ? `🔒 Đã cố định chữ ký tại trang ${placement.page + 1}. Bấm lại vào tài liệu để đổi vị trí.`
+                : '💡 Nhấn vào vị trí trên tài liệu muốn đặt chữ ký.'}
+            </p>
 
             <div className="relative inline-block" style={{ maxWidth: '100%' }}>
               <canvas ref={canvasRef} onClick={handleCanvasClick}
                 style={{ maxWidth: '100%', height: 'auto', cursor: 'crosshair', border: '1px solid var(--border)', display: 'block' }} />
-              {placement && currentUser.signatureUrl && canvasRef.current && (
+              {placement && placement.page === pageIndex && currentUser.signatureUrl && canvasRef.current && (
                 <img src={currentUser.signatureUrl} alt="chữ ký"
                   style={{
                     position: 'absolute',
