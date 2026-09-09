@@ -4581,6 +4581,7 @@ interface Proposal {
   rejectedReason?: string
   participants: string[]
   createdAt: string
+  signedFileUrl?: string
 }
 
 type CollaborationStatus = 'pending' | 'assigned' | 'rejected'
@@ -8252,7 +8253,7 @@ function mapDbProposalRevision(r: any): ProposalRevision {
   return { id: r.id, proposalId: r.proposal_id, editedBy: r.edited_by, addedNote: r.added_note ?? undefined, editedNote: r.edited_note ?? undefined, createdAt: r.created_at }
 }
 
-function SignDocumentModal({ currentUser, onClose }: { currentUser: User; onClose: () => void }) {
+function SignDocumentModal({ currentUser, proposal, onClose }: { currentUser: User; proposal: Proposal; onClose: () => void }) {
   const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null)
   const [pdfDoc, setPdfDoc] = useState<any>(null)
   const [pageIndex, setPageIndex] = useState(0)
@@ -8261,6 +8262,9 @@ function SignDocumentModal({ currentUser, onClose }: { currentUser: User; onClos
   const [sigSize, setSigSize] = useState({ w: 130, h: 60 })
   const [processing, setProcessing] = useState(false)
   const [error, setError] = useState('')
+  const [signedBlobUrl, setSignedBlobUrl] = useState<string | null>(null)
+  const [signedFileLink, setSignedFileLink] = useState('')
+  const [savingLink, setSavingLink] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -8334,11 +8338,19 @@ function SignDocumentModal({ currentUser, onClose }: { currentUser: User; onClos
 
       const outBytes = await doc.save()
       const blob = new Blob([outBytes as BlobPart], { type: 'application/pdf' })
-      window.open(URL.createObjectURL(blob), '_blank')
+      setSignedBlobUrl(URL.createObjectURL(blob))
     } catch (err: any) {
       setError('Lỗi khi tạo file đã ký: ' + err.message)
     }
     setProcessing(false)
+  }
+
+  const handleSaveSignedLink = async () => {
+    if (!signedFileLink.trim()) return
+    setSavingLink(true)
+    await supabase.from('proposals').update({ signed_file_url: signedFileLink.trim() }).eq('id', proposal.id)
+    setSavingLink(false)
+    onClose()
   }
 
   return (
@@ -8397,14 +8409,39 @@ function SignDocumentModal({ currentUser, onClose }: { currentUser: User; onClos
 
         {error && <p className="text-xs mt-3" style={{ color: '#dc2626' }}>{error}</p>}
 
-        <div className="flex gap-3 mt-5">
-          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>Đóng</button>
-          <button onClick={handleExport} disabled={!pdfBytes || !placement || !currentUser.signatureUrl || processing}
-            className="flex-1 py-2.5 rounded-xl font-bold text-white text-sm disabled:opacity-40"
-            style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
-            {processing ? 'Đang xử lý...' : '✅ Xác nhận & Mở file đã ký'}
-          </button>
-        </div>
+        {!signedBlobUrl ? (
+          <div className="flex gap-3 mt-5">
+            <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>Đóng</button>
+            <button onClick={handleExport} disabled={!pdfBytes || !placement || !currentUser.signatureUrl || processing}
+              className="flex-1 py-2.5 rounded-xl font-bold text-white text-sm disabled:opacity-40"
+              style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
+              {processing ? 'Đang xử lý...' : '✅ Xác nhận ký'}
+            </button>
+          </div>
+        ) : (
+          <div className="mt-5 p-4 rounded-xl space-y-3" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
+            <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>✅ Đã tạo file ký thành công</p>
+            <a href={signedBlobUrl} download={`${proposal.title}-da-ky.pdf`}
+              className="inline-block px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#3b82f622', color: '#2563eb' }}>
+              ⬇ Tải file đã ký về máy
+            </a>
+            <p className="text-xs leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+              Tải file trên về, tải lên đúng thư mục Drive của tờ trình này, sau đó dán link file đã ký vào ô dưới để lưu lại cho mọi người xem.
+            </p>
+            <input value={signedFileLink} onChange={e => setSignedFileLink(e.target.value)}
+              placeholder="https://drive.google.com/file/d/... (file đã ký)"
+              className="w-full px-3 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
+              style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+            <div className="flex gap-3">
+              <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm" style={{ background: 'var(--bg-panel)', color: 'var(--text-muted)' }}>Đóng</button>
+              <button onClick={handleSaveSignedLink} disabled={!signedFileLink.trim() || savingLink}
+                className="flex-1 py-2.5 rounded-xl font-bold text-white text-sm disabled:opacity-40"
+                style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
+                {savingLink ? 'Đang lưu...' : '💾 Lưu link file đã ký'}
+              </button>
+            </div>
+          </div>
+        )}
 
         <input ref={fileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleFile} />
       </div>
@@ -8711,16 +8748,36 @@ function ForwardApprovalModal({ proposal, currentUser, users, onClose }: {
   )
 }
 
-function ProposalsView({ currentUser, users, proposals, proposalApprovals, proposalRevisions, onJoinDiscussion }: {
+function ProposalsView({ currentUser, users, proposals, proposalApprovals, proposalRevisions, onJoinDiscussion, highlightProposalId, clearHighlightProposalId }: {
   currentUser: User; users: User[]; proposals: Proposal[]; proposalApprovals: ProposalApproval[]
   proposalRevisions: ProposalRevision[]
   onJoinDiscussion: (p: Proposal) => void
+  highlightProposalId?: string | null; clearHighlightProposalId?: () => void
 }) {
   const [showModal, setShowModal] = useState(false)
   const [forwardingProposal, setForwardingProposal] = useState<Proposal | null>(null)
   const [editingProposal, setEditingProposal] = useState<Proposal | null>(null)
   const [signingProposal, setSigningProposal] = useState<Proposal | null>(null)
   const getUserById = (id?: string) => users.find(u => u.id === id)
+  const proposalRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const [flashProposalId, setFlashProposalId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!highlightProposalId) return
+    const tryScroll = () => {
+      const el = proposalRefs.current[highlightProposalId]
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        setFlashProposalId(highlightProposalId)
+        setTimeout(() => setFlashProposalId(prev => (prev === highlightProposalId ? null : prev)), 2500)
+        clearHighlightProposalId?.()
+      } else {
+        setTimeout(tryScroll, 150)
+      }
+    }
+    const t = setTimeout(tryScroll, 150)
+    return () => clearTimeout(t)
+  }, [highlightProposalId])
 
   const received = proposals.filter(p => p.recipientId === currentUser.id)
   const sent = proposals.filter(p => p.submittedBy === currentUser.id)
@@ -8803,7 +8860,14 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   }
 
   const ProposalCard = ({ p, showActions }: { p: Proposal; showActions?: boolean }) => (
-    <div className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+    <div ref={el => { proposalRefs.current[p.id] = el }}
+      className="rounded-xl p-4 transition-all"
+      style={{
+        background: flashProposalId === p.id ? '#7c3aed1a' : 'var(--bg-panel)',
+        border: `1px solid ${flashProposalId === p.id ? '#7c3aed' : 'var(--border)'}`,
+        boxShadow: flashProposalId === p.id ? '0 0 16px #7c3aed40' : 'none',
+        transition: 'background 0.4s ease, border 0.4s ease, box-shadow 0.4s ease',
+      }}>
       <div className="flex items-start justify-between gap-3 mb-2">
         <div>
           <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{p.title}</h3>
@@ -8818,10 +8882,18 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
         <p className="text-xs mb-3" style={{ color: '#dc2626' }}>Lý do: {p.rejectedReason}</p>
       )}
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <a href={p.driveUrl} target="_blank" rel="noopener noreferrer"
-          className="text-xs underline" style={{ color: '#3b82f6' }}>
-          📁 Xem tờ trình trên Drive
-        </a>
+        <div className="flex items-center gap-3 flex-wrap">
+          <a href={p.driveUrl} target="_blank" rel="noopener noreferrer"
+            className="text-xs underline" style={{ color: '#3b82f6' }}>
+            📁 Xem tờ trình trên Drive
+          </a>
+          {p.signedFileUrl && (
+            <a href={p.signedFileUrl} target="_blank" rel="noopener noreferrer"
+              className="text-xs underline" style={{ color: '#0e7490' }}>
+              🖊 Xem file đã ký
+            </a>
+          )}
+        </div>
         <div className="flex gap-2 flex-wrap">
           <button onClick={() => onJoinDiscussion(p)}
             className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>
@@ -8851,7 +8923,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
               ✏️ Chỉnh sửa & Gửi lại
             </button>
           )}
-          {p.recipientId === currentUser.id && p.status === 'pending' && (
+          {p.recipientId === currentUser.id && (p.status === 'pending' || p.status === 'approved') && (
             <button onClick={() => setSigningProposal(p)}
               className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#0891b222', color: '#0e7490' }}>
               🖊 Ký tờ trình
@@ -8913,7 +8985,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
         <ForwardApprovalModal proposal={forwardingProposal} currentUser={currentUser} users={users} onClose={() => setForwardingProposal(null)} />
       )}
       {signingProposal && (
-        <SignDocumentModal currentUser={currentUser} onClose={() => setSigningProposal(null)} />
+        <SignDocumentModal currentUser={currentUser} proposal={signingProposal} onClose={() => setSigningProposal(null)} />
       )}
     </div>
   )
@@ -9212,6 +9284,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   const [lastSeenMention, setLastSeenMention] = useState(() => localStorage.getItem('lastSeenMention') || '')
   const [socialTarget, setSocialTarget] = useState<{ channel: ChatChannel; dmUserId?: string; proposalId?: string } | null>(null)
   const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null)
+  const [highlightProposalId, setHighlightProposalId] = useState<string | null>(null)
 
   const handleJoinProposal = async (proposal: Proposal) => {
     if (!proposal.participants.includes(currentUser.id)) {
@@ -9228,6 +9301,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   const handleNotificationClick = (n: { linkChannel?: string; linkDmUserId?: string; linkTaskId?: string; linkProposalId?: string }) => {
     if (n.linkProposalId) {
       setView('proposals')
+      setHighlightProposalId(n.linkProposalId)
       return
     }
     if (n.linkTaskId) {
@@ -9281,7 +9355,8 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
           proposals={proposals} />
       )
       case 'profile': return <ProfileView currentUser={currentUser} setCurrentUser={setCurrentUser} tasks={tasks} />
-      case 'proposals': return <ProposalsView currentUser={currentUser} users={users} proposals={proposals} proposalApprovals={proposalApprovals} proposalRevisions={proposalRevisions} onJoinDiscussion={handleJoinProposal} />
+      case 'proposals': return <ProposalsView currentUser={currentUser} users={users} proposals={proposals} proposalApprovals={proposalApprovals} proposalRevisions={proposalRevisions} onJoinDiscussion={handleJoinProposal}
+          highlightProposalId={highlightProposalId} clearHighlightProposalId={() => setHighlightProposalId(null)} />
           case 'bodlog': return currentUser.isDirector ? <BodLogView tasks={tasks} users={users} /> : <DashboardView {...sharedProps} />
     }
   }
@@ -9476,6 +9551,7 @@ function mapDbProposal(p: any): Proposal {
     rejectedReason: p.rejected_reason ?? undefined,
     participants: p.participants ?? [],
     createdAt: p.created_at,
+    signedFileUrl: p.signed_file_url ?? undefined,
   }
 }
 function mapDbProposalApproval(a: any): ProposalApproval {
