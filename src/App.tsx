@@ -5416,26 +5416,28 @@ if (directoryEntry.signup_code !== signupCode.trim().toUpperCase()) {
 
   const team = TEAMS.find(t => t.id === directoryEntry.team_id)
 
-//   const { error: profileError } = await supabase.from('profiles').insert({
-//     id: data.user.id,
-//     name: directoryEntry.full_name,
-//     role: directoryEntry.role,
-//     avatar,
-//     exp: 0,
-//     team_id: directoryEntry.team_id,
-//     department: team?.name ?? '',
-//   })
-//   setLoading(false)
-//   if (profileError) { setError(profileError.message); return }
-//   onLoggedIn()
-// }
-    setLoading(false)
-    if (!data.session) {
-      setError('Đăng ký thành công! Kiểm tra email để xác nhận, sau đó quay lại đăng nhập.')
-      return
-    }}
-onLoggedIn()
-  const handleSignIn = async () => {
+  const { error: profileError } = await supabase.from('profiles').upsert({
+    id: data.user.id,
+    name: name.trim() || directoryEntry.full_name,
+    role: directoryEntry.role,
+    avatar,
+    exp: 0,
+    team_id: directoryEntry.team_id,
+    department: team?.name ?? '',
+    email: email.trim().toLowerCase(),
+  })
+
+  setLoading(false)
+  if (profileError) { setError(profileError.message); return }
+
+  if (!data.session) {
+    setError('Đăng ký thành công! Kiểm tra email để xác nhận, sau đó quay lại đăng nhập.')
+    return
+  }
+  onLoggedIn()
+}
+
+const handleSignIn = async () => {
     if (!email.trim() || !password.trim()) return
     setError('')
     setLoading(true)
