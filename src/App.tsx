@@ -5540,8 +5540,10 @@ onLoggedIn()
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div>
                 <label className="text-gray-500 text-xs uppercase tracking-wider mb-1.5 block">Tên của bạn</label>
-                <input type="text" value={name} onChange={e => setName(e.target.value)}
+                <input value={name} onChange={e => setName(e.target.value)}
                   placeholder="Nhập tên hiển thị..."
+                  autoComplete="off"
+                  name="display-name-no-autofill"
                   className="w-full px-4 py-3 rounded-xl text-white placeholder-gray-600 outline-none"
                   style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
               </div>
