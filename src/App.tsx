@@ -1829,15 +1829,112 @@ function TaskTicketPanel({ task, currentUser, users, canSubmit }: {
     setSaving(false)
   }
 
-  const LockedStep = ({ label, text, at }: { label: string; text?: string; at?: string }) => {
-    if (!text) return null
+  // const LockedStep = ({ label, text, at }: { label: string; text?: string; at?: string }) => {
+  //   if (!text) return null
+  //   return (
+  //     <div className="p-2.5 rounded-lg mb-2" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
+  //       <div className="flex items-center justify-between mb-1">
+  //         <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{label}</span>
+  //         <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>🔒 {at ? fmtTime(at) : ''}</span>
+  //       </div>
+  //       <p className="text-xs whitespace-pre-wrap break-words" style={{ color: 'var(--text-muted)' }}>{text}</p>
+  //     </div>
+  //   )
+  // }
+
+  const isKniNotificationHtml = (value: string) =>
+  /<table[\s\S]*KNI Task Management Notification/i.test(value)
+
+  const TicketNotificationPreview = ({ html }: { html: string }) => {
+    const srcDoc = `<!doctype html>
+  <html>
+  <head>
+  <meta charset="UTF-8">
+  <style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #fff;
+  }
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+  }
+  table[role="presentation"] {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+  img {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+  </style>
+  </head>
+  <body>${html}</body>
+  </html>`
+
     return (
-      <div className="p-2.5 rounded-lg mb-2" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{label}</span>
-          <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>🔒 {at ? fmtTime(at) : ''}</span>
+      <iframe
+        title="KNI Task Management Notification"
+        srcDoc={srcDoc}
+        sandbox=""
+        className="w-full rounded-lg bg-white"
+        style={{
+          height: 500,
+          border: '1px solid var(--border)'
+        }}
+      />
+    )
+  }
+
+  const LockedStep = ({
+    label,
+    text,
+    at
+  }: {
+    label: string
+    text?: string
+    at?: string
+  }) => {
+    if (!text) return null
+
+    const isHtml = isKniNotificationHtml(text)
+
+    return (
+      <div
+        className="p-2.5 rounded-lg mb-2"
+        style={{
+          background: 'var(--bg-card-alt)',
+          border: '1px solid var(--border)'
+        }}
+      >
+        <div className="flex items-center justify-between mb-2">
+          <span
+            className="text-xs font-semibold"
+            style={{ color: 'var(--text-primary)' }}
+          >
+            {label}
+          </span>
+
+          <span
+            className="text-[10px]"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            🔒 {at ? fmtTime(at) : ''}
+          </span>
         </div>
-        <p className="text-xs whitespace-pre-wrap break-words" style={{ color: 'var(--text-muted)' }}>{text}</p>
+
+        {isHtml ? (
+          <TicketNotificationPreview html={text} />
+        ) : (
+          <p
+            className="text-xs whitespace-pre-wrap break-words"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            {text}
+          </p>
+        )}
       </div>
     )
   }
