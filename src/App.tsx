@@ -1673,11 +1673,12 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
   )
 }
 // Dropdown chọn nhiều người dùng chung (Phụ trách / PM / Hỗ trợ)
-function MultiUserSelect({ label, options, selected, onToggle, placeholder = 'Chọn...', badge }: {
+function MultiUserSelect({ label, options, selected, onToggle, placeholder = 'Chọn...', badge, isDirector = false }: {
   label: string; options: User[]; selected: string[]; onToggle: (id: string) => void
-  placeholder?: string; badge?: string
+  placeholder?: string; badge?: string; isDirector?: boolean
 }) {
   const [open, setOpen] = useState(false)
+  const [teamId, setTeamId] = useState('')
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -1687,6 +1688,9 @@ function MultiUserSelect({ label, options, selected, onToggle, placeholder = 'Ch
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
   }, [])
+
+  const teamsWithOptions = TEAMS.filter(t => options.some(u => u.teamId === t.id))
+  const visibleUsers = isDirector ? options.filter(u => u.teamId === teamId) : options
 
   return (
     <div ref={ref} className="relative">
@@ -1698,26 +1702,42 @@ function MultiUserSelect({ label, options, selected, onToggle, placeholder = 'Ch
         style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: selected.length > 0 ? 'var(--text-primary)' : 'var(--text-muted)' }}>
         <span>
           {selected.length === 0 ? placeholder
-            : selected.map(sid => options.find(u => u.id === sid)?.name.split(' ').slice(-1)[0]).join(', ')}
+            : selected.map(sid => options.find(u => u.id === sid)?.name).join(', ')}
         </span>
         <span style={{ color: 'var(--text-muted)' }}>{open ? '▲' : '▼'}</span>
       </button>
       {open && (
-        <div className="absolute z-10 top-full left-0 right-0 mt-1 rounded-xl overflow-hidden max-h-60 overflow-y-auto"
+        <div className="absolute z-10 top-full left-0 right-0 mt-1 rounded-xl overflow-hidden"
           style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.25)' }}>
-          {options.map(u => (
-            <label key={u.id}
-              className="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer transition-colors hover:bg-[color:var(--bg-panel)]">
-              <input type="checkbox" checked={selected.includes(u.id)} onChange={() => onToggle(u.id)}
-                className="w-4 h-4 rounded accent-violet-500" />
-              <CharAvatar user={u} size={24} />
-              <span className="text-sm flex-1" style={{ color: 'var(--text-primary)' }}>{u.name}</span>
-              {badge && u.role === 'manager' && (
-                <span className="text-[9px] px-1 rounded" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>{badge}</span>
-              )}
-              <LevelBadge exp={u.exp} />
-            </label>
-          ))}
+          {isDirector && (
+            <div className="p-2 border-b" style={{ borderColor: 'var(--border)' }}>
+              <select value={teamId} onChange={e => setTeamId(e.target.value)}
+                className="w-full px-2 py-2 rounded-lg text-xs outline-none"
+                style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                <option value="">-- Chọn phòng ban --</option>
+                {teamsWithOptions.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
+              </select>
+            </div>
+          )}
+          <div className="max-h-52 overflow-y-auto">
+            {isDirector && !teamId ? (
+              <p className="text-xs px-3 py-3" style={{ color: 'var(--text-muted)' }}>Chọn phòng ban trước để hiện danh sách</p>
+            ) : visibleUsers.length === 0 ? (
+              <p className="text-xs px-3 py-3" style={{ color: 'var(--text-muted)' }}>Không có ai phù hợp.</p>
+            ) : visibleUsers.map(u => (
+              <label key={u.id}
+                className="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer transition-colors hover:bg-[color:var(--bg-panel)]">
+                <input type="checkbox" checked={selected.includes(u.id)} onChange={() => onToggle(u.id)}
+                  className="w-4 h-4 rounded accent-violet-500" />
+                <CharAvatar user={u} size={24} />
+                <span className="text-sm flex-1" style={{ color: 'var(--text-primary)' }}>{u.name}</span>
+                {badge && u.role === 'manager' && (
+                  <span className="text-[9px] px-1 rounded" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>{badge}</span>
+                )}
+                <LevelBadge exp={u.exp} />
+              </label>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -2753,7 +2773,8 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
                     options={employees}
                     selected={form.assignedTo}
                     onToggle={uid => toggleFormArray('assignedTo', uid)}
-                    placeholder="Chưa giao" />
+                    placeholder="Chưa giao"
+                    isDirector={currentUser.isDirector} />
 
                   <MultiUserSelect
                     label="Quản lý dự án (PM) — mỗi người nhận đủ 100% EXP"
@@ -2761,14 +2782,16 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
                     selected={form.projectManager}
                     onToggle={uid => toggleFormArray('projectManager', uid)}
                     placeholder="Chọn PM..."
-                    badge="PM" />
+                    badge="PM"
+                    isDirector={currentUser.isDirector} />
 
                   <MultiUserSelect
                     label={`Người hỗ trợ — mỗi người nhận ${Math.round(SUPPORTER_EXP_PERCENT * 100)}% EXP`}
                     options={employees}
                     selected={form.supporters}
                     onToggle={uid => toggleFormArray('supporters', uid)}
-                    placeholder="Chọn người hỗ trợ..." />
+                    placeholder="Chọn người hỗ trợ..."
+                    isDirector={currentUser.isDirector} />
 
                   <div className="p-3 rounded-lg" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
                     <label className="flex items-center gap-2.5 mb-2 cursor-pointer select-none">
