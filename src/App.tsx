@@ -1933,7 +1933,7 @@ function TaskTicketPanel({ task, currentUser, users, canSubmit }: {
             style={{ color: 'var(--text-muted)' }}
           >
             {text}
-          </p>
+          </p> 
         )}
       </div>
     )
@@ -3943,9 +3943,6 @@ function ProposalModal({ currentUser, users, editingProposal, onClose }: { curre
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const recipients = currentUser.role === 'manager'
-    ? users.filter(u => u.isDirector)
-    : users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)
 
   const managersInResubmitTeam = users.filter(u => u.role === 'manager' && u.teamId === resubmitTeamId)
 
@@ -4087,45 +4084,29 @@ function ProposalModal({ currentUser, users, editingProposal, onClose }: { curre
             </div>
           )}
 
-          {editingProposal ? (
-            <>
-              <div>
-                <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Chọn phòng ban *</label>
-                <select value={resubmitTeamId} onChange={e => { setResubmitTeamId(e.target.value); setRecipientId('') }}
+          <div>
+            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Chọn phòng ban *</label>
+            <select value={resubmitTeamId} onChange={e => { setResubmitTeamId(e.target.value); setRecipientId('') }}
+              className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+              <option value="">-- Chọn phòng ban --</option>
+              {TEAMS.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
+            </select>
+          </div>
+
+          {resubmitTeamId && (
+            <div>
+              <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Chọn quản lý *</label>
+              {managersInResubmitTeam.length === 0 ? (
+                <p className="text-xs" style={{ color: '#dc2626' }}>Phòng ban này chưa có quản lý nào trong hệ thống.</p>
+              ) : (
+                <select value={recipientId} onChange={e => setRecipientId(e.target.value)}
                   className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
                   style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-                  <option value="">-- Chọn phòng ban --</option>
-                  {TEAMS.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
+                  <option value="">-- Chọn quản lý --</option>
+                  {managersInResubmitTeam.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
                 </select>
-              </div>
-
-              {resubmitTeamId && (
-                <div>
-                  <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Chọn quản lý *</label>
-                  {managersInResubmitTeam.length === 0 ? (
-                    <p className="text-xs" style={{ color: '#dc2626' }}>Phòng ban này chưa có quản lý nào trong hệ thống.</p>
-                  ) : (
-                    <select value={recipientId} onChange={e => setRecipientId(e.target.value)}
-                      className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
-                      style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-                      <option value="">-- Chọn quản lý --</option>
-                      {managersInResubmitTeam.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                    </select>
-                  )}
-                </div>
               )}
-            </>
-          ) : (
-            <div>
-              <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
-                Trình lên ai *
-              </label>
-              <select value={recipientId} onChange={e => setRecipientId(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
-                style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-                <option value="">-- Chọn người nhận --</option>
-                {recipients.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </select>
             </div>
           )}
 
@@ -4929,7 +4910,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
             <div className="flex items-center gap-2 cursor-pointer flex-shrink-0" onClick={() => setView('profile')}>
               <CharAvatar user={currentUser} size={32} />
               <div className="hidden sm:block">
-                <div className="text-sm font-medium leading-tight truncate max-w-[100px]" style={{ color: 'var(--text-primary)' }}>{currentUser.name.split(' ').slice(-1)[0]}</div>
+                <div className="text-sm font-medium leading-tight truncate max-w-[140px]" title={currentUser.name} style={{ color: 'var(--text-primary)' }}>{currentUser.name}</div>
                 <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{currentUser.role === 'manager' ? '👑 Quản lý' : '⚔️ Nhân viên'}</div>
               </div>
             </div>
