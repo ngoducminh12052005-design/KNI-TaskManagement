@@ -135,7 +135,7 @@ interface Collaboration {
   targetManagerId?: string
   expReward?: number
   status: CollaborationStatus
-  assignedEmployeeId?: string
+  assignedEmployeeIds?: string[]
   assignedBy?: string
   rejectedReason?: string
   createdAt: string
@@ -1496,7 +1496,7 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
   currentUser: User; users: User[]; collaborations: Collaboration[]
 }) {
   const [assigningId, setAssigningId] = useState<string | null>(null)
-  const [pickedEmployee, setPickedEmployee] = useState('')
+  const [pickedEmployees, setPickedEmployees] = useState<string[]>([])
 
   if (currentUser.role !== 'manager') return null
 
@@ -1517,14 +1517,18 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
 
   const openAssign = (c: Collaboration) => {
     setAssigningId(c.id)
-    setPickedEmployee('')
+    setPickedEmployees([])
+  }
+
+  const toggleEmployee = (uid: string) => {
+    setPickedEmployees(prev => prev.includes(uid) ? prev.filter(id => id !== uid) : [...prev, uid])
   }
 
   const handleConfirmAssign = async (c: Collaboration) => {
-    if (!pickedEmployee) return
+    if (pickedEmployees.length === 0) return
     const exp = c.expReward ?? 80
     await supabase.from('collaborations').update({
-      status: 'assigned', assigned_employee_id: pickedEmployee, assigned_by: currentUser.id,
+      status: 'assigned', assigned_employee_ids: pickedEmployees, assigned_by: currentUser.id,
     }).eq('id', c.id)
 
     const { data: newTask } = await supabase.from('tasks').insert({
@@ -1532,7 +1536,7 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
       description: `[Phối hợp phòng ban] ${c.description}`,
       exp_reward: exp,
       status: 'open',
-      assigned_to: [pickedEmployee],
+      assigned_to: pickedEmployees,
       project_manager: [c.requestedBy, currentUser.id],
       supporters: [],
       created_by: currentUser.id,
@@ -1549,17 +1553,19 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
     }).select('id').single()
     const newTaskId = newTask?.id
 
-    const employeeName = getUserById(pickedEmployee)?.name ?? ''
+    const employeeNames = pickedEmployees.map(uid => getUserById(uid)?.name).filter(Boolean).join(', ')
     await supabase.from('notifications').insert({
-      message: `🤝 ${currentUser.name} đã phân công ${employeeName} hợp tác trong dự án "${c.title}"`,
+      message: `🤝 ${currentUser.name} đã phân công ${employeeNames} hợp tác trong dự án "${c.title}"`,
       target_user_id: c.requestedBy,
       link_task_id: newTaskId,
     })
-    await supabase.from('notifications').insert({
-      message: `🤝 Bạn vừa được phân công hợp tác trong dự án "${c.title}" (phối hợp với ${TEAMS.find(t => t.id === c.requestingTeamId)?.name ?? ''})`,
-      target_user_id: pickedEmployee,
-      link_task_id: newTaskId,
-    })
+    for (const uid of pickedEmployees) {
+      await supabase.from('notifications').insert({
+        message: `🤝 Bạn vừa được phân công hợp tác trong dự án "${c.title}" (phối hợp với ${TEAMS.find(t => t.id === c.requestingTeamId)?.name ?? ''})`,
+        target_user_id: uid,
+        link_task_id: newTaskId,
+      })
+    }
 
     setAssigningId(null)
   }
@@ -1572,7 +1578,8 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
         {c.rejectedReason && <span className="text-[10px] max-w-[200px] text-right" style={{ color: 'var(--text-muted)' }}>{c.rejectedReason}</span>}
       </div>
     )
-    return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#34d39922', color: '#059669' }}>✅ Đã phân công: {getUserById(c.assignedEmployeeId)?.name}</span>
+    const names = (c.assignedEmployeeIds ?? []).map(id => getUserById(id)?.name).filter(Boolean).join(', ')
+    return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#34d39922', color: '#059669' }}>✅ Đã phân công: {names}</span>
   }
 
   if (sent.length === 0 && receivedPending.length === 0 && receivedProcessed.length === 0) return null
@@ -1602,16 +1609,26 @@ function CollaborationsPanel({ currentUser, users, collaborations }: {
 
                 {assigningId === c.id ? (
                   <div className="space-y-2 p-2.5 rounded-lg" style={{ background: 'var(--bg-panel)' }}>
-                    <label className="text-[10px] uppercase tracking-wider block" style={{ color: 'var(--text-muted)' }}>Phân công nhân viên phòng bạn</label>
-                    <select value={pickedEmployee} onChange={e => setPickedEmployee(e.target.value)}
-                      className="w-full px-2.5 py-2 rounded-lg text-xs outline-none"
-                      style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-                      <option value="">-- Chọn nhân viên --</option>
-                      {myTeamEmployees.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                    </select>
+                    <label className="text-[10px] uppercase tracking-wider block" style={{ color: 'var(--text-muted)' }}>
+                      Phân công nhân viên phòng bạn {pickedEmployees.length > 0 && `(${pickedEmployees.length} đã chọn)`}
+                    </label>
+                    <div className="rounded-lg overflow-hidden max-h-40 overflow-y-auto" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
+                      {myTeamEmployees.length === 0 ? (
+                        <p className="text-xs p-2.5" style={{ color: 'var(--text-muted)' }}>Team bạn chưa có nhân viên nào.</p>
+                      ) : (
+                        myTeamEmployees.map(u => (
+                          <label key={u.id} className="flex items-center gap-2.5 px-2.5 py-2 cursor-pointer transition-colors hover:bg-[color:var(--bg-panel)]">
+                            <input type="checkbox" checked={pickedEmployees.includes(u.id)} onChange={() => toggleEmployee(u.id)}
+                              className="w-4 h-4 rounded accent-violet-500" />
+                            <CharAvatar user={u} size={20} />
+                            <span className="text-xs" style={{ color: 'var(--text-primary)' }}>{u.name}</span>
+                          </label>
+                        ))
+                      )}
+                    </div>
                     <div className="flex gap-2 pt-1">
                       <button onClick={() => setAssigningId(null)} className="flex-1 py-1.5 rounded-lg text-xs" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>Hủy</button>
-                      <button onClick={() => handleConfirmAssign(c)} disabled={!pickedEmployee}
+                      <button onClick={() => handleConfirmAssign(c)} disabled={pickedEmployees.length === 0}
                         className="flex-1 py-1.5 rounded-lg text-xs font-bold disabled:opacity-40" style={{ background: '#34d39922', color: '#059669' }}>
                         Xác nhận phân công
                       </button>
@@ -5055,7 +5072,7 @@ function mapDbCollaboration(c: any): Collaboration {
     requestedBy: c.requested_by, requestingTeamId: c.requesting_team_id, targetTeamId: c.target_team_id,
     targetManagerId: c.target_manager_id ?? undefined,
     expReward: c.exp_reward ?? undefined,
-    status: c.status, assignedEmployeeId: c.assigned_employee_id ?? undefined,
+    status: c.status, assignedEmployeeIds: c.assigned_employee_ids ?? [],
     assignedBy: c.assigned_by ?? undefined, rejectedReason: c.rejected_reason ?? undefined,
     createdAt: c.created_at,
     driveFolderCreated: c.drive_folder_created ?? false,
