@@ -1155,8 +1155,7 @@ function DashboardView({ currentUser, tasks, users, setTasks, setCurrentUser, se
                   <span className="text-xs w-4 font-mono" style={{ color: 'var(--text-muted)' }}>#{i + 1}</span>
                   <CharAvatar user={user} size={28} />
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium truncate" style={{ color: 'var(--text-primary)' }}>{user.name.split(' ').slice(-1)[0]}</div>
-                    <ExpBarMini exp={user.exp} />
+                    <div className="text-xs font-medium truncate" style={{ color: 'var(--text-primary)' }}>{user.name}</div>                    <ExpBarMini exp={user.exp} />
                   </div>
                   <div className="text-amber-500 text-xs font-bold" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{user.exp}</div>
                 </div>
@@ -2452,8 +2451,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
                       {pms.map(pm => (
                         <div key={pm.id} className="flex items-center gap-1">
                           <CharAvatar user={pm} size={20} />
-                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{pm.name.split(' ').slice(-1)[0]}</span>
-                        </div>
+                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{pm.name}</span>                        </div>
                       ))}
                       <span className="text-[9px] px-1 rounded" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>PM</span>
                     </div>
