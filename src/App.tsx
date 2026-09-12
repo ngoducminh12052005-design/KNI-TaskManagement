@@ -1155,7 +1155,8 @@ function DashboardView({ currentUser, tasks, users, setTasks, setCurrentUser, se
                   <span className="text-xs w-4 font-mono" style={{ color: 'var(--text-muted)' }}>#{i + 1}</span>
                   <CharAvatar user={user} size={28} />
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium truncate" style={{ color: 'var(--text-primary)' }}>{user.name}</div>                    <ExpBarMini exp={user.exp} />
+                    <div className="text-xs font-medium truncate" style={{ color: 'var(--text-primary)' }}>{user.name.split(' ').slice(-1)[0]}</div>
+                    <ExpBarMini exp={user.exp} />
                   </div>
                   <div className="text-amber-500 text-xs font-bold" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{user.exp}</div>
                 </div>
@@ -1677,7 +1678,6 @@ function MultiUserSelect({ label, options, selected, onToggle, placeholder = 'Ch
   placeholder?: string; badge?: string
 }) {
   const [open, setOpen] = useState(false)
-  const [teamId, setTeamId] = useState('')
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -1687,10 +1687,6 @@ function MultiUserSelect({ label, options, selected, onToggle, placeholder = 'Ch
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
   }, [])
-
-  // Chỉ liệt kê phòng ban thực sự có người trong danh sách options
-  const teamsWithOptions = TEAMS.filter(t => options.some(u => u.teamId === t.id))
-  const usersInTeam = options.filter(u => u.teamId === teamId)
 
   return (
     <div ref={ref} className="relative">
@@ -1702,40 +1698,26 @@ function MultiUserSelect({ label, options, selected, onToggle, placeholder = 'Ch
         style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: selected.length > 0 ? 'var(--text-primary)' : 'var(--text-muted)' }}>
         <span>
           {selected.length === 0 ? placeholder
-            : selected.map(sid => options.find(u => u.id === sid)?.name).join(', ')}
+            : selected.map(sid => options.find(u => u.id === sid)?.name.split(' ').slice(-1)[0]).join(', ')}
         </span>
         <span style={{ color: 'var(--text-muted)' }}>{open ? '▲' : '▼'}</span>
       </button>
       {open && (
-        <div className="absolute z-10 top-full left-0 right-0 mt-1 rounded-xl overflow-hidden"
+        <div className="absolute z-10 top-full left-0 right-0 mt-1 rounded-xl overflow-hidden max-h-60 overflow-y-auto"
           style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.25)' }}>
-          <div className="p-2 border-b" style={{ borderColor: 'var(--border)' }}>
-            <select value={teamId} onChange={e => setTeamId(e.target.value)}
-              className="w-full px-2 py-2 rounded-lg text-xs outline-none"
-              style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-              <option value="">-- Chọn phòng ban --</option>
-              {teamsWithOptions.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
-            </select>
-          </div>
-          <div className="max-h-52 overflow-y-auto">
-            {!teamId ? (
-              <p className="text-xs px-3 py-3" style={{ color: 'var(--text-muted)' }}>Chọn phòng ban trước để hiện danh sách</p>
-            ) : usersInTeam.length === 0 ? (
-              <p className="text-xs px-3 py-3" style={{ color: 'var(--text-muted)' }}>Phòng ban này chưa có ai phù hợp.</p>
-            ) : usersInTeam.map(u => (
-              <label key={u.id}
-                className="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer transition-colors hover:bg-[color:var(--bg-panel)]">
-                <input type="checkbox" checked={selected.includes(u.id)} onChange={() => onToggle(u.id)}
-                  className="w-4 h-4 rounded accent-violet-500" />
-                <CharAvatar user={u} size={24} />
-                <span className="text-sm flex-1" style={{ color: 'var(--text-primary)' }}>{u.name}</span>
-                {badge && u.role === 'manager' && (
-                  <span className="text-[9px] px-1 rounded" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>{badge}</span>
-                )}
-                <LevelBadge exp={u.exp} />
-              </label>
-            ))}
-          </div>
+          {options.map(u => (
+            <label key={u.id}
+              className="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer transition-colors hover:bg-[color:var(--bg-panel)]">
+              <input type="checkbox" checked={selected.includes(u.id)} onChange={() => onToggle(u.id)}
+                className="w-4 h-4 rounded accent-violet-500" />
+              <CharAvatar user={u} size={24} />
+              <span className="text-sm flex-1" style={{ color: 'var(--text-primary)' }}>{u.name}</span>
+              {badge && u.role === 'manager' && (
+                <span className="text-[9px] px-1 rounded" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>{badge}</span>
+              )}
+              <LevelBadge exp={u.exp} />
+            </label>
+          ))}
         </div>
       )}
     </div>
@@ -2436,7 +2418,8 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
                       {assignees.map(a => (
                         <div key={a.id} className="flex items-center gap-1">
                           <CharAvatar user={a} size={20} />
-                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{a.name}</span>                        </div>
+                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{a.name.split(' ').slice(-1)[0]}</span>
+                        </div>
                       ))}
                     </div>
                   ) : <span className="text-xs italic" style={{ color: 'var(--text-muted)' }}>Chưa giao</span>}
@@ -2449,7 +2432,8 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
                       {pms.map(pm => (
                         <div key={pm.id} className="flex items-center gap-1">
                           <CharAvatar user={pm} size={20} />
-                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{pm.name}</span>                        </div>
+                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{pm.name.split(' ').slice(-1)[0]}</span>
+                        </div>
                       ))}
                       <span className="text-[9px] px-1 rounded" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>PM</span>
                     </div>
@@ -3558,7 +3542,8 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
                 <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-400"
                   style={{ border: '1.5px solid var(--bg-panel)' }} />
               </div>
-              <span className="text-[11px] truncate flex-1 text-left" style={{ color: 'var(--text-muted)' }}>{u.name}</span>              {u.role === 'manager' && <span className="text-[9px]" style={{ color: '#8b5cf6' }}>QL</span>}
+              <span className="text-[11px] truncate flex-1 text-left" style={{ color: 'var(--text-muted)' }}>{u.name.split(' ').slice(-1)[0]}</span>
+              {u.role === 'manager' && <span className="text-[9px]" style={{ color: '#8b5cf6' }}>QL</span>}
               {dmUnread(u.id) && <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />}
             </button>
           ))}
