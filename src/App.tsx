@@ -3319,6 +3319,72 @@ function UserProfileCard({ user, onClose, onMessage }: { user: User; onClose: ()
     </div>
   )
 }
+
+
+function BrowseByDepartmentModal({ users, currentUser, onSelectUser, onClose }: {
+  users: User[]; currentUser: User; onSelectUser: (userId: string) => void; onClose: () => void
+}) {
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
+
+  const teamsWithCount = TEAMS.map(t => ({
+    ...t, count: users.filter(u => u.teamId === t.id && u.id !== currentUser.id).length,
+  })).filter(t => t.count > 0)
+
+  const peopleInTeam = selectedTeamId
+    ? users.filter(u => u.teamId === selectedTeamId && u.id !== currentUser.id)
+    : []
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
+      <div className="w-full max-w-sm rounded-2xl p-5 max-h-[80vh] flex flex-col" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+        <div className="flex items-center justify-between mb-4 flex-shrink-0">
+          <h3 className="font-bold text-lg flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
+            {selectedTeamId ? (
+              <>
+                <button onClick={() => setSelectedTeamId(null)} className="text-lg hover:opacity-70" style={{ color: 'var(--text-muted)' }}>‹</button>
+                {TEAMS.find(t => t.id === selectedTeamId)?.emoji} {TEAMS.find(t => t.id === selectedTeamId)?.name}
+              </>
+            ) : (
+              <>🏢 Chọn phòng ban</>
+            )}
+          </h3>
+          <button onClick={onClose} className="text-2xl leading-none hover:opacity-70" style={{ color: 'var(--text-muted)' }}>×</button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 space-y-1.5">
+          {!selectedTeamId ? (
+            teamsWithCount.length === 0 ? (
+              <p className="text-sm text-center py-8" style={{ color: 'var(--text-muted)' }}>Chưa có phòng ban nào có nhân sự.</p>
+            ) : (
+              teamsWithCount.map(t => (
+                <button key={t.id} onClick={() => setSelectedTeamId(t.id)}
+                  className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg transition-all hover:brightness-95"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
+                  <span className="text-sm flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
+                    <span className="text-lg">{t.emoji}</span> {t.name}
+                  </span>
+                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{t.count} người ›</span>
+                </button>
+              ))
+            )
+          ) : (
+            peopleInTeam.map(u => (
+              <button key={u.id} onClick={() => onSelectUser(u.id)}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg transition-all hover:brightness-95"
+                style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
+                <CharAvatar user={u} size={28} />
+                <div className="flex-1 text-left min-w-0">
+                  <div className="text-sm truncate" style={{ color: 'var(--text-primary)' }}>{u.name}</div>
+                  {u.role === 'manager' && <div className="text-[10px]" style={{ color: '#8b5cf6' }}>Quản lý</div>}
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
 // ==================== SOCIAL ====================
 
 function SocialView({ currentUser, users, messages, setMessages, showMentions, setShowMentions, markMentionsSeen, navigateTarget, clearNavigateTarget, proposals }: {
@@ -3334,6 +3400,7 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
   const [input, setInput] = useState('')
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
   const [profileUser, setProfileUser] = useState<User | null>(null)
+  const [showBrowseDept, setShowBrowseDept] = useState(false)
   const [lastSeenMap, setLastSeenMap] = useState<Record<string, string>>(() => {
     try { return JSON.parse(localStorage.getItem('chatLastSeen') || '{}') } catch { return {} }
   })
@@ -3576,7 +3643,14 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
           </>
         )}
 
-        <p className="text-[10px] uppercase tracking-widest px-2 mt-4 mb-2" style={{ color: 'var(--text-muted)' }}>Online ({users.length})</p>
+        <button onClick={() => setShowBrowseDept(true)}
+          className="w-full flex items-center gap-2 px-2 py-2 rounded-lg mt-4 mb-2 transition-all hover:brightness-95"
+          style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
+          <span className="text-base">🔍</span>
+          <span className="text-xs hidden md:inline" style={{ color: 'var(--text-muted)' }}>Tìm người theo phòng ban</span>
+        </button>
+
+        <p className="text-[10px] uppercase tracking-widest px-2 mt-2 mb-2" style={{ color: 'var(--text-muted)' }}>Online ({users.length})</p>
         <div className="space-y-1 overflow-y-auto flex-1">
           {users.filter(u => u.id !== currentUser.id).map(u => (
             <button key={u.id} onClick={() => openDm(u.id)}
@@ -3754,6 +3828,11 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
       {profileUser && (
         <UserProfileCard user={profileUser} onClose={() => setProfileUser(null)}
           onMessage={() => { openDm(profileUser.id); setProfileUser(null) }} />
+      )}
+      {showBrowseDept && (
+        <BrowseByDepartmentModal users={users} currentUser={currentUser}
+          onSelectUser={(userId) => { openDm(userId); setShowBrowseDept(false) }}
+          onClose={() => setShowBrowseDept(false)} />
       )}
     </div>
   )
