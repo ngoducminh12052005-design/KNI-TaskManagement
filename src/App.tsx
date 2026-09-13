@@ -4535,6 +4535,15 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
               style={{ background: editing ? '#7c3aed' : 'var(--bg-card-alt)', color: editing ? '#fff' : 'var(--text-muted)', border: '1px solid var(--border)' }}>
               {editing ? '↑ Đóng' : '🎭 Đổi tên & nhân vật'}
             </button>
+            <button
+              onClick={async () => {
+                if (!window.confirm('Đăng xuất khỏi tài khoản?')) return
+                await supabase.auth.signOut()
+              }}
+              className="mt-2 w-full py-2 rounded-lg text-sm font-medium transition-all"
+              style={{ background: '#f8717118', color: '#dc2626', border: '1px solid #f8717130' }}>
+              🚪 Đăng xuất
+            </button>
           </div>
 
           {/* Stats */}
