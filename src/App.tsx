@@ -3325,6 +3325,7 @@ function BrowseByDepartmentModal({ users, currentUser, onSelectUser, onClose }: 
   users: User[]; currentUser: User; onSelectUser: (userId: string) => void; onClose: () => void
 }) {
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
 
   const teamsWithCount = TEAMS.map(t => ({
     ...t, count: users.filter(u => u.teamId === t.id && u.id !== currentUser.id).length,
@@ -3334,25 +3335,59 @@ function BrowseByDepartmentModal({ users, currentUser, onSelectUser, onClose }: 
     ? users.filter(u => u.teamId === selectedTeamId && u.id !== currentUser.id)
     : []
 
+  const searchResults = search.trim()
+    ? users.filter(u => u.id !== currentUser.id && u.name.toLowerCase().includes(search.trim().toLowerCase()))
+    : []
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
       <div className="w-full max-w-sm rounded-2xl p-5 max-h-[80vh] flex flex-col" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
-        <div className="flex items-center justify-between mb-4 flex-shrink-0">
+        <div className="flex items-center justify-between mb-3 flex-shrink-0">
           <h3 className="font-bold text-lg flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
-            {selectedTeamId ? (
+            {selectedTeamId && !search.trim() ? (
               <>
                 <button onClick={() => setSelectedTeamId(null)} className="text-lg hover:opacity-70" style={{ color: 'var(--text-muted)' }}>‹</button>
                 {TEAMS.find(t => t.id === selectedTeamId)?.emoji} {TEAMS.find(t => t.id === selectedTeamId)?.name}
               </>
             ) : (
-              <>🏢 Chọn phòng ban</>
+              <>🏢 Tìm người để nhắn tin</>
             )}
           </h3>
           <button onClick={onClose} className="text-2xl leading-none hover:opacity-70" style={{ color: 'var(--text-muted)' }}>×</button>
         </div>
 
+        <div className="relative mb-3 flex-shrink-0">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--text-muted)' }}>🔍</span>
+          <input value={search} onChange={e => setSearch(e.target.value)} autoFocus
+            placeholder="Gõ tên cần tìm..."
+            className="w-full pl-9 pr-8 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
+            style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+          {search && (
+            <button onClick={() => setSearch('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-sm hover:opacity-70" style={{ color: 'var(--text-muted)' }}>✕</button>
+          )}
+        </div>
+
         <div className="overflow-y-auto flex-1 space-y-1.5">
-          {!selectedTeamId ? (
+          {search.trim() ? (
+            searchResults.length === 0 ? (
+              <p className="text-sm text-center py-8" style={{ color: 'var(--text-muted)' }}>Không tìm thấy ai tên "{search.trim()}".</p>
+            ) : (
+              searchResults.map(u => (
+                <button key={u.id} onClick={() => onSelectUser(u.id)}
+                  className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg transition-all hover:brightness-95"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
+                  <CharAvatar user={u} size={28} />
+                  <div className="flex-1 text-left min-w-0">
+                    <div className="text-sm truncate" style={{ color: 'var(--text-primary)' }}>{u.name}</div>
+                    <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                      {TEAMS.find(t => t.id === u.teamId)?.name}{u.role === 'manager' ? ' · Quản lý' : ''}
+                    </div>
+                  </div>
+                </button>
+              ))
+            )
+          ) : !selectedTeamId ? (
             teamsWithCount.length === 0 ? (
               <p className="text-sm text-center py-8" style={{ color: 'var(--text-muted)' }}>Chưa có phòng ban nào có nhân sự.</p>
             ) : (
