@@ -524,6 +524,13 @@ const getExpProgress = (exp: number) => {
 const fmtDate = (s: string) => new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })
 const fmtTime = (s: string) => new Date(s).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
 
+// Tên hiển thị gọn: bỏ phần trong ngoặc (chức danh) trước khi lấy từ cuối cùng
+function shortName(fullName: string) {
+  const withoutParens = fullName.replace(/\(.*?\)/g, '').trim()
+  const parts = withoutParens.split(' ').filter(Boolean)
+  return parts.length > 0 ? parts[parts.length - 1] : fullName
+}
+
 // Tìm các vị trí "@Tên đầy đủ" khớp với danh sách user trong nội dung tin nhắn
 function parseMentions(content: string, users: User[]): { start: number; end: number; user: User }[] {
   const candidates = [...users].sort((a, b) => b.name.length - a.name.length)
@@ -2454,7 +2461,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
                       {assignees.map(a => (
                         <div key={a.id} className="flex items-center gap-1">
                           <CharAvatar user={a} size={20} />
-                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{a.name.split(' ').slice(-1)[0]}</span>
+                          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{shortName(a.name)}</span>
                         </div>
                       ))}
                     </div>
@@ -3580,7 +3587,7 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
                 <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-400"
                   style={{ border: '1.5px solid var(--bg-panel)' }} />
               </div>
-              <span className="text-[11px] truncate flex-1 text-left" style={{ color: 'var(--text-muted)' }}>{u.name.split(' ').slice(-1)[0]}</span>
+              <span className="text-[11px] truncate flex-1 text-left" style={{ color: 'var(--text-muted)' }}>{shortName(u.name)}</span>
               {u.role === 'manager' && <span className="text-[9px]" style={{ color: '#8b5cf6' }}>QL</span>}
               {dmUnread(u.id) && <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />}
             </button>
