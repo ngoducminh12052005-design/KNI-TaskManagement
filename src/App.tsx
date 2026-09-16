@@ -77,6 +77,14 @@ interface Task {
   ticketReceivedAt?: string
   ticketInProcessAt?: string
   ticketCompletedAt?: string
+  taskCode?: string
+  slaLevel?: 'P1' | 'P2' | 'P3' | 'P4'
+  workStatus?: 'received' | 'processing' | 'pending' | 'complete'
+  startedAt?: string
+  isLocked?: boolean
+  lockReason?: string
+  unlockRequestedReason?: string
+  unlockRequestedAt?: string
 }
 
 interface Message {
@@ -723,6 +731,44 @@ const PRIORITY_CONFIG = {
   high: { label: 'Cao', color: '#ef4444', bg: '#200a0a' },
   medium: { label: 'Trung bình', color: '#f59e0b', bg: '#1a1000' },
   low: { label: 'Thấp', color: '#6b7280', bg: '#111118' },
+}
+const SLA_LEVELS: Record<string, { label: string; hours: number; color: string }> = {
+  P1: { label: 'P1 · 1 giờ', hours: 1, color: '#dc2626' },
+  P2: { label: 'P2 · 4 giờ', hours: 4, color: '#d97706' },
+  P3: { label: 'P3 · 1 ngày', hours: 24, color: '#2563eb' },
+  P4: { label: 'P4 · 3 ngày', hours: 72, color: '#059669' },
+}
+
+const WORK_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
+  received: { label: '📥 Đã nhận', color: '#6b7280' },
+  processing: { label: '⚙️ Đang xử lý', color: '#2563eb' },
+  pending: { label: '⏸ Tạm hoãn', color: '#d97706' },
+  complete: { label: '✅ Hoàn tất', color: '#059669' },
+}
+
+// Sinh mã task dạng TASK{ddmmyy}-{số thứ tự trong ngày}
+function generateTaskCode(startDate: string, existingTasks: Task[]) {
+  const d = new Date(startDate)
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const yy = String(d.getFullYear()).slice(-2)
+  const prefix = `TASK${dd}${mm}${yy}`
+  const countSameDay = existingTasks.filter(t => t.taskCode?.startsWith(prefix)).length
+  return `${prefix}-${String(countSameDay + 1).padStart(2, '0')}`
+}
+
+// Tính hạn SLA và kiểm tra trễ hạn
+function getSlaDeadline(task: Task): Date | null {
+  if (!task.slaLevel || !task.startedAt) return null
+  const start = new Date(task.startedAt)
+  return new Date(start.getTime() + SLA_LEVELS[task.slaLevel].hours * 3600000)
+}
+
+function isSlaOverdue(task: Task): boolean {
+  const deadline = getSlaDeadline(task)
+  if (!deadline) return false
+  if (task.workStatus === 'complete' || task.status === 'completed') return false
+  return new Date() > deadline
 }
 const PRIORITY_EXP_LIMITS: Record<TaskPriority, { min: number; max: number; suggested: number; hint: string }> = {
   low: { min: 20, max: 60, suggested: 30, hint: '💡 Việc dễ, xong trong ngày → nên cho 20–60 EXP' },
@@ -1837,6 +1883,74 @@ function TaskCommentsPanel({ taskId, currentUser, users }: { taskId: string; cur
   )
 }
 
+function TaskWorkNotePanel({ taskId, currentUser, users }: { taskId: string; currentUser: User; users: User[] }) {
+  const [notes, setNotes] = useState<{ id: string; userId: string; note: string; createdAt: string }[]>([])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    supabase.from('task_work_notes').select('*').eq('task_id', taskId).order('created_at', { ascending: false })
+      .then(({ data }) => {
+        if (data) setNotes(data.map(n => ({ id: n.id, userId: n.user_id, note: n.note, createdAt: n.created_at })))
+        setLoading(false)
+      })
+
+    const channel = supabase.channel(`task-worknotes-${taskId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'task_work_notes', filter: `task_id=eq.${taskId}` }, payload => {
+        const n = payload.new
+        setNotes(prev => [{ id: n.id, userId: n.user_id, note: n.note, createdAt: n.created_at }, ...prev])
+      }).subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [taskId])
+
+  const send = async () => {
+    if (!input.trim()) return
+    const note = input.trim()
+    setInput('')
+    await supabase.from('task_work_notes').insert({ task_id: taskId, user_id: currentUser.id, note })
+  }
+
+  return (
+    <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }} onClick={e => e.stopPropagation()}>
+      <div className="flex gap-1.5 mb-3">
+        <input value={input} onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && send()}
+          placeholder="Hôm nay đã làm tới đâu..."
+          className="flex-1 min-w-0 px-3 py-1.5 rounded-lg text-xs outline-none placeholder-[color:var(--text-muted)]"
+          style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+        <button onClick={send} disabled={!input.trim()}
+          className="px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-40 flex-shrink-0"
+          style={{ background: '#0891b2', color: '#fff' }}>
+          Ghi lại
+        </button>
+      </div>
+      {loading ? (
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Đang tải...</p>
+      ) : notes.length === 0 ? (
+        <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>Chưa có cập nhật tiến độ nào.</p>
+      ) : (
+        <div className="space-y-2 max-h-52 overflow-y-auto">
+          {notes.map(n => {
+            const u = users.find(x => x.id === n.userId)
+            return (
+              <div key={n.id} className="flex items-start gap-2">
+                {u && <CharAvatar user={u} size={20} />}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{u?.name ?? 'Ẩn danh'}</span>
+                    <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{new Date(n.createdAt).toLocaleString('vi-VN')}</span>
+                  </div>
+                  <p className="text-xs break-words" style={{ color: 'var(--text-muted)' }}>{n.note}</p>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function TaskTicketPanel({ task, currentUser, users, canSubmit }: {
   task: Task; currentUser: User; users: User[]; canSubmit: boolean
 }) {
@@ -2040,11 +2154,25 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   const [showModal, setShowModal] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [openCommentsFor, setOpenCommentsFor] = useState<string | null>(null)
+  const [openWorkNoteFor, setOpenWorkNoteFor] = useState<string | null>(null)
   const [openTicketFor, setOpenTicketFor] = useState<string | null>(null)
   const [submittingTask, setSubmittingTask] = useState<Task | null>(null)
   const [selfMode, setSelfMode] = useState(false)
   const taskRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [flashTaskId, setFlashTaskId] = useState<string | null>(null)
+
+    useEffect(() => {
+    const check = () => {
+      tasks.forEach(t => {
+        if (!t.isLocked && isSlaOverdue(t) && t.status !== 'completed') {
+          supabase.from('tasks').update({ is_locked: true }).eq('id', t.id)
+        }
+      })
+    }
+    check()
+    const interval = setInterval(check, 60000)
+    return () => clearInterval(interval)
+  }, [tasks])
 
   useEffect(() => {
     if (!highlightTaskId) return
@@ -2072,6 +2200,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     important: false, urgent: false, isTeamProject: false,
     assignedTo: [] as string[], projectManager: [] as string[], supporters: [] as string[],
     driveFolderCreated: false, driveFolderName: '',
+    slaLevel: '' as '' | 'P1' | 'P2' | 'P3' | 'P4',
   })
 
   const isManager = currentUser.role === 'manager'
@@ -2103,7 +2232,10 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   })
 
   const handleStart = async (id: string) => {
-    await supabase.from('tasks').update({ status: 'in-progress' }).eq('id', id)
+    await supabase.from('tasks').update({
+      status: 'in-progress',
+      started_at: new Date().toISOString(),
+    }).eq('id', id)
   }
 
   const handleApprove = async (task: Task) => {
@@ -2211,6 +2343,42 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
       })
     }
   }
+    const handleRequestUnlock = async (task: Task) => {
+    const reason = window.prompt('Lý do trễ hạn / xin mở khoá task:') ?? ''
+    if (!reason.trim()) return
+    await supabase.from('tasks').update({
+      unlock_requested_reason: reason.trim(),
+      unlock_requested_at: new Date().toISOString(),
+    }).eq('id', task.id)
+
+    const managers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)
+    for (const mgr of managers) {
+      await supabase.from('notifications').insert({
+        message: `🔒 ${currentUser.name} xin mở khoá task quá hạn "${task.title}": ${reason.trim()}`,
+        target_user_id: mgr.id,
+        link_task_id: task.id,
+      })
+    }
+  }
+
+  const handleUnlock = async (task: Task) => {
+    await supabase.from('tasks').update({
+      is_locked: false, unlock_requested_reason: null, unlock_requested_at: null,
+    }).eq('id', task.id)
+
+    const notifyIds = Array.from(new Set([...task.assignedTo, task.createdBy])).filter(uid => uid !== currentUser.id)
+    for (const uid of notifyIds) {
+      await supabase.from('notifications').insert({
+        message: `🔓 ${currentUser.name} đã mở khoá task "${task.title}", bạn có thể tiếp tục làm.`,
+        target_user_id: uid,
+        link_task_id: task.id,
+      })
+    }
+  }
+
+  const updateWorkStatus = async (taskId: string, workStatus: string) => {
+    await supabase.from('tasks').update({ work_status: workStatus }).eq('id', taskId)
+  }
 
   const handleApproveCrossDept = async (task: Task) => {
     await supabase.from('tasks').update({ cross_dept_pending: false }).eq('id', task.id)
@@ -2236,11 +2404,12 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
       category: task.category, priority: task.priority,
       important: task.important, urgent: task.urgent, isTeamProject: task.isTeamProject ?? false,
       assignedTo: task.assignedTo, projectManager: task.projectManager, supporters: task.supporters,
-      driveFolderCreated: task.driveFolderCreated ?? false,
-      driveFolderName: task.driveFolderName ?? '',
-    })
-    setShowModal(true)
-  }
+          driveFolderCreated: task.driveFolderCreated ?? false,
+    driveFolderName: task.driveFolderName ?? '',
+    slaLevel: task.slaLevel ?? '',
+  })
+  setShowModal(true)
+}
 
   const handleSaveTask = async () => {
     if (!form.title.trim()) return
@@ -2257,18 +2426,23 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
         start_date: form.startDate, due_date: form.dueDate,
         category: form.category, priority: form.priority,
         important: form.important, urgent: form.urgent, is_team_project: form.isTeamProject,
-        drive_folder_created: form.driveFolderCreated,
-        drive_folder_name: form.driveFolderCreated ? (form.driveFolderName.trim() || null) : null,
-      }).eq('id', editingTask.id)
-    } else {
+              drive_folder_created: form.driveFolderCreated,
+      drive_folder_name: form.driveFolderCreated ? (form.driveFolderName.trim() || null) : null,
+      sla_level: form.slaLevel || null,
+    }).eq('id', editingTask.id)
+  } else {
       const creatingForSelf = !isManager || selfMode
       const assignedUsers = form.assignedTo.map(uid => users.find(u => u.id === uid)).filter(Boolean) as User[]
       const outsideAssignees = assignedUsers.filter(u => u.teamId !== currentUser.teamId)
       const isCrossDept = !creatingForSelf && !currentUser.isDirector && outsideAssignees.length > 0
       const targetTeamId = isCrossDept ? outsideAssignees[0].teamId : null
 
+      const taskCode = generateTaskCode(form.startDate, tasks)
       const { data: newTask } = await supabase.from('tasks').insert({
         title: form.title, description: form.description, exp_reward: form.expReward,
+        task_code: taskCode,
+        sla_level: form.slaLevel || null,
+        work_status: 'received',
         status: 'open', assigned_to: creatingForSelf ? [currentUser.id] : form.assignedTo,
         project_manager: form.projectManager, supporters: form.supporters,
         created_by: currentUser.id,
@@ -2328,7 +2502,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     setShowModal(false)
     setEditingTask(null)
     setSelfMode(false)
-    setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'development', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '' })
+    setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'development', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '', slaLevel: '' })
   }
 
   const toggleFormArray = (field: 'assignedTo' | 'projectManager' | 'supporters', uid: string) => {
@@ -2430,7 +2604,10 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
                     {task.urgent && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold animate-pulse" style={{ background: '#f8717122', color: '#dc2626' }}>⏰ GẤP</span>}
                     {task.important && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#fbbf2422', color: '#d97706' }}>🔥 Quan trọng</span>}
                   </div>
-                  <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{task.title}</h3>
+                  <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
+                    {task.taskCode && <span className="font-mono text-[10px] mr-1.5" style={{ color: 'var(--text-muted)' }}>[{task.taskCode}]</span>}
+                    {task.title}
+                  </h3>
                 </div>
                 <div className="text-right flex-shrink-0">
                   {canEdit && (
@@ -2447,9 +2624,35 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
               <p className="text-xs mb-3 line-clamp-2 leading-relaxed" style={{ color: 'var(--text-muted)' }}>{task.description}</p>
 
               {/* Priority + date */}
-              <div className="flex items-center gap-2 mb-3">
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
                 <span className="text-xs px-2 py-0.5 rounded" style={{ background: pri.bg, color: pri.color }}>{pri.label}</span>
                 <span className="text-xs" style={{ color: 'var(--text-muted)' }}>📅 {fmtDate(task.dueDate)}</span>
+                {task.slaLevel && (
+                  <span className="text-xs px-2 py-0.5 rounded font-bold" style={{ background: `${SLA_LEVELS[task.slaLevel].color}22`, color: SLA_LEVELS[task.slaLevel].color }}>
+                    {SLA_LEVELS[task.slaLevel].label}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 mb-3 flex-wrap">
+                <select value={task.workStatus ?? 'received'} onChange={e => updateWorkStatus(task.id, e.target.value)}
+                  onClick={e => e.stopPropagation()}
+                  className="text-xs px-2 py-1 rounded outline-none"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: WORK_STATUS_CONFIG[task.workStatus ?? 'received'].color }}>
+                  {Object.entries(WORK_STATUS_CONFIG).map(([key, cfg]) => (
+                    <option key={key} value={key}>{cfg.label}</option>
+                  ))}
+                </select>
+                {isSlaOverdue(task) && !task.isLocked && (
+                  <span className="text-xs px-2 py-0.5 rounded font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>
+                    ⚠️ Quá hạn SLA
+                  </span>
+                )}
+                {task.isLocked && (
+                  <span className="text-xs px-2 py-0.5 rounded font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>
+                    🔒 Đã khoá — quá hạn SLA
+                  </span>
+                )}
               </div>
 
               {/* People section */}
@@ -2573,6 +2776,30 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
                       ⏳ Đang chờ quản lý duyệt
                     </span>
 
+                  ) : task.isLocked ? (
+                    <div className="flex flex-col gap-1 items-end">
+                      {task.unlockRequestedReason ? (
+                        <>
+                          <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#fbbf2422', color: '#d97706' }}>
+                            ⏳ Đang chờ duyệt mở khoá
+                          </span>
+                          <p className="text-[10px] max-w-[200px] text-right" style={{ color: 'var(--text-muted)' }}>Lý do: {task.unlockRequestedReason}</p>
+                          {currentUser.role === 'manager' && (
+                            <button onClick={() => handleUnlock(task)}
+                              className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#34d39922', color: '#059669' }}>
+                              🔓 Mở khoá cho làm tiếp
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        isMyTask && (
+                          <button onClick={() => handleRequestUnlock(task)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>
+                            🔒 Xin mở khoá (ghi lý do)
+                          </button>
+                        )
+                      )}
+                    </div>
                   ) : isMyTask ? (
                     <div className="flex flex-col gap-1 items-end">
                       <div className="flex gap-1.5">
@@ -2606,14 +2833,23 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
                   )}
               </div>
 
-              {isTaskParticipant && (
+                            {isTaskParticipant && (
                 <>
-                  <button onClick={() => setOpenCommentsFor(openCommentsFor === task.id ? null : task.id)}
-                    className="hover:text-violet-400 text-xs flex items-center gap-1 mt-3" style={{ color: 'var(--text-muted)' }}>
-                    💬 Thảo luận {openCommentsFor === task.id ? '▲' : '▼'}
-                  </button>
+                  <div className="flex gap-4 mt-3">
+                    <button onClick={() => setOpenCommentsFor(openCommentsFor === task.id ? null : task.id)}
+                      className="hover:text-violet-400 text-xs flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
+                      💬 Thảo luận {openCommentsFor === task.id ? '▲' : '▼'}
+                    </button>
+                    <button onClick={() => setOpenWorkNoteFor(openWorkNoteFor === task.id ? null : task.id)}
+                      className="hover:text-cyan-500 text-xs flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
+                      📝 Work Note {openWorkNoteFor === task.id ? '▲' : '▼'}
+                    </button>
+                  </div>
                   {openCommentsFor === task.id && (
                     <TaskCommentsPanel taskId={task.id} currentUser={currentUser} users={users} />
+                  )}
+                  {openWorkNoteFor === task.id && (
+                    <TaskWorkNotePanel taskId={task.id} currentUser={currentUser} users={users} />
                   )}
 
                   <button onClick={() => setOpenTicketFor(openTicketFor === task.id ? null : task.id)}
@@ -2745,7 +2981,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+                            <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Mức độ quan trọng</label>
                   <select value={form.important ? '1' : '0'}
@@ -2772,6 +3008,23 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
                     <option value="1">Gấp</option>
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+                  Mức độ SLA (thời gian xử lý bắt buộc)
+                </label>
+                <select value={form.slaLevel} onChange={e => setForm({ ...form, slaLevel: e.target.value as any })}
+                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                  <option value="">-- Không áp dụng SLA --</option>
+                  {Object.entries(SLA_LEVELS).map(([key, cfg]) => (
+                    <option key={key} value={key}>{cfg.label}</option>
+                  ))}
+                </select>
+                <p className="text-[10px] mt-1.5 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+                  💡 Đồng hồ SLA bắt đầu tính từ lúc nhân viên bấm "Bắt đầu", không phải từ ngày bắt đầu dự kiến.
+                </p>
               </div>
 
               {isManager && (
@@ -5177,6 +5430,14 @@ export default function App() {
     ticketReceivedAt: t.ticket_received_at ?? undefined,
     ticketInProcessAt: t.ticket_in_process_at ?? undefined,
     ticketCompletedAt: t.ticket_completed_at ?? undefined,
+    taskCode: t.task_code ?? undefined,
+    slaLevel: t.sla_level ?? undefined,
+    workStatus: t.work_status ?? 'received',
+    startedAt: t.started_at ?? undefined,
+    isLocked: t.is_locked ?? false,
+    lockReason: t.lock_reason ?? undefined,
+    unlockRequestedReason: t.unlock_requested_reason ?? undefined,
+    unlockRequestedAt: t.unlock_requested_at ?? undefined,
   }
 }
 function mapDbProposal(p: any): Proposal {
