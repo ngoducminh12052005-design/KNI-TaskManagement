@@ -8011,10 +8011,14 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   })
 
   const handleStart = async (id: string) => {
-    await supabase.from('tasks').update({
+    const now = new Date().toISOString()
+    const { error } = await supabase.from('tasks').update({
       status: 'in-progress',
-      started_at: new Date().toISOString(),
+      started_at: now,
+      work_status: 'processing',
+      processing_started_at: now,
     }).eq('id', id)
+    if (error) { alert('Không bắt đầu được task: ' + error.message); return }
   }
 
   const handleApprove = async (task: Task) => {
