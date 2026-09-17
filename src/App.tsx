@@ -2161,7 +2161,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   const taskRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [flashTaskId, setFlashTaskId] = useState<string | null>(null)
 
-    useEffect(() => {
+  useEffect(() => {
     const check = () => {
       tasks.forEach(t => {
         if (!t.isLocked && isSlaOverdue(t) && t.status !== 'completed') {
@@ -2776,7 +2776,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
                       ⏳ Đang chờ quản lý duyệt
                     </span>
 
-                  ) : task.isLocked ? (
+                  ) : (task.isLocked || isSlaOverdue(task)) ? (
                     <div className="flex flex-col gap-1 items-end">
                       {task.unlockRequestedReason ? (
                         <>
