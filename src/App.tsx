@@ -8175,11 +8175,12 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
       if (task.pendingRequestedAt) return // đang chờ duyệt rồi, không gửi lại
       const reason = window.prompt('Lý do xin tạm dừng task này (quản lý sẽ duyệt trước khi chính thức tạm dừng):') ?? ''
       if (!reason.trim()) return
-      await supabase.from('tasks').update({
+      const { error } = await supabase.from('tasks').update({
         pending_reason: reason.trim(),
         pending_requested_by: currentUser.id,
         pending_requested_at: new Date().toISOString(),
       }).eq('id', task.id)
+      if (error) { alert('Không gửi được yêu cầu tạm dừng: ' + error.message); return }
 
       const managers = users.filter(u => u.role === 'manager' && (u.teamId === currentUser.teamId || u.isDirector))
       for (const mgr of managers) {
@@ -8199,7 +8200,8 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
       updates.pending_reason = null
       updates.pending_requested_by = null
       updates.pending_requested_at = null
-      await supabase.from('tasks').update(updates).eq('id', task.id)
+      const { error } = await supabase.from('tasks').update(updates).eq('id', task.id)
+      if (error) { alert('Không đổi được trạng thái: ' + error.message); return }
       await notifyManagersWorkStatus(task, newStatus)
       return
     }
@@ -8212,13 +8214,15 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
         updates.total_processing_seconds = (task.totalProcessingSeconds ?? 0) + elapsed
         updates.processing_started_at = null
       }
-      await supabase.from('tasks').update(updates).eq('id', task.id)
+      const { error } = await supabase.from('tasks').update(updates).eq('id', task.id)
+      if (error) { alert('Không đổi được trạng thái: ' + error.message); return }
       await notifyManagersWorkStatus(task, newStatus)
       return
     }
 
     // 'received' hoặc trường hợp khác: set trực tiếp
-    await supabase.from('tasks').update({ work_status: newStatus }).eq('id', task.id)
+    const { error } = await supabase.from('tasks').update({ work_status: newStatus }).eq('id', task.id)
+    if (error) { alert('Không đổi được trạng thái: ' + error.message); return }
     await notifyManagersWorkStatus(task, newStatus)
   }
 
@@ -8234,7 +8238,8 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
       updates.total_processing_seconds = (task.totalProcessingSeconds ?? 0) + elapsed
       updates.processing_started_at = null
     }
-    await supabase.from('tasks').update(updates).eq('id', task.id)
+    const { error } = await supabase.from('tasks').update(updates).eq('id', task.id)
+    if (error) { alert('Không duyệt được yêu cầu tạm dừng: ' + error.message); return }
 
     const notifyId = task.pendingRequestedBy
     if (notifyId && notifyId !== currentUser.id) {
@@ -8248,9 +8253,10 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
 
   const handleRejectPending = async (task: Task) => {
     const reason = window.prompt('Lý do từ chối yêu cầu tạm dừng (không bắt buộc):') ?? ''
-    await supabase.from('tasks').update({
+    const { error } = await supabase.from('tasks').update({
       pending_reason: null, pending_requested_by: null, pending_requested_at: null,
     }).eq('id', task.id)
+    if (error) { alert('Không từ chối được yêu cầu: ' + error.message); return }
 
     const notifyId = task.pendingRequestedBy
     if (notifyId && notifyId !== currentUser.id) {
@@ -8722,15 +8728,15 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
                             Bắt đầu
                           </button>
                         )}
-                        {task.status === 'in-progress' && !task.pendingRequestedAt && (
+                        {task.status === 'in-progress' && task.workStatus !== 'pending' && (
                           <button onClick={() => setSubmittingTask(task)}
                             className="px-4 py-2 rounded-xl text-sm font-bold" style={{ background: '#34d39922', color: '#059669' }}>
                             Nộp task ✓
                           </button>
                         )}
-                        {task.status === 'in-progress' && task.pendingRequestedAt && (
+                        {task.status === 'in-progress' && task.workStatus === 'pending' && (
                           <span className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: '#d9770622', color: '#d97706' }}>
-                            ⏳ Đang chờ duyệt tạm dừng, chưa thể nộp
+                            ⏸ Đang tạm hoãn, chưa thể nộp
                           </span>
                         )}
                       </div>
@@ -11659,4 +11665,3 @@ useEffect(() => {
     />
   )
 }
-
