@@ -85,6 +85,7 @@ interface Task {
   lockReason?: string
   unlockRequestedReason?: string
   unlockRequestedAt?: string
+  slaUnlockGranted?: boolean
 }
 
 interface Message {
@@ -2164,7 +2165,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   useEffect(() => {
     const check = () => {
       tasks.forEach(t => {
-        if (!t.isLocked && isSlaOverdue(t) && t.status !== 'completed') {
+        if (!t.isLocked && !t.slaUnlockGranted && isSlaOverdue(t) && t.status !== 'completed') {
           supabase.from('tasks').update({ is_locked: true }).eq('id', t.id)
         }
       })
@@ -2364,6 +2365,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   const handleUnlock = async (task: Task) => {
     await supabase.from('tasks').update({
       is_locked: false, unlock_requested_reason: null, unlock_requested_at: null,
+      sla_unlock_granted: true,
     }).eq('id', task.id)
 
     const notifyIds = Array.from(new Set([...task.assignedTo, task.createdBy])).filter(uid => uid !== currentUser.id)
@@ -2776,7 +2778,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
                       ⏳ Đang chờ quản lý duyệt
                     </span>
 
-                  ) : (task.isLocked || isSlaOverdue(task)) ? (
+                  ) : (task.isLocked || (isSlaOverdue(task) && !task.slaUnlockGranted)) ? (
                     <div className="flex flex-col gap-1 items-end">
                       {task.unlockRequestedReason ? (
                         <>
@@ -5438,6 +5440,7 @@ export default function App() {
     lockReason: t.lock_reason ?? undefined,
     unlockRequestedReason: t.unlock_requested_reason ?? undefined,
     unlockRequestedAt: t.unlock_requested_at ?? undefined,
+    slaUnlockGranted: t.sla_unlock_granted ?? false,
   }
 }
 function mapDbProposal(p: any): Proposal {
