@@ -8350,10 +8350,11 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
       const newTaskId = newTask?.id
 
       if (isManager && !selfMode) {
+        const taskContent = form.description.trim() || form.title
         for (const uid of form.assignedTo) {
           if (uid === currentUser.id) continue
           await supabase.from('notifications').insert({
-            message: `📋 ${currentUser.name} vừa giao cho bạn task: ${form.title}`,
+            message: `📋 ${currentUser.name} vừa giao task [${taskCode}] cho bạn: ${taskContent}`,
             target_user_id: uid,
             link_task_id: newTaskId,
           })
@@ -8362,7 +8363,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
         for (const uid of form.supporters) {
           if (uid === currentUser.id) continue
           await supabase.from('notifications').insert({
-            message: `🤝 ${currentUser.name} vừa thêm bạn làm người hỗ trợ task: ${form.title}`,
+            message: `🤝 ${currentUser.name} vừa thêm bạn làm người hỗ trợ task [${taskCode}]: ${taskContent}`,
             target_user_id: uid,
             link_task_id: newTaskId,
           })
@@ -8373,17 +8374,18 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
           const assigneeNames = outsideAssignees.map(u => u.name).join(', ')
           for (const mgr of targetManagers) {
             await supabase.from('notifications').insert({
-              message: `📨 ${currentUser.name} (${TEAMS.find(t => t.id === currentUser.teamId)?.name ?? ''}) muốn giao task "${form.title}" cho ${assigneeNames} trong phòng ban của bạn`,
+              message: `📨 ${currentUser.name} (${TEAMS.find(t => t.id === currentUser.teamId)?.name ?? ''}) muốn giao task [${taskCode}] "${form.title}" cho ${assigneeNames} trong phòng ban của bạn: ${taskContent}`,
               target_user_id: mgr.id,
               link_task_id: newTaskId,
             })
           }
         }
       } else if (creatingForSelf) {
+        const taskContent = form.description.trim() || form.title
         const teamManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)
         for (const mgr of teamManagers) {
           await supabase.from('notifications').insert({
-            message: `🎯 ${currentUser.name} vừa tự tạo task: ${form.title}`,
+            message: `🎯 ${currentUser.name} vừa tự tạo task [${taskCode}]: ${taskContent}`,
             target_user_id: mgr.id,
             link_task_id: newTaskId,
           })
