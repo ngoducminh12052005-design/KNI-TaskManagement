@@ -6532,11 +6532,13 @@ function getElapsedProcessingSeconds(task: Task): number {
   return base
 }
 function formatDuration(totalSeconds: number): string {
-  if (totalSeconds < 60) return `${totalSeconds}s`
   const h = Math.floor(totalSeconds / 3600)
   const m = Math.floor((totalSeconds % 3600) / 60)
-  if (h > 0) return `${h}h${String(m).padStart(2, '0')}m`
-  return `${m}m`
+  const s = totalSeconds % 60
+  const mm = String(m).padStart(2, '0')
+  const ss = String(s).padStart(2, '0')
+  if (h > 0) return `${h}:${mm}:${ss}`
+  return `${mm}:${ss}`
 }
 const PRIORITY_EXP_LIMITS: Record<TaskPriority, { min: number; max: number; suggested: number; hint: string }> = {
   low: { min: 20, max: 60, suggested: 30, hint: '💡 Việc dễ, xong trong ngày → nên cho 20–60 EXP' },
@@ -7929,12 +7931,14 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   const taskRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [flashTaskId, setFlashTaskId] = useState<string | null>(null)
 
-  // Đồng hồ chạy để cập nhật hiển thị thời gian đang xử lý theo thời gian thực
+  // Đồng hồ chạy real-time (mỗi giây) để hiển thị thời gian đang xử lý, chỉ chạy khi có task nào đó đang "Đang xử lý"
   const [, setTick] = useState(0)
+  const hasProcessingTask = tasks.some(t => t.workStatus === 'processing')
   useEffect(() => {
-    const id = setInterval(() => setTick(t => t + 1), 30000)
+    if (!hasProcessingTask) return
+    const id = setInterval(() => setTick(t => t + 1), 1000)
     return () => clearInterval(id)
-  }, [])
+  }, [hasProcessingTask])
 
   useEffect(() => {
     const check = () => {
@@ -8152,6 +8156,19 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     }
   }
 
+  // Báo cho quản lý (cùng team + BOD) mỗi khi trạng thái xử lý của task thay đổi
+  const notifyManagersWorkStatus = async (task: Task, newStatus: string) => {
+    const managers = users.filter(u => u.role === 'manager' && (u.teamId === currentUser.teamId || u.isDirector) && u.id !== currentUser.id)
+    const label = WORK_STATUS_CONFIG[newStatus]?.label ?? newStatus
+    for (const mgr of managers) {
+      await supabase.from('notifications').insert({
+        message: `🔄 ${currentUser.name} đã chuyển task "${task.title}" sang trạng thái: ${label}`,
+        target_user_id: mgr.id,
+        link_task_id: task.id,
+      })
+    }
+  }
+
   const updateWorkStatus = async (task: Task, newStatus: string) => {
     // Xin tạm dừng: phải nhập lý do, và chỉ thực sự chuyển sang "pending" sau khi quản lý duyệt
     if (newStatus === 'pending') {
@@ -8183,6 +8200,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
       updates.pending_requested_by = null
       updates.pending_requested_at = null
       await supabase.from('tasks').update(updates).eq('id', task.id)
+      await notifyManagersWorkStatus(task, newStatus)
       return
     }
 
@@ -8195,15 +8213,22 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
         updates.processing_started_at = null
       }
       await supabase.from('tasks').update(updates).eq('id', task.id)
+      await notifyManagersWorkStatus(task, newStatus)
       return
     }
 
     // 'received' hoặc trường hợp khác: set trực tiếp
     await supabase.from('tasks').update({ work_status: newStatus }).eq('id', task.id)
+    await notifyManagersWorkStatus(task, newStatus)
   }
 
   const handleApprovePending = async (task: Task) => {
-    const updates: Record<string, any> = { work_status: 'pending', pending_requested_by: null }
+    const updates: Record<string, any> = {
+      work_status: 'pending',
+      pending_requested_by: null,
+      pending_requested_at: null,
+      pending_reason: null,
+    }
     if (task.processingStartedAt) {
       const elapsed = Math.floor((Date.now() - new Date(task.processingStartedAt).getTime()) / 1000)
       updates.total_processing_seconds = (task.totalProcessingSeconds ?? 0) + elapsed
@@ -8697,11 +8722,16 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
                             Bắt đầu
                           </button>
                         )}
-                        {task.status === 'in-progress' && (
+                        {task.status === 'in-progress' && !task.pendingRequestedAt && (
                           <button onClick={() => setSubmittingTask(task)}
                             className="px-4 py-2 rounded-xl text-sm font-bold" style={{ background: '#34d39922', color: '#059669' }}>
                             Nộp task ✓
                           </button>
+                        )}
+                        {task.status === 'in-progress' && task.pendingRequestedAt && (
+                          <span className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: '#d9770622', color: '#d97706' }}>
+                            ⏳ Đang chờ duyệt tạm dừng, chưa thể nộp
+                          </span>
                         )}
                       </div>
                       {task.status === 'in-progress' && task.rejectedReason && (
@@ -11629,3 +11659,4 @@ useEffect(() => {
     />
   )
 }
+
