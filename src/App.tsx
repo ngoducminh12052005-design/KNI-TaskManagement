@@ -8550,7 +8550,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
 
               <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                 <select value={task.workStatus ?? 'received'}
-                  disabled={!!task.pendingRequestedAt}
+                  disabled={!!task.pendingRequestedAt || !!task.isLocked}
                   onChange={e => updateWorkStatus(task, e.target.value)}
                   onClick={e => e.stopPropagation()}
                   className="text-xs px-2 py-1 rounded outline-none disabled:opacity-50"
