@@ -7941,17 +7941,37 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   }, [hasProcessingTask])
 
   useEffect(() => {
-    const check = () => {
-      tasks.forEach(t => {
-        if (!t.isLocked && !t.slaUnlockGranted && isSlaOverdue(t) && t.status !== 'completed') {
-          supabase.from('tasks').update({ is_locked: true }).eq('id', t.id)
+  const checkSlaAndLock = async () => {
+    for (const task of tasks) {
+      if (
+        !task.isLocked &&
+        !task.slaUnlockGranted &&
+        task.status !== 'completed' &&
+        isSlaOverdue(task)
+      ) {
+        const { error } = await supabase
+          .from('tasks')
+          .update({
+            is_locked: true,
+            lock_reason: 'Quá hạn SLA',
+          })
+          .eq('id', task.id)
+          .eq('is_locked', false)
+
+        if (error) {
+          console.error(`Không thể khóa task ${task.id}:`, error)
         }
-      })
+      }
     }
-    check()
-    const interval = setInterval(check, 60000)
-    return () => clearInterval(interval)
-  }, [tasks])
+  }
+
+  checkSlaAndLock()
+
+  // Kiểm tra mỗi 10 giây
+  const interval = setInterval(checkSlaAndLock, 10000)
+
+  return () => clearInterval(interval)
+}, [tasks])
 
   useEffect(() => {
     if (!highlightTaskId) return
