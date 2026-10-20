@@ -5744,14 +5744,14 @@
 //   )
 // }
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, createContext, useContext } from 'react'
 import { supabase } from './supabaseClient'
 import companyLogo from './assets/company-logo.png'
 import * as XLSX from 'xlsx'
 // ==================== TYPES ====================
 
 type Role = 'manager' | 'employee'
-type View = 'dashboard' | 'tasks' | 'leaderboard' | 'rewards' | 'social' | 'profile' | 'proposals' | 'bodlog'
+type View = 'dashboard' | 'tasks' | 'projects' | 'leaderboard' | 'rewards' | 'social' | 'profile' | 'proposals' | 'bodlog'
 type TaskStatus = 'open' | 'in-progress' | 'submitted' | 'completed'
 type TaskPriority = 'low' | 'medium' | 'high'
 type ChatChannel = 'general' | 'team' | 'announcements' | 'dm' | 'proposal'
@@ -5824,6 +5824,9 @@ interface Task {
   ticketInProcessAt?: string
   ticketCompletedAt?: string
   taskCode?: string
+  company?: string
+  projectId?: string
+  createdAt?: string
   slaLevel?: 'P1' | 'P2' | 'P3' | 'P4'
   workStatus?: 'received' | 'processing' | 'pending' | 'complete'
   startedAt?: string
@@ -5879,6 +5882,21 @@ interface Proposal {
   participants: string[]
   createdAt: string
   signedFileUrl?: string
+  code?: string
+  groupName?: string
+  department?: string
+  company?: string
+  brief?: string
+  days?: number
+  dueDate?: string
+  approvalMode?: 'seq' | 'par'
+  items?: { item: string; cost: string; amount: number }[]
+  risks?: { t: string; lv: string; u: string; at: string }[]
+  planStatus?: string
+  kind?: 'dexuat' | 'totrinh' | 'dntt'
+  projectId?: string
+  formData?: Record<string, any>
+  attachments?: { name: string; path: string; size: number; type: string; at?: string; by?: string; round?: number; note?: string }[]
 }
 
 type CollaborationStatus = 'pending' | 'assigned' | 'rejected'
@@ -6508,7 +6526,35 @@ function generateTaskCode(startDate: string, existingTasks: Task[]) {
   const countSameDay = existingTasks.filter(t => t.taskCode?.startsWith(prefix)).length
   return `${prefix}-${String(countSameDay + 1).padStart(2, '0')}`
 }
+// Mã viết tắt của công ty, dùng làm tiền tố tên task (sửa lại cho đúng ý bạn)
+const COMPANY_CODES: Record<string, string> = {
+  'KNI Office': 'KNI',
+  'Genki House': 'GH',
+  'Genki Farm': 'GF',
+  'First Steps': 'FS',
+  'Les Sens Phú Quốc': 'LSPQ',
+  'ACVN': 'ACVN',
+}
 
+// Gắn tiền tố "KNI-" vào tên task; nếu đổi công ty thì gỡ tiền tố cũ trước
+const withCompanyPrefix = (title: string, company?: string, oldCompany?: string) => {
+  let t = title.trim()
+  const oldCode = oldCompany ? COMPANY_CODES[oldCompany] : undefined
+  if (oldCode && t.toLowerCase().startsWith(`${oldCode}-`.toLowerCase())) t = t.slice(oldCode.length + 1).trim()
+  const code = company ? COMPANY_CODES[company] : undefined
+  if (!code) return t
+  return t.toLowerCase().startsWith(`${code}-`.toLowerCase()) ? t : `${code}-${t}`
+}
+
+// Sắp task cũ nhất ở trên, mới nhất ở dưới cùng
+const byCreatedAsc = (a: Task, b: Task) => {
+  const ka = a.createdAt ?? a.startDate ?? ''
+  const kb = b.createdAt ?? b.startDate ?? ''
+  if (ka !== kb) return ka < kb ? -1 : 1
+  return (a.taskCode ?? '').localeCompare(b.taskCode ?? '')
+}
+// Task mới nhất ở trên cùng (dùng cho dạng Thẻ)
+const byCreatedDesc = (a: Task, b: Task) => byCreatedAsc(b, a)
 // Tính hạn SLA và kiểm tra trễ hạn
 function getSlaDeadline(task: Task): Date | null {
   if (!task.slaLevel || !task.startedAt) return null
@@ -7653,6 +7699,280 @@ function TaskCommentsPanel({ taskId, currentUser, users }: { taskId: string; cur
   )
 }
 
+const TRACKER_STATUS: Record<string, [string, string, string]> = {
+  received: ['Receive', '#3b82f622', '#2563eb'],
+  processing: ['In process', '#f59e0b22', '#b45309'],
+  pending: ['Pending', '#8b5cf622', '#7c3aed'],
+  complete: ['Complete', '#34d39922', '#059669'],
+  closed: ['Closed', '#64748b22', '#64748b'],
+}
+const TRACKER_PRIORITY: Record<string, string> = { P1: '#dc2626', P2: '#ea580c', P3: '#ca8a04', P4: '#16a34a' }
+
+const fmtClock = (sec: number) => {
+  const s = Math.max(0, Math.floor(sec))
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60), x = s % 60
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d > 0 ? `${d} ngày ` : ''}${pad(h)}:${pad(m)}:${pad(x)}`
+}
+
+// Ô đếm giờ SLA trong Tracker (tự chạy từng giây, chỉ khi task còn đang tính giờ)
+function SlaCell({ task }: { task: Task }) {
+  const [, setTick] = useState(0)
+  const done = task.status === 'completed' || task.workStatus === 'complete'
+  const deadline = getSlaDeadline(task)
+  const live = !done && (!!deadline || task.workStatus === 'processing')
+  useEffect(() => {
+    if (!live) return
+    const id = setInterval(() => setTick(t => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [live])
+
+  let text = 'Không áp dụng SLA'
+  let color = 'var(--text-muted)'
+  let bg = 'transparent'
+  let sub = ''
+  if (task.slaLevel) {
+    const lv = SLA_LEVELS[task.slaLevel]
+    if (task.isLocked) { text = '🔒 Đã khoá — quá hạn SLA'; color = '#dc2626'; bg = '#dc262618' }
+    else if (done) { text = '✅ Đã hoàn tất'; color = '#059669' }
+    else if (!deadline) { text = `Chưa bắt đầu · SLA ${lv.label}` }
+    else {
+      const remain = Math.floor((deadline.getTime() - Date.now()) / 1000)
+      sub = `Hạn: ${deadline.toLocaleString('vi-VN')}`
+      if (remain < 0) { text = `⚠️ Quá hạn ${fmtClock(-remain)}`; color = '#dc2626'; bg = '#dc262618' }
+      else {
+        text = `Còn ${fmtClock(remain)}`
+        color = remain < lv.hours * 3600 * 0.25 ? '#d97706' : '#059669'
+        bg = color + '18'
+      }
+    }
+  }
+  const showElapsed = task.workStatus === 'processing' || task.workStatus === 'pending' || task.workStatus === 'complete' || done
+
+  return (
+    <div className="space-y-1 text-center">
+      <div className="px-2 py-1 rounded-md font-bold font-mono whitespace-nowrap" style={{ background: bg, color }}>{text}</div>
+      {sub && <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{sub}</div>}
+      {showElapsed && <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>⏱ Đã xử lý {formatDuration(getElapsedProcessingSeconds(task))}</div>}
+    </div>
+  )
+}
+function TaskTracker({ tasks: rawTasks, users, currentUser }: { tasks: Task[]; users: User[]; currentUser: User }) {
+  const [teamSel, setTeamSel] = useState('')
+  const [who, setWho] = useState('')
+  const [onlyOverdue, setOnlyOverdue] = useState(false)
+  const [, setClock] = useState(0)
+  useEffect(() => { const id = setInterval(() => setClock(c => c + 1), 15000); return () => clearInterval(id) }, [])
+  const isOver = (t: Task) => isSlaOverdue(t) || !!t.isLocked
+  const teamIdOf = (id: string) => users.find(u => u.id === id)?.teamId
+  const involved = (t: Task) => [...t.assignedTo, ...t.supporters]
+
+  // Phân quyền: Ban giám đốc xem hết; còn lại chỉ xem task có người cùng phòng ban với mình
+  const isDir = !!currentUser.isDirector
+  const inMyTeam = (id: string) => teamIdOf(id) === currentUser.teamId
+  const allTasks = isDir
+    ? rawTasks
+    : rawTasks.filter(t => involved(t).some(inMyTeam) || t.targetTeamId === currentUser.teamId)
+
+  const overdueCount = allTasks.filter(isOver).length
+  const tasks = allTasks.filter(t =>
+    (!onlyOverdue || isOver(t)) && (
+      who ? involved(t).includes(who)
+      : teamSel ? involved(t).some(id => teamIdOf(id) === teamSel)
+      : true))
+  const peopleIds = Array.from(new Set(allTasks.flatMap(involved)))
+    .filter(id => (isDir || inMyTeam(id)) && (!teamSel || teamIdOf(id) === teamSel))
+  const teamsInTasks = isDir
+    ? TEAMS.filter(tm => allTasks.some(t => involved(t).some(id => teamIdOf(id) === tm.id)))
+    : []
+  const [notes, setNotes] = useState<{ id: string; taskId: string; userId: string; note: string; createdAt: string }[]>([])
+  const [commentCounts, setCommentCounts] = useState<Record<string, number>>({})
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [openComments, setOpenComments] = useState<string | null>(null)
+  const idsKey = tasks.map(t => t.id).join(',')
+
+  const load = async () => {
+    const ids = tasks.map(t => t.id)
+    if (ids.length === 0) { setNotes([]); setCommentCounts({}); return }
+    const [n, c] = await Promise.all([
+      supabase.from('task_work_notes').select('*').in('task_id', ids).order('created_at'),
+      supabase.from('task_comments').select('id, task_id').in('task_id', ids),
+    ])
+    setNotes((n.data ?? []).map((x: any) => ({ id: x.id, taskId: x.task_id, userId: x.user_id, note: x.note, createdAt: x.created_at })))
+    const counts: Record<string, number> = {}
+    ;(c.data ?? []).forEach((x: any) => { counts[x.task_id] = (counts[x.task_id] ?? 0) + 1 })
+    setCommentCounts(counts)
+  }
+
+  useEffect(() => {
+    load()
+    const ch = supabase.channel('tracker-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_work_notes' }, () => { load() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_comments' }, () => { load() })
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [idsKey])
+
+  const userOf = (id: string) => users.find(u => u.id === id)
+  const teamOf = (u?: User) => TEAMS.find(t => t.id === u?.teamId)?.name ?? u?.department ?? ''
+  const fmtDate = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN') : '—')
+  const dayKey = (iso: string) => new Date(iso).toLocaleDateString('vi-VN')
+
+  const notesOf = (taskId: string) => {
+    const m = new Map<string, typeof notes>()
+    notes.filter(n => n.taskId === taskId).forEach(n => {
+      const k = dayKey(n.createdAt)
+      m.set(k, [...(m.get(k) ?? []), n])
+    })
+    return Array.from(m.entries())
+  }
+
+  const addNote = async (taskId: string) => {
+    const lines = (drafts[taskId] ?? '').split('\n').map(s => s.replace(/^\s*[-•*]\s*/, '').trim()).filter(Boolean)
+    if (lines.length === 0) return
+    setDrafts(prev => ({ ...prev, [taskId]: '' }))
+    const base = Date.now()
+    const { error } = await supabase.from('task_work_notes').insert(
+      lines.map((note, i) => ({ task_id: taskId, user_id: currentUser.id, note, created_at: new Date(base + i).toISOString() }))
+    )
+    if (error) { alert('Không ghi được worknote: ' + error.message); return }
+    load()
+  }
+
+  const th = 'px-2 py-2 text-xs font-bold text-white text-center border border-white/30 whitespace-nowrap'
+  const td = 'px-2 py-2 text-xs align-top border'
+  const cellBorder = { borderColor: 'var(--border)', color: 'var(--text-primary)' }
+  const commentTask = tasks.find(t => t.id === openComments)
+
+  return (
+    <div className="mb-6">
+      <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--border)' }}>
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+        <button type="button" onClick={() => { setTeamSel(''); setWho('') }}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold"
+          style={{ background: !teamSel && !who ? '#7c3aed' : 'var(--bg-panel)', color: !teamSel && !who ? '#fff' : 'var(--text-muted)', border: '1px solid var(--border)' }}>Tất cả</button>
+        <button type="button" onClick={() => { setTeamSel(''); setWho(currentUser.id) }}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold"
+          style={{ background: who === currentUser.id ? '#7c3aed' : 'var(--bg-panel)', color: who === currentUser.id ? '#fff' : 'var(--text-muted)', border: '1px solid var(--border)' }}>Của tôi</button>
+        {isDir && (
+          <select value={teamSel} onChange={e => { setTeamSel(e.target.value); setWho('') }}
+            className="px-2 py-1.5 rounded-lg text-xs outline-none"
+            style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+            <option value="">-- Phòng ban --</option>
+            {teamsInTasks.map(tm => <option key={tm.id} value={tm.id}>{tm.emoji} {tm.name}</option>)}
+          </select>
+        )}
+        <select value={who} onChange={e => setWho(e.target.value)}
+          className="px-2 py-1.5 rounded-lg text-xs outline-none"
+          style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+          <option value="">-- Người phụ trách --</option>
+          {peopleIds.map(id => <option key={id} value={id}>{users.find(u => u.id === id)?.name}</option>)}
+        </select>
+        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Đang xem {tasks.length} task</span>
+        {overdueCount > 0 && (
+          <span className="text-xs px-2 py-1 rounded-md font-bold" style={{ background: '#dc262618', color: '#dc2626' }}>⚠️ {overdueCount} quá hạn SLA</span>
+        )}
+        <button type="button" onClick={() => setOnlyOverdue(v => !v)}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold"
+          style={{ background: onlyOverdue ? '#dc2626' : 'var(--bg-panel)', color: onlyOverdue ? '#fff' : 'var(--text-muted)', border: '1px solid var(--border)' }}>Chỉ quá hạn</button>
+      </div>
+        <table className="w-full border-collapse" style={{ minWidth: 1700 }}>
+          <thead>
+            <tr style={{ background: '#6d9eeb' }}>
+              <th className={th} style={{ width: 44 }}>No</th>
+              <th className={th} style={{ width: 120 }}>ID Number</th>
+              <th className={th} style={{ width: 90 }}>Company</th>
+              <th className={th} style={{ minWidth: 220 }}>Title</th>
+              <th className={th} style={{ width: 100 }}>Status</th>
+              <th className={th} style={{ width: 70 }}>Priority</th>
+              <th className={th} style={{ width: 130 }}>PIC</th>
+              <th className={th} style={{ width: 130 }}>Support</th>
+              <th className={th} style={{ width: 95 }}>Start Date</th>
+              <th className={th} style={{ width: 95 }}>Due Date</th>
+              <th className={th} style={{ width: 190, background: '#cc4125' }}>SLA / Thời gian</th>
+              <th className={th} style={{ minWidth: 320 }}>Work Note</th>
+              <th className={th} style={{ width: 100, background: '#3c78d8' }}>Comments</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tasks.length === 0 && (
+              <tr><td colSpan={13} className="px-3 py-6 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Chưa có task nào.</td></tr>
+            )}
+            {tasks.map((t, i) => {
+              const sk = t.status === 'completed' ? 'closed' : (t.workStatus ?? 'received')
+              const st = TRACKER_STATUS[sk] ?? TRACKER_STATUS.received
+              const days = notesOf(t.id)
+              return (
+                <tr key={t.id} style={isOver(t) ? { background: '#dc262612' } : undefined}>
+                  <td className={`${td} text-center`} style={cellBorder}>{i + 1}</td>
+                  <td className={`${td} font-mono`} style={cellBorder}>{t.taskCode ?? '—'}</td>
+                  <td className={`${td} text-center font-semibold`} style={cellBorder}>{t.company ? (COMPANY_CODES[t.company] ?? t.company) : '—'}</td>
+                  <td className={`${td} font-semibold`} style={cellBorder}>{t.title}</td>
+                  <td className={`${td} text-center`} style={cellBorder}>
+                    <span className="px-2 py-0.5 rounded-md font-semibold whitespace-nowrap" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
+                  </td>
+                  <td className={`${td} text-center font-bold`} style={{ ...cellBorder, color: t.slaLevel ? TRACKER_PRIORITY[t.slaLevel] : 'var(--text-muted)' }}>{t.slaLevel ?? '—'}</td>
+                  <td className={td} style={cellBorder}>
+                    {t.assignedTo.length === 0 && '—'}
+                    {t.assignedTo.map(id => (
+                      <div key={id}>{userOf(id)?.name}<div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{teamOf(userOf(id))}</div></div>
+                    ))}
+                  </td>
+                  <td className={td} style={cellBorder}>
+                    {t.supporters.length === 0 && '—'}
+                    {t.supporters.map(id => (
+                      <div key={id}>{userOf(id)?.name}<div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{teamOf(userOf(id))}</div></div>
+                    ))}
+                  </td>
+                  <td className={`${td} text-center`} style={cellBorder}>{fmtDate(t.startDate)}</td>
+                  <td className={`${td} text-center`} style={cellBorder}>{fmtDate(t.dueDate)}</td>
+                  <td className={td} style={cellBorder}><SlaCell task={t} /></td>
+                  <td className={td} style={cellBorder}>
+                    {days.length === 0 && <p className="mb-1.5" style={{ color: 'var(--text-muted)' }}>Chưa có cập nhật.</p>}
+                    {days.map(([day, list]) => (
+                      <div key={day} className="mb-1.5">
+                        <p className="font-bold">{day}:</p>
+                        {list.map(n => (
+                          <p key={n.id} className="pl-2">- {n.note} <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>({userOf(n.userId)?.name})</span></p>
+                        ))}
+                      </div>
+                    ))}
+                    <textarea value={drafts[t.id] ?? ''} onChange={e => setDrafts(prev => ({ ...prev, [t.id]: e.target.value }))}
+                      rows={2} placeholder={`Hôm nay ${new Date().toLocaleDateString('vi-VN')}: ghi mỗi ý một dòng...`}
+                      className="w-full px-2 py-1 rounded text-xs outline-none resize-none"
+                      style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+                    <button type="button" onClick={() => addNote(t.id)} disabled={!(drafts[t.id] ?? '').trim()}
+                      className="mt-1 px-2.5 py-1 rounded text-[11px] font-bold text-white disabled:opacity-40" style={{ background: '#0891b2' }}>Ghi lại</button>
+                  </td>
+                  <td className={`${td} text-center`} style={cellBorder}>
+                    <button type="button" onClick={() => setOpenComments(t.id)}
+                      className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#7c3aed' }}>
+                      💬 {commentCounts[t.id] ?? 0}
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {commentTask && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }} onClick={() => setOpenComments(null)}>
+          <div className="w-full max-w-lg rounded-2xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }} onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>💬 Comments · {commentTask.taskCode ?? ''} {commentTask.title}</h3>
+              <button type="button" onClick={() => setOpenComments(null)} style={{ color: 'var(--text-muted)' }}>✕</button>
+            </div>
+            <p className="text-[11px] mb-2" style={{ color: 'var(--text-muted)' }}>Quản lý ghi nhận xét hoặc yêu cầu bổ sung cho người phụ trách tại đây.</p>
+            <TaskCommentsPanel taskId={commentTask.id} currentUser={currentUser} users={users} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function TaskWorkNotePanel({ taskId, currentUser, users }: { taskId: string; currentUser: User; users: User[] }) {
   const [notes, setNotes] = useState<{ id: string; userId: string; note: string; createdAt: string }[]>([])
   const [input, setInput] = useState('')
@@ -7921,6 +8241,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   const [filter, setFilter] = useState<'all' | 'mine' | 'open' | 'done'>('all')
   const [search, setSearch] = useState('')
   const [showCollabModal, setShowCollabModal] = useState(false)
+  const [viewMode, setViewMode] = useState<'cards' | 'tracker'>('cards')
   const [showModal, setShowModal] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [openCommentsFor, setOpenCommentsFor] = useState<string | null>(null)
@@ -8000,6 +8321,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     assignedTo: [] as string[], projectManager: [] as string[], supporters: [] as string[],
     driveFolderCreated: false, driveFolderName: '',
     slaLevel: '' as '' | 'P1' | 'P2' | 'P3' | 'P4',
+    company: '',
   })
 
   const isManager = currentUser.role === 'manager'
@@ -8028,7 +8350,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     if (filter === 'open') return t.status === 'open'
     if (filter === 'done') return t.status === 'completed'
     return true
-  })
+  }).sort(byCreatedDesc)
 
   const handleStart = async (id: string) => {
     const now = new Date().toISOString()
@@ -8319,12 +8641,15 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
           driveFolderCreated: task.driveFolderCreated ?? false,
     driveFolderName: task.driveFolderName ?? '',
     slaLevel: task.slaLevel ?? '',
+    company: task.company ?? '',
   })
   setShowModal(true)
 }
 
   const handleSaveTask = async () => {
-    if (!form.title.trim()) return
+    const prefixOnly = form.company && COMPANY_CODES[form.company] ? `${COMPANY_CODES[form.company]}-` : ''
+    if (!form.title.trim() || form.title.trim() === prefixOnly) return
+    const finalTitle = withCompanyPrefix(form.title, form.company, editingTask?.company)
     const { min, max } = getExpRange(form.priority, form.important, form.urgent)
     if (form.expReward < min || form.expReward > max) {
       alert(`Điểm EXP phải nằm trong khoảng ${min}–${max} cho mức độ "${PRIORITY_CONFIG[form.priority].label}" với lựa chọn Quan trọng/Gấp hiện tại`)
@@ -8333,7 +8658,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
 
     if (editingTask) {
       await supabase.from('tasks').update({
-        title: form.title, description: form.description, exp_reward: form.expReward,
+        title: finalTitle, company: form.company || null, description: form.description, exp_reward: form.expReward,
         assigned_to: form.assignedTo, project_manager: form.projectManager, supporters: form.supporters,
         start_date: form.startDate, due_date: form.dueDate,
         category: form.category, priority: form.priority,
@@ -8351,7 +8676,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
 
       const taskCode = generateTaskCode(form.startDate, tasks)
       const { data: newTask } = await supabase.from('tasks').insert({
-        title: form.title, description: form.description, exp_reward: form.expReward,
+        title: finalTitle, company: form.company || null, description: form.description, exp_reward: form.expReward,
         task_code: taskCode,
         sla_level: form.slaLevel || null,
         work_status: 'received',
@@ -8416,7 +8741,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     setShowModal(false)
     setEditingTask(null)
     setSelfMode(false)
-    setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'development', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '', slaLevel: '' })
+    setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'development', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '', slaLevel: '', company: '' })
   }
 
   const toggleFormArray = (field: 'assignedTo' | 'projectManager' | 'supporters', uid: string) => {
@@ -8476,7 +8801,19 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
         )}
       </div>
 
-      <CollaborationsPanel currentUser={currentUser} users={users} collaborations={collaborations} />
+      <div className="flex gap-2 mb-3">
+        {([['cards', '🗂 Thẻ'], ['tracker', '📊 Tracker']] as const).map(([k, label]) => (
+          <button key={k} type="button" onClick={() => setViewMode(k)}
+            className="px-3.5 py-1.5 rounded-lg text-sm font-semibold"
+            style={{
+              background: viewMode === k ? '#0891b2' : 'var(--bg-panel)',
+              color: viewMode === k ? '#fff' : 'var(--text-muted)',
+              border: `1px solid ${viewMode === k ? '#0891b2' : 'var(--border)'}`,
+            }}>
+            {label}
+          </button>
+        ))}
+      </div>
       <div className="flex gap-2 mb-5">
         {[{ id: 'all', label: 'Tất cả' }, { id: 'mine', label: 'Của tôi' }, { id: 'open', label: 'Chưa làm' }, { id: 'done', label: 'Xong' }].map(f => (
           <button key={f.id} onClick={() => setFilter(f.id as typeof filter)}
@@ -8487,7 +8824,8 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
         ))}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {viewMode === 'tracker' && <TaskTracker tasks={[...(currentUser.isDirector ? tasks : visible)].sort(byCreatedAsc)} users={users} currentUser={currentUser} />}
+      <div className={viewMode === 'tracker' ? 'hidden' : 'grid grid-cols-1 sm:grid-cols-2 gap-4'}>
         {visible.map(task => {
           const assignees = task.assignedTo.map(getUserById).filter((u): u is User => !!u)
           const pms = task.projectManager.map(getUserById).filter((u): u is User => !!u)
@@ -8848,6 +9186,16 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
 
             <div className="space-y-3.5">
               <div>
+                <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Công ty</label>
+                <select value={form.company}
+                  onChange={e => { const v = e.target.value; setForm(f => ({ ...f, company: v, title: withCompanyPrefix(f.title, v, f.company) })) }}
+                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                  <option value="">-- Chọn công ty --</option>
+                  {COMPANIES.map(c => <option key={c} value={c}>{COMPANY_CODES[c] ? `${COMPANY_CODES[c]} · ${c}` : c}</option>)}
+                </select>
+              </div>
+              <div>
                 <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Tên task *</label>
                 <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
                   placeholder="Mô tả ngắn gọn task..."
@@ -9184,7 +9532,7 @@ function LeaderboardView({ users, tasks }: { users: User[]; tasks: Task[] }) {
 }
 
 // ==================== REWARDS ====================
-function RedemptionHistoryPanel({ users }: { users: User[] }) {
+function RedemptionHistoryPanel({ users, refreshKey }: { users: User[]; refreshKey?: number }) {
   const [allRedemptions, setAllRedemptions] = useState<{
     id: string; userId: string; rewardName: string; cost: number; redeemedAt: string
   }[]>([])
@@ -9193,14 +9541,23 @@ function RedemptionHistoryPanel({ users }: { users: User[] }) {
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
 
+  const load = async () => {
+    const { data } = await supabase.from('redemptions').select('*').order('redeemed_at', { ascending: false })
+    if (data) setAllRedemptions(data.map(r => ({
+      id: r.id, userId: r.user_id, rewardName: r.reward_name, cost: r.cost, redeemedAt: r.redeemed_at,
+    })))
+    setLoading(false)
+  }
+
+  // Tải lại khi danh sách đổi quà của app đổi (ví dụ vừa đổi xong)
+  useEffect(() => { load() }, [refreshKey])
+
+  // Và tự cập nhật khi bất kỳ ai đổi quà (realtime)
   useEffect(() => {
-    supabase.from('redemptions').select('*').order('redeemed_at', { ascending: false })
-      .then(({ data }) => {
-        if (data) setAllRedemptions(data.map(r => ({
-          id: r.id, userId: r.user_id, rewardName: r.reward_name, cost: r.cost, redeemedAt: r.redeemed_at,
-        })))
-        setLoading(false)
-      })
+    const ch = supabase.channel(`redemption-history-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'redemptions' }, () => { load() })
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
   }, [])
 
   const filtered = allRedemptions.filter(r => {
@@ -9475,7 +9832,7 @@ function RewardsView({ currentUser, redemptions, users }: { currentUser: User; r
         })}
       </div>
 
-      {currentUser.teamId === 't1c' && <RedemptionHistoryPanel users={users} />}
+      {currentUser.teamId === 't1c' && <RedemptionHistoryPanel users={users} refreshKey={redemptions.length} />}
     </div>
   )
 }
@@ -9634,6 +9991,7 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
   const [profileUser, setProfileUser] = useState<User | null>(null)
   const [showBrowseDept, setShowBrowseDept] = useState(false)
+  const [proposalsOpen, setProposalsOpen] = useState(false)
   const [lastSeenMap, setLastSeenMap] = useState<Record<string, string>>(() => {
     try { return JSON.parse(localStorage.getItem('chatLastSeen') || '{}') } catch { return {} }
   })
@@ -9790,6 +10148,28 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
 
   const myTeam = TEAMS.find(t => t.id === currentUser.teamId)
 
+  // Đang xem một tờ trình thì tự mở nhóm "Tờ trình" trong sidebar
+  useEffect(() => { if (isProposal) setProposalsOpen(true) }, [isProposal])
+
+  const myProposals = proposals
+    .filter(p => p.participants.includes(currentUser.id))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const dayLabel = (iso: string) => {
+    const d = new Date(iso)
+    const dd = d.toLocaleDateString('vi-VN')
+    if (d.toDateString() === new Date().toDateString()) return `Hôm nay · ${dd}`
+    if (d.toDateString() === new Date(Date.now() - 86400000).toDateString()) return `Hôm qua · ${dd}`
+    return dd
+  }
+  const dateGroups: [string, Proposal[]][] = []
+  myProposals.forEach(p => {
+    const label = dayLabel(p.createdAt)
+    const last = dateGroups[dateGroups.length - 1]
+    if (last && last[0] === label) last[1].push(p)
+    else dateGroups.push([label, [p]])
+  })
+  const groupOf = (p: Proposal) => p.groupName ?? (p.kind === 'totrinh' ? 'Tờ trình' : 'Đề xuất')
+
   const CHANNELS: { id: ChatChannel; label: string; desc: string; icon: string }[] = [
     { id: 'general', label: '# chung', desc: 'Tất cả', icon: '💬' },
     { id: 'team', label: myTeam ? `# ${myTeam.name}` : '# team', desc: myTeam ? `${myTeam.emoji} Nội bộ team` : 'Chưa có team', icon: '👥' },
@@ -9860,19 +10240,37 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
           </button>
         ))}
 
-        {proposals.filter(p => p.participants.includes(currentUser.id)).length > 0 && (
+        {myProposals.length > 0 && (
           <>
-            <p className="text-[10px] uppercase tracking-widest px-2 mt-4 mb-2" style={{ color: 'var(--text-muted)' }}>Tờ trình</p>
-            {proposals.filter(p => p.participants.includes(currentUser.id)).map(p => (
-              <button key={p.id}
-                onClick={() => { setChannel('proposal'); setDmUserId(null); setProposalId(p.id); setShowMentions(false) }}
-                title={p.title}
-                className="w-full text-left px-2 py-2 rounded-lg mb-0.5 transition-all"
-                style={{ background: isProposal && proposalId === p.id ? 'var(--bg-card-alt)' : 'transparent', color: isProposal && proposalId === p.id ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                <div className="text-lg md:hidden text-center">📜</div>
-                <div className="text-sm hidden md:block truncate">📜 {p.title}</div>
-              </button>
-            ))}
+            <button type="button" onClick={() => setProposalsOpen(o => !o)} title="Tờ trình"
+              className="w-full flex items-center justify-between px-2 mt-4 mb-2 text-[10px] uppercase tracking-widest"
+              style={{ color: 'var(--text-muted)' }}>
+              <span className="hidden md:inline">Tờ trình ({myProposals.length})</span>
+              <span className="md:hidden text-lg">📜</span>
+              <span className="text-xs">{proposalsOpen ? '▾' : '▸'}</span>
+            </button>
+            {proposalsOpen && (
+              <div className="max-h-64 overflow-y-auto mb-1">
+                {dateGroups.map(([label, list]) => (
+                  <div key={label}>
+                    <p className="hidden md:block text-[10px] font-semibold px-2 mt-2 mb-1" style={{ color: 'var(--text-muted)' }}>{label}</p>
+                    {list.map(p => (
+                      <button key={p.id}
+                        onClick={() => { setChannel('proposal'); setDmUserId(null); setProposalId(p.id); setShowMentions(false) }}
+                        title={`${p.title} — ${groupOf(p)}`}
+                        className="w-full text-left px-2 py-1.5 rounded-lg mb-0.5 transition-all"
+                        style={{ background: isProposal && proposalId === p.id ? 'var(--bg-card-alt)' : 'transparent', color: isProposal && proposalId === p.id ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                        <div className="text-lg md:hidden text-center">📜</div>
+                        <div className="text-sm hidden md:block truncate">📜 {p.title}</div>
+                        <div className="text-[10px] opacity-60 hidden md:block truncate pl-5">
+                          {groupOf(p)} · {new Date(p.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
           </>
         )}
 
@@ -10285,26 +10683,1962 @@ function SignDocumentModal({ currentUser, proposal, onClose }: { currentUser: Us
     </div>
   )
 }
+// Cầu nối: bấm số tờ trình ở bất kỳ đâu -> ProposalsView mở đúng tờ trình đó
+const ProposalLinkContext = createContext<(code: string) => void>(() => {})
+const PROPOSAL_CODE_SPLIT = /(R-TASK\d{6}-\d{2,})/gi
 
-function ProposalModal({ currentUser, users, editingProposal, onClose }: { currentUser: User; users: User[]; editingProposal?: Proposal | null; onClose: () => void }) {
+function ProposalCodeLink({ code }: { code: string }) {
+  const open = useContext(ProposalLinkContext)
+  return (
+    <button type="button" onClick={() => open(code)}
+      className="underline font-mono font-semibold" style={{ color: '#2563eb' }}>{code}</button>
+  )
+}
+
+// Tự biến mọi số R-TASKddmmyy-NN trong đoạn text thành link
+function LinkifyCodes({ text }: { text: string }) {
+  const parts = text.split(PROPOSAL_CODE_SPLIT)
+  return <>{parts.map((s, i) => (i % 2 === 1 ? <ProposalCodeLink key={i} code={s.toUpperCase()} /> : <span key={i}>{s}</span>))}</>
+}
+function ProposalSupplementSection({ p, currentUser, flow }: {
+  p: Proposal; currentUser: User; flow: { id: string; approverId: string; status: string }[]
+}) {
+  const [files, setFiles] = useState<File[]>([])
+  const [note, setNote] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [driveLink, setDriveLink] = useState('')
+
+  if (currentUser.id !== p.submittedBy || p.status === 'approved') return null
+  const isRejected = p.status === 'rejected'
+
+  const pick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = Array.from(e.target.files ?? [])
+    const tooBig = picked.find(f => f.size > MAX_FILE_MB * 1024 * 1024)
+    if (tooBig) { setMsg(`File "${tooBig.name}" lớn hơn ${MAX_FILE_MB}MB.`); e.target.value = ''; return }
+    if (files.length + picked.length > MAX_FILES) { setMsg(`Mỗi lần bổ sung tối đa ${MAX_FILES} file.`); e.target.value = ''; return }
+    setMsg('')
+    setFiles(prev => [...prev, ...picked])
+    e.target.value = ''
+  }
+
+  const submit = async () => {
+    const link = driveLink.trim()
+if (link && !/^https?:\/\//i.test(link)) { setMsg('Link Drive không hợp lệ (phải bắt đầu bằng http:// hoặc https://).'); return }
+if (!note.trim() && files.length === 0 && !link) { setMsg('Hãy nhập nội dung bổ sung, chọn file hoặc dán link Drive.'); return }
+    setSaving(true); setMsg('')
+    let uploaded: { name: string; path: string; size: number; type: string }[] = []
+    try { uploaded = await uploadProposalFiles(currentUser.id, files) }
+    catch (err: any) { setSaving(false); setMsg('Tải file thất bại: ' + (err?.message ?? '')); return }
+
+    const round = Math.max(0, ...(p.attachments ?? []).map(a => a.round ?? 0)) + 1
+    const tagged = [
+  ...uploaded.map(f => ({ ...f, round, note: note.trim() || undefined })),
+  ...(link ? [{
+    name: 'Link Drive bổ sung', path: link, size: 0, type: 'link',
+    at: new Date().toISOString(), by: currentUser.id, round, note: note.trim() || undefined,
+  }] : []),
+]
+    const update: Record<string, any> = { attachments: [...(p.attachments ?? []), ...tagged] }
+    if (isRejected) { update.status = 'pending'; update.rejected_reason = null }
+    const { error } = await supabase.from('proposals').update(update).eq('id', p.id)
+    if (error) { setSaving(false); setMsg('Không lưu được: ' + error.message); return }
+
+    await supabase.from('proposal_revisions').insert({
+      proposal_id: p.id,
+      edited_by: currentUser.id,
+      added_note: [
+        note.trim(),
+        uploaded.length ? `File: ${uploaded.map(f => f.name).join(', ')}` : '',
+        link ? `Link Drive: ${link}` : '',
+      ].filter(Boolean).join(' — ') || null,
+    })
+
+    if (isRejected && flow.length > 0) {
+      await supabase.from('proposal_steps')
+        .update({ status: p.approvalMode === 'par' ? 'pending' : 'waiting', decided_at: null, note: null })
+        .eq('proposal_id', p.id)
+      if (p.approvalMode !== 'par') {
+        await supabase.from('proposal_steps').update({ status: 'pending' }).eq('proposal_id', p.id).eq('step_order', 1)
+      }
+    }
+
+    await supabase.from('notifications').insert({
+      message: `📜 ${currentUser.name} đã bổ sung hồ sơ${isRejected ? ' và nộp lại' : ''} cho tờ trình "${p.title}"`,
+      target_user_id: p.recipientId,
+      link_proposal_id: p.id,
+    })
+
+    setFiles([]); setNote(''); setDriveLink(''); setSaving(false)
+    setMsg(isRejected ? '✅ Đã nộp lại, đề xuất quay về trạng thái chờ duyệt.' : '✅ Đã bổ sung hồ sơ.')
+  }
+
+  const inputStyle = { background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
+
+  return (
+    <section className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: `1px solid ${isRejected ? '#dc262655' : 'var(--border)'}` }}>
+      <h3 className="text-sm font-bold mb-1" style={{ color: 'var(--text-primary)' }}>
+        {isRejected ? 'Bổ sung hồ sơ & nộp lại' : 'Bổ sung hồ sơ'}
+      </h3>
+      {isRejected && (
+        <p className="text-xs mb-2" style={{ color: '#b45309' }}>{p.rejectedReason?.startsWith('[REVIEW]') ? `Người duyệt yêu cầu xem xét lại: ${p.rejectedReason.slice(8).trim()}` : `Lý do từ chối: ${p.rejectedReason || '—'}`}</p>
+      )}
+      <textarea value={note} onChange={e => setNote(e.target.value)} rows={2}
+        placeholder="Đã bổ sung / chỉnh sửa gì? VD: đã bổ sung báo giá và bảng so sánh nhà cung cấp"
+        className="w-full px-2 py-1.5 rounded-lg text-xs outline-none resize-none mb-2" style={inputStyle} />
+      <input value={driveLink} onChange={e => setDriveLink(e.target.value)}
+        placeholder="Link Drive chứa báo giá / tài liệu (https://drive.google.com/...)"
+        className="w-full px-2 py-1.5 rounded-lg text-xs outline-none mb-2" style={inputStyle} />
+      <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" onChange={pick}
+        className="w-full text-xs" style={{ color: 'var(--text-muted)' }} />
+      {files.length > 0 && (
+        <ul className="mt-2 space-y-1">
+          {files.map((f, i) => (
+            <li key={i} className="flex items-center justify-between text-xs rounded-lg px-2 py-1" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-primary)' }}>
+              <span className="truncate">{f.name} ({(f.size / 1024 / 1024).toFixed(1)}MB)</span>
+              <button type="button" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} style={{ color: '#dc2626' }}>✕</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {msg && <p className="text-xs mt-2" style={{ color: msg.startsWith('✅') ? '#059669' : '#dc2626' }}>{msg}</p>}
+      <button type="button" onClick={submit} disabled={saving}
+        className="mt-3 px-4 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40"
+        style={{ background: isRejected ? 'linear-gradient(135deg, #7c3aed, #5b21b6)' : '#0891b2' }}>
+        {saving ? 'Đang gửi...' : isRejected ? 'Bổ sung & nộp lại' : 'Bổ sung hồ sơ'}
+      </button>
+    </section>
+  )
+}
+function ProposalAttachments({ p, users }: { p: Proposal; users: User[] }) {
+  const list = p.attachments ?? []
+  if (list.length === 0) return null
+  const fmt = (d?: string) => (d ? new Date(d).toLocaleString('vi-VN') : '')
+  const rounds = Array.from(new Set(list.map(a => a.round ?? 0))).sort((a, b) => a - b)
+  return (
+    <div className="pt-2 space-y-2">
+      {rounds.map(r => {
+        const files = list.filter(a => (a.round ?? 0) === r)
+        const first = files[0]
+        const when = first.at ?? (r === 0 ? p.createdAt : undefined)
+        const who = users.find(u => u.id === first.by)?.name ?? (r === 0 ? users.find(u => u.id === p.submittedBy)?.name : undefined)
+        return (
+          <div key={r} className="rounded-lg p-2" style={{ background: 'var(--bg-card-alt)' }}>
+            <p className="text-[11px] font-semibold mb-1" style={{ color: r === 0 ? 'var(--text-muted)' : '#b45309' }}>
+              {r === 0 ? 'Hồ sơ ban đầu' : `Bổ sung lần ${r}`}{when ? ` · ${fmt(when)}` : ''}{who ? ` · ${who}` : ''}
+            </p>
+            {first.note && <p className="text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>"<LinkifyCodes text={first.note} />"</p>}
+            <div className="flex flex-wrap gap-3">
+              {files.map(a => (
+                <button key={a.path} type="button" onClick={() => openProposalFile(a.path)}
+                  className="text-xs underline" style={{ color: '#3b82f6' }}>📎 {a.name}</button>
+              ))}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+type DocCostRow = { item: string; unit: string; qty: string; price: string; note: string }
+// Số < 1.000 coi như đơn vị "triệu" (dữ liệu cũ) -> đổi ra VNĐ đầy đủ
+const toVnd = (n: number) => {
+  const v = Number(n) || 0
+  return Math.abs(v) < 1000 ? Math.round(v * 1e6) : Math.round(v)
+}
+
+const costRowAmount = (r: { amount?: number; qty?: string; price?: string }) =>
+  toVnd(r.amount !== undefined ? Number(r.amount) || 0 : (Number(r.qty) || 0) * (Number(r.price) || 0))
+
+const CHU_SO = ['không', 'một', 'hai', 'ba', 'bốn', 'năm', 'sáu', 'bảy', 'tám', 'chín']
+function docBaChuSo(n: number, full: boolean): string {
+  const tram = Math.floor(n / 100), chuc = Math.floor((n % 100) / 10), dv = n % 10
+  let s = ''
+  if (tram > 0 || full) s += CHU_SO[tram] + ' trăm'
+  if (chuc > 1) {
+    s += ' ' + CHU_SO[chuc] + ' mươi'
+    if (dv === 1) s += ' mốt'
+    else if (dv === 5) s += ' lăm'
+    else if (dv > 0) s += ' ' + CHU_SO[dv]
+  } else if (chuc === 1) {
+    s += ' mười'
+    if (dv === 5) s += ' lăm'
+    else if (dv > 0) s += ' ' + CHU_SO[dv]
+  } else if (dv > 0) {
+    if (tram > 0 || full) s += ' lẻ'
+    s += ' ' + CHU_SO[dv]
+  }
+  return s.trim()
+}
+function docSoThanhChu(value: number): string {
+  let n = Math.round(Number(value) || 0)
+  if (n === 0) return 'Không đồng'
+  const neg = n < 0
+  if (neg) n = -n
+  const units = ['', 'nghìn', 'triệu', 'tỷ', 'nghìn tỷ', 'triệu tỷ']
+  const groups: number[] = []
+  while (n > 0) { groups.push(n % 1000); n = Math.floor(n / 1000) }
+  const parts: string[] = []
+  for (let i = groups.length - 1; i >= 0; i--) {
+    if (groups[i] === 0) continue
+    const full = i < groups.length - 1
+    parts.push([docBaChuSo(groups[i], full), units[i]].filter(Boolean).join(' '))
+  }
+  const text = (neg ? 'âm ' : '') + parts.join(' ') + ' đồng chẵn'
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+
+function ProposalDocForm({ currentUser, users, onClose }: { currentUser: User; users: User[]; onClose: () => void }) {
+  const now = new Date()
+  const dateText = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()}`
+  const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)
+
+  const [title, setTitle] = useState('')
+  const [company, setCompany] = useState('')
+  const [place, setPlace] = useState('HCMC')
+  const [kinhGui, setKinhGui] = useState<string[]>(['Ban Giám đốc Tập đoàn KNI'])
+  const [canCu, setCanCu] = useState<string[]>([''])
+  const [intro, setIntro] = useState('')
+  const [noiDung, setNoiDung] = useState('')
+  const [rows, setRows] = useState<DocCostRow[]>([{ item: '', unit: '', qty: '', price: '', note: '' }])
+  const [bangChu, setBangChu] = useState('')
+  const [thongTinKhac, setThongTinKhac] = useState('')
+  const [deNghi, setDeNghi] = useState('')
+  const [files, setFiles] = useState<File[]>([])
+  const [driveUrl, setDriveUrl] = useState('')
+  const [recipientId, setRecipientId] = useState(myManagers[0]?.id ?? '')
+  const [extraApprovers, setExtraApprovers] = useState<string[]>([])
+  const [approvalMode, setApprovalMode] = useState<'seq' | 'par'>('seq')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? ''
+  const rowAmount = (r: DocCostRow) => toVnd((Number(r.qty) || 0) * (Number(r.price) || 0))
+  const total = rows.reduce((s, r) => s + rowAmount(r), 0)
+  const money = (n: number) => n.toLocaleString('vi-VN')
+  const approverIds = [recipientId, ...extraApprovers.filter(id => id !== recipientId)].filter(Boolean)
+
+  const line = 'w-full bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500 py-0.5'
+  const ink = { color: '#111827' }
+
+  const renderList = (list: string[], set: (v: string[]) => void, bullet: string, placeholder: string) => (
+    <div className="space-y-1">
+      {list.map((v, i) => (
+        <div key={i} className="flex items-start gap-2">
+          <span className="pt-0.5">{bullet}</span>
+          <input value={v} onChange={e => set(list.map((x, j) => (j === i ? e.target.value : x)))}
+            placeholder={placeholder} className={line} style={ink} />
+          {list.length > 1 && (
+            <button type="button" onClick={() => set(list.filter((_, j) => j !== i))} className="text-red-500 text-xs px-1">✕</button>
+          )}
+        </div>
+      ))}
+      <button type="button" onClick={() => set([...list, ''])} className="text-xs text-blue-600">+ Thêm dòng</button>
+    </div>
+  )
+
+  const updateRow = (i: number, patch: Partial<DocCostRow>) => setRows(prev => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+
+  const pickFiles = (e: { target: HTMLInputElement }) => {
+    const picked = Array.from(e.target.files ?? [])
+    const tooBig = picked.find(f => f.size > MAX_FILE_MB * 1024 * 1024)
+    if (tooBig) { setError(`File "${tooBig.name}" lớn hơn ${MAX_FILE_MB}MB. Hãy dùng link Drive cho file lớn.`); e.target.value = ''; return }
+    if (files.length + picked.length > MAX_FILES) { setError(`Tối đa ${MAX_FILES} file.`); e.target.value = ''; return }
+    setError('')
+    setFiles(prev => [...prev, ...picked])
+    e.target.value = ''
+  }
+
+  const submit = async () => {
+    if (!title.trim()) { setError('Vui lòng nhập tiêu đề tờ trình (V/V).'); return }
+    if (!intro.trim() && !noiDung.trim()) { setError('Vui lòng nhập nội dung tờ trình.'); return }
+    if (!recipientId) { setError('Vui lòng chọn người duyệt đầu tiên.'); return }
+    setSaving(true); setError('')
+
+    let uploaded: { name: string; path: string; size: number; type: string }[] = []
+    try { uploaded = await uploadProposalFiles(currentUser.id, files) }
+    catch (err: any) { setSaving(false); setError('Tải file thất bại: ' + (err?.message ?? '')); return }
+
+    const cleanRows = rows
+      .filter(r => r.item.trim())
+      .map(r => ({ ...r, price: r.price ? String(toVnd(Number(r.price))) : '' }))
+    const items = cleanRows.map(r => ({
+      item: r.item.trim(),
+      cost: `${[r.qty, r.unit].filter(Boolean).join(' ')}${r.price ? ` × ${money(Number(r.price))}` : ''}`.trim(),
+      amount: rowAmount(r),
+    }))
+    const formData = {
+      place, dateText, kinhGui: kinhGui.filter(s => s.trim()), canCu: canCu.filter(s => s.trim()),
+      intro: intro.trim(), noiDung: noiDung.trim(), costRows: cleanRows, bangChu: docSoThanhChu(total),
+      thongTinKhac: thongTinKhac.trim(), deNghi: deNghi.trim(),
+    }
+
+    let data: any = null
+    let insertError: any = null
+    for (let i = 0; i < 3; i++) {
+      const res = await supabase.from('proposals').insert({
+        title: title.trim(),
+        description: (intro.trim() || noiDung.trim()).slice(0, 200),
+        drive_url: driveUrl.trim(),
+        submitted_by: currentUser.id, recipient_id: recipientId, status: 'pending',
+        participants: [currentUser.id, ...approverIds],
+        code: await generateProposalCode(currentUser.id),
+        group_name: 'Tờ trình', department: currentUser.department, company: company || null,
+        brief: title.trim(), approval_mode: approvalMode,
+        attachments: uploaded, items, kind: 'totrinh', form_data: formData,
+      }).select('id').single()
+      data = res.data; insertError = res.error
+      if (!insertError && data?.id) {
+        await supabase.from('proposal_steps').insert(approverIds.map((id, k) => ({
+          proposal_id: data.id, approver_id: id, step_order: k + 1,
+          status: k === 0 || approvalMode === 'par' ? 'pending' : 'waiting',
+        })))
+      }
+      if (!insertError || insertError.code !== '23505') break
+    }
+    setSaving(false)
+    if (insertError) { setError(insertError.message); return }
+
+    const notifyIds = approvalMode === 'par' ? approverIds : [recipientId]
+    for (const id of notifyIds) {
+      await supabase.from('notifications').insert({
+        message: `📜 ${currentUser.name} vừa trình tờ trình "${title.trim()}" cho bạn`,
+        target_user_id: id,
+        link_proposal_id: data?.id,
+      })
+    }
+    onClose()
+  }
+
+  const area = `${line} resize-none`
+  const th = 'border border-gray-400 px-1.5 py-1 text-xs font-bold text-center bg-gray-50'
+  const td = 'border border-gray-400 px-1 py-0.5 text-xs'
+  const cell = 'w-full bg-transparent outline-none'
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto" style={{ background: '#d1d5db' }}>
+      <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
+        <span className="text-sm font-bold text-gray-800">📜 Tạo tờ trình mới (R-TASK)</span>
+        <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
+      </div>
+
+      <div className="max-w-[860px] mx-auto my-4 bg-white shadow-xl p-6 sm:p-12 text-[13px] leading-relaxed" style={{ ...ink, fontFamily: 'Arial, Helvetica, sans-serif' }}>
+        <p className="font-bold text-gray-500">TẬP ĐOÀN KHÔI NGUYÊN INVESTMENT (KNI)</p>
+        <div className="flex items-center gap-2 font-bold text-gray-500 flex-wrap">
+          <span>CÔNG TY</span>
+          <select value={company} onChange={e => setCompany(e.target.value)} className="border-b border-dashed border-gray-300 bg-transparent outline-none font-bold" style={ink}>
+            <option value="">-- chọn --</option>
+            {COMPANIES.map(c => <option key={c} value={c}>{c.toUpperCase()}</option>)}
+          </select>
+          <span>– {(currentUser.department || '').toUpperCase()}</span>
+        </div>
+
+        <div className="grid grid-cols-3 border border-black my-5">
+          <div className="p-3 text-xs border-r border-black flex items-center">Số/No: <span className="ml-1 font-mono text-gray-500">R-TASK… (tự sinh khi gửi)</span></div>
+          <div className="col-span-2 p-3 text-center text-3xl font-bold">TỜ TRÌNH<span className="text-blue-400">/ PROPOSAL</span></div>
+        </div>
+
+        <textarea value={title} onChange={e => setTitle(e.target.value)} rows={2}
+          placeholder="(V/V: NỘI DUNG TỜ TRÌNH — VD: PHÊ DUYỆT KINH PHÍ MUA SẮM THIẾT BỊ IT ...)"
+          className={`${area} text-center text-base font-bold uppercase`} style={ink} />
+
+        <div className="text-right italic my-3 flex items-center justify-end gap-1">
+          <input value={place} onChange={e => setPlace(e.target.value)} className="w-20 text-right bg-transparent outline-none border-b border-dashed border-gray-300 italic" style={ink} />
+          <span>, {dateText}</span>
+        </div>
+
+        <div className="flex gap-3 mb-3">
+          <b className="shrink-0 w-20">Kính gửi:</b>
+          <div className="flex-1">{renderList(kinhGui, setKinhGui, '-', 'Ban Giám đốc / đơn vị nhận')}</div>
+        </div>
+
+        <div className="mb-3">
+          <b>Căn cứ:</b>
+          <div className="mt-1 italic">{renderList(canCu, setCanCu, '•', 'Căn cứ Tờ trình / kế hoạch / báo giá ...')}</div>
+        </div>
+
+        <textarea value={intro} onChange={e => setIntro(e.target.value)} rows={3}
+          placeholder="Phòng ... kính trình Ban Giám đốc xem xét và phê duyệt ... với các nội dung chi tiết như sau:"
+          className={`${area} mb-4`} style={ink} />
+
+        <p className="font-bold mb-1">NỘI DUNG</p>
+        <textarea value={noiDung} onChange={e => setNoiDung(e.target.value)} rows={10}
+          placeholder={'I. NỘI DUNG ĐIỀU CHỈNH & TỐI ƯU CHI PHÍ\n1. Về Máy tính xách tay & Phần mềm bản quyền: ...\n2. Về Thiết bị In ấn / Copy / Scan: ...'}
+          className={`${area} mb-4`} style={ink} />
+
+        <p className="font-bold mb-1">CHI PHÍ</p>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse" style={{ minWidth: 640 }}>
+            <thead>
+              <tr>
+                <th className={th} style={{ width: 36 }}>STT</th>
+                <th className={th}>Danh mục</th>
+                <th className={th} style={{ width: 70 }}>Đơn vị</th>
+                <th className={th} style={{ width: 60 }}>Số lượng</th>
+                <th className={th} style={{ width: 110 }}>Đơn giá (VNĐ)</th>
+                <th className={th} style={{ width: 110 }}>Thành tiền (VNĐ)</th>
+                <th className={th}>Ghi chú</th>
+                <th style={{ width: 24 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i}>
+                  <td className={`${td} text-center`}>{i + 1}</td>
+                  <td className={td}><input value={r.item} onChange={e => updateRow(i, { item: e.target.value })} className={cell} style={ink} /></td>
+                  <td className={td}><input value={r.unit} onChange={e => updateRow(i, { unit: e.target.value })} className={cell} style={ink} /></td>
+                  <td className={td}><input type="number" min="0" value={r.qty} onChange={e => updateRow(i, { qty: e.target.value })} className={cell} style={ink} /></td>
+                  <td className={td}><input type="number" min="0" value={r.price} onChange={e => updateRow(i, { price: e.target.value })} className={cell} style={ink} /></td>
+                  <td className={`${td} text-right`}>{money(rowAmount(r))}</td>
+                  <td className={td}><input value={r.note} onChange={e => updateRow(i, { note: e.target.value })} className={cell} style={ink} /></td>
+                  <td className="text-center">
+                    {rows.length > 1 && <button type="button" onClick={() => setRows(prev => prev.filter((_, j) => j !== i))} className="text-red-500 text-xs">✕</button>}
+                  </td>
+                </tr>
+              ))}
+              <tr>
+                <td className={`${td} font-bold`} colSpan={5}>TỔNG CHI PHÍ</td>
+                <td className={`${td} font-bold text-right`}>{money(total)}</td>
+                <td className={td}></td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <button type="button" onClick={() => setRows(prev => [...prev, { item: '', unit: '', qty: '', price: '', note: '' }])} className="text-xs text-blue-600 mt-1">+ Thêm dòng chi phí</button>
+        <div className="italic mt-2 mb-4">(Bằng chữ: {docSoThanhChu(total)})</div>
+
+        <p className="font-bold mb-1">THÔNG TIN KHÁC</p>
+        <textarea value={thongTinKhac} onChange={e => setThongTinKhac(e.target.value)} rows={3}
+          placeholder="Điều khoản thanh toán, thời gian giao hàng, ghi chú bổ sung ..." className={`${area} mb-4`} style={ink} />
+
+        <p className="font-bold mb-1">ĐỀ NGHỊ PHÊ DUYỆT</p>
+        <textarea value={deNghi} onChange={e => setDeNghi(e.target.value)} rows={4}
+          placeholder={'Phòng ... kính trình Ban Giám đốc phê duyệt:\n1. Phê duyệt kinh phí ... \n2. ...\nKính trình Ban Giám đốc xem xét và quyết định./.'}
+          className={`${area} mb-4`} style={ink} />
+
+        <p className="font-bold mb-1">Tài liệu đính kèm theo Tờ trình:</p>
+        <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" onChange={pickFiles} className="text-xs" />
+        {files.length > 0 && (
+          <ul className="mt-1 space-y-0.5">
+            {files.map((f, i) => (
+              <li key={i} className="flex items-center justify-between text-xs">
+                <span className="truncate">☐ {f.name} ({(f.size / 1024 / 1024).toFixed(1)}MB)</span>
+                <button type="button" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} className="text-red-500 px-1">✕</button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <input value={driveUrl} onChange={e => setDriveUrl(e.target.value)} placeholder="Hoặc dán link Google Drive (file lớn)" className={`${line} mt-2 text-xs`} style={ink} />
+
+        <div className="grid gap-4 mt-8 text-center" style={{ gridTemplateColumns: `repeat(${Math.min(4, 1 + Math.max(approverIds.length, 1))}, minmax(0, 1fr))` }}>
+          <div>
+            <p className="font-bold">Người lập tờ trình</p>
+            <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+            <p className="mt-10 text-xs text-gray-500">{currentUser.name}</p>
+          </div>
+          {(approverIds.length > 0 ? approverIds : ['']).map((id, i) => (
+            <div key={i}>
+              <p className="font-bold">{i === approverIds.length - 1 && approverIds.length > 1 ? 'Phê duyệt cuối cùng' : `Người duyệt ${i + 1}`}</p>
+              <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+              <p className="mt-10 text-xs text-gray-500">{id ? nameOf(id) : '—'}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="max-w-[860px] mx-auto mb-4 bg-white shadow-xl p-6 text-[13px] space-y-4" style={ink}>
+        <p className="font-bold">Luồng phê duyệt</p>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Người duyệt đầu tiên {myManagers.length > 0 ? '(quản lý phòng ban của bạn)' : ''} *</label>
+          <select value={recipientId} disabled={myManagers.length === 1} onChange={e => setRecipientId(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white disabled:bg-gray-100" style={ink}>
+            {myManagers.length === 0 && <option value="">-- Chọn người duyệt --</option>}
+            {(myManagers.length > 0 ? myManagers : users.filter(u => u.id !== currentUser.id)).map(u => (
+              <option key={u.id} value={u.id}>{u.name} — {u.department}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Người duyệt tiếp theo (không bắt buộc, duyệt theo thứ tự bạn tick)</label>
+          <ApproverPicker users={users} excludeIds={[currentUser.id, recipientId]} value={extraApprovers} onChange={setExtraApprovers} />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Luồng phê duyệt</label>
+          <select value={approvalMode} onChange={e => setApprovalMode(e.target.value as 'seq' | 'par')} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
+            <option value="seq">Nối tiếp (lần lượt)</option>
+            <option value="par">Song song (cùng lúc)</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="sticky bottom-0 z-10 px-4 py-3 flex items-center justify-end gap-3" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
+        {error && <span className="text-xs text-red-600 mr-auto">{error}</span>}
+        <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600">Hủy</button>
+        <button type="button" onClick={submit} disabled={saving}
+          className="px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40"
+          style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
+          {saving ? 'Đang gửi...' : 'Gửi tờ trình'}
+        </button>
+      </div>
+    </div>
+  )
+}
+function ProposalDocView({ p, users, currentUserId, onClose, canAct, onApprove, onReject, onRequestReview }: {
+  p: Proposal; users: User[]; currentUserId: string; onClose: () => void; canAct: boolean
+  onApprove: (note: string) => Promise<void>; onReject: (note: string) => Promise<void>; onRequestReview: (note: string) => Promise<void>
+}) {
+  const f: any = p.formData ?? {}
+  const [steps, setSteps] = useState<{ id: string; approverId: string; order: number; status: string; decidedAt?: string; note?: string }[]>([])
+  const [busy, setBusy] = useState(false)
+  const [myNote, setMyNote] = useState('')
+  const [warn, setWarn] = useState('')
+  const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? ''
+  const fmt = (d?: string) => (d ? new Date(d).toLocaleString('vi-VN') : '')
+  const money = (n: number) => Number(n || 0).toLocaleString('vi-VN')
+
+  useEffect(() => {
+    let alive = true
+    supabase.from('proposal_steps').select('*').eq('proposal_id', p.id).order('step_order').then(({ data }: any) => {
+      if (!alive) return
+      setSteps((data ?? []).map((s: any) => ({ id: s.id, approverId: s.approver_id, order: s.step_order, status: s.status, decidedAt: s.decided_at ?? undefined, note: s.note ?? undefined })))
+    })
+    return () => { alive = false }
+  }, [p.id, p.status, p.recipientId])
+
+  const flow = steps.length > 0 ? steps : [{
+    id: 'legacy', approverId: p.recipientId, order: 1,
+    status: p.status === 'approved' ? 'approved' : p.status === 'rejected' ? 'rejected' : 'pending',
+    decidedAt: undefined as string | undefined,
+    note: undefined as string | undefined,
+  }]
+  const STATUS: Record<string, string> = {
+    approved: '✓ Đã duyệt', pending: 'Chờ duyệt', waiting: 'Chưa đến lượt', rejected: '✕ Từ chối', revision: '🔁 Yêu cầu xem xét lại', skipped: 'Bỏ qua',
+  }
+  const STATUS_COLOR: Record<string, string> = {
+    approved: '#059669', pending: '#b45309', waiting: '#6b7280', rejected: '#dc2626', revision: '#b45309', skipped: '#6b7280',
+  }
+
+  const rows: any[] = Array.isArray(f.costRows) && f.costRows.length > 0
+    ? f.costRows
+    : (p.items ?? []).map((x: any) => ({ item: x.item, unit: '', qty: '', price: '', note: x.cost, amount: x.amount }))
+  const amt = (r: any) => costRowAmount(r)
+  const total = rows.reduce((s, r) => s + amt(r), 0)
+
+  const ink = { color: '#111827' }
+  const th = 'border border-gray-400 px-1.5 py-1 text-xs font-bold text-center bg-gray-50'
+  const td = 'border border-gray-400 px-1.5 py-1 text-xs'
+  const para = (text?: string) => (text ? <p className="whitespace-pre-wrap mb-4">{text}</p> : null)
+  const heading = (t: string) => <p className="font-bold mb-1">{t}</p>
+
+  const isReview = p.status === 'rejected' && !!p.rejectedReason?.startsWith('[REVIEW]')
+  const act = async (fn: (note: string) => Promise<void>, needNote = false) => {
+    if (needNote && !myNote.trim()) { setWarn('Hãy ghi ý kiến của bạn vào ô dưới tên bạn ở cuối tờ trình.'); return }
+    setWarn(''); setBusy(true)
+    try { await fn(myNote.trim()) } finally { setBusy(false) }
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
+      <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
+        <span className="text-sm font-bold text-gray-800">📄 Tờ trình {p.code ?? ''}</span>
+        <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+
+      {isReview && (
+        <div className="max-w-[860px] mx-auto mt-4 rounded-lg px-4 py-3 text-sm" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d' }}>
+          🔁 <b>Người duyệt yêu cầu xem xét lại:</b> {(p.rejectedReason ?? '').replace('[REVIEW]', '').trim()}
+        </div>
+      )}
+      <div className="max-w-[860px] mx-auto my-4 bg-white shadow-xl p-6 sm:p-12 text-[13px] leading-relaxed" style={{ ...ink, fontFamily: 'Arial, Helvetica, sans-serif' }}>
+        <p className="font-bold text-gray-500">TẬP ĐOÀN KHÔI NGUYÊN INVESTMENT (KNI)</p>
+        <p className="font-bold text-gray-500">
+          {p.company ? `CÔNG TY ${p.company.toUpperCase()}` : ''}{p.company && p.department ? ' – ' : ''}{(p.department ?? '').toUpperCase()}
+        </p>
+
+        <div className="grid grid-cols-3 border border-black my-5">
+          <div className="p-3 text-xs border-r border-black flex items-center">Số/No: <span className="ml-1 font-mono">{p.code ?? '—'}</span></div>
+          <div className="col-span-2 p-3 text-center text-3xl font-bold">TỜ TRÌNH<span className="text-blue-400">/ PROPOSAL</span></div>
+        </div>
+
+        <p className="text-center text-base font-bold uppercase whitespace-pre-wrap">{p.title}</p>
+        <p className="text-right italic my-3">{f.place ?? 'HCMC'}, {f.dateText ?? new Date(p.createdAt).toLocaleDateString('vi-VN')}</p>
+
+        {Array.isArray(f.kinhGui) && f.kinhGui.length > 0 && (
+          <div className="flex gap-3 mb-3">
+            <b className="shrink-0 w-20">Kính gửi:</b>
+            <div>{f.kinhGui.map((k: string, i: number) => <p key={i}>- {k}</p>)}</div>
+          </div>
+        )}
+
+        {Array.isArray(f.canCu) && f.canCu.length > 0 && (
+          <div className="mb-3">
+            <b>Căn cứ:</b>
+            <ul className="italic mt-1 space-y-1">{f.canCu.map((c: string, i: number) => <li key={i}>• {c}</li>)}</ul>
+          </div>
+        )}
+
+        {para(f.intro)}
+        {f.noiDung && <>{heading('NỘI DUNG')}{para(f.noiDung)}</>}
+
+        {rows.length > 0 && (
+          <>
+            {heading('CHI PHÍ')}
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse" style={{ minWidth: 560 }}>
+                <thead>
+                  <tr>
+                    <th className={th} style={{ width: 36 }}>STT</th><th className={th}>Danh mục</th><th className={th}>Đơn vị</th>
+                    <th className={th}>Số lượng</th><th className={th}>Đơn giá (VNĐ)</th><th className={th}>Thành tiền (VNĐ)</th><th className={th}>Ghi chú</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => (
+                    <tr key={i}>
+                      <td className={`${td} text-center`}>{i + 1}</td>
+                      <td className={td}>{r.item}{r.extra && <i> (phát sinh)</i>}</td>
+                      <td className={`${td} text-center`}>{r.unit}</td>
+                      <td className={`${td} text-center`}>{r.qty}</td>
+                      <td className={`${td} text-right`}>{r.price ? money(toVnd(Number(r.price))) : ''}</td>
+                      <td className={`${td} text-right`}>{money(amt(r))}</td>
+                      <td className={td}>{r.note}</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td className={`${td} font-bold`} colSpan={5}>TỔNG CHI PHÍ</td>
+                    <td className={`${td} font-bold text-right`}>{money(total)}</td>
+                    <td className={td}></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="italic mt-2">(Bằng chữ: {docSoThanhChu(total)})</p>
+            <div className="mb-4" />
+          </>
+        )}
+
+        {f.thongTinKhac && <>{heading('THÔNG TIN KHÁC')}{para(f.thongTinKhac)}</>}
+        {f.deNghi && <>{heading('ĐỀ NGHỊ PHÊ DUYỆT')}{para(f.deNghi)}</>}
+
+        {((p.attachments ?? []).length > 0 || p.driveUrl) && (
+          <div className="mb-4">
+            {heading('Tài liệu đính kèm theo Tờ trình:')}
+            <div className="flex flex-col gap-1 items-start">
+              {(p.attachments ?? []).map(a => (
+                <button key={a.path} type="button" onClick={() => openProposalFile(a.path)} className="text-xs underline text-blue-600">📎 {a.name}</button>
+              ))}
+              {p.driveUrl && <a href={p.driveUrl} target="_blank" rel="noopener noreferrer" className="text-xs underline text-blue-600">📁 Xem tài liệu đính kèm trên Drive</a>}
+            </div>
+          </div>
+        )}
+
+        <div className="grid gap-4 mt-8 text-center" style={{ gridTemplateColumns: `repeat(${Math.min(4, 1 + flow.length)}, minmax(0, 1fr))` }}>
+          <div>
+            <p className="font-bold">Người lập tờ trình</p>
+            <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+            <p className="mt-8 font-semibold">{nameOf(p.submittedBy)}</p>
+            <p className="text-[11px] text-gray-500">{fmt(p.createdAt)}</p>
+          </div>
+          {flow.map((s, i) => {
+            const mine = canAct && s.approverId === currentUserId && s.status === 'pending'
+            return (
+              <div key={s.id}>
+                <p className="font-bold">{i === flow.length - 1 && flow.length > 1 ? 'Phê duyệt cuối cùng' : `Người duyệt ${i + 1}`}</p>
+                <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+                <p className="mt-8 font-semibold">{nameOf(s.approverId)}</p>
+                <p className="text-[11px] font-semibold" style={{ color: STATUS_COLOR[s.status] ?? '#6b7280' }}>{STATUS[s.status] ?? s.status}</p>
+                {s.decidedAt && <p className="text-[11px] text-gray-500">{fmt(s.decidedAt)}</p>}
+                {mine ? (
+                  <textarea value={myNote} onChange={e => setMyNote(e.target.value)} rows={3}
+                    placeholder="Ý kiến của bạn (VD: chi phí quá cao, đề nghị xem xét lại...)"
+                    className="mt-2 w-full text-xs border border-amber-300 rounded p-1.5 outline-none focus:border-amber-500 bg-amber-50" style={ink} />
+                ) : (
+                  s.note && <p className="mt-1 text-[11px] italic" style={{ color: s.status === 'revision' ? '#b45309' : '#374151' }}>“{s.note}”</p>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        {p.status === 'rejected' && p.rejectedReason && !isReview && (
+          <p className="mt-6 text-xs text-red-600">Lý do từ chối: {p.rejectedReason}</p>
+        )}
+      </div>
+
+      </div>
+      <div className="shrink-0 px-4 py-3 flex items-center justify-end gap-3" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
+        {warn && <span className="text-xs text-red-600 mr-auto">{warn}</span>}
+        <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600">Đóng</button>
+        {canAct && (
+          <>
+            <button type="button" disabled={busy} onClick={() => act(async n => { await onReject(n) })}
+              className="px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-40" style={{ background: '#fee2e2', color: '#dc2626' }}>Từ chối</button>
+            <button type="button" disabled={busy} onClick={() => act(onRequestReview, true)}
+              className="px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-40" style={{ background: '#fef3c7', color: '#b45309' }}>🔁 Yêu cầu xem xét lại</button>
+            <button type="button" disabled={busy} onClick={() => act(onApprove)}
+              className="px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40" style={{ background: '#059669' }}>✓ Duyệt</button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+function vnMoneyWords(input: number): string {
+  const n = Math.round(Number(input) || 0)
+  if (n <= 0) return 'Không Đồng'
+  const digit = ['không', 'một', 'hai', 'ba', 'bốn', 'năm', 'sáu', 'bảy', 'tám', 'chín']
+  const readGroup = (num: number, full: boolean): string => {
+    const tram = Math.floor(num / 100)
+    const chuc = Math.floor((num % 100) / 10)
+    const donvi = num % 10
+    const parts: string[] = []
+    if (tram > 0 || full) parts.push(`${digit[tram]} trăm`)
+    if (chuc > 1) parts.push(`${digit[chuc]} mươi`)
+    else if (chuc === 1) parts.push('mười')
+    else if (donvi > 0 && (tram > 0 || full)) parts.push('lẻ')
+    if (donvi > 0) {
+      if (chuc > 1 && donvi === 1) parts.push('mốt')
+      else if (chuc > 0 && donvi === 5) parts.push('lăm')
+      else parts.push(digit[donvi])
+    }
+    return parts.join(' ')
+  }
+  const units = ['', 'nghìn', 'triệu', 'tỷ', 'nghìn tỷ', 'triệu tỷ']
+  const groups: number[] = []
+  let rest = n
+  while (rest > 0) { groups.push(rest % 1000); rest = Math.floor(rest / 1000) }
+  const words: string[] = []
+  for (let i = groups.length - 1; i >= 0; i--) {
+    if (groups[i] === 0) continue
+    const text = readGroup(groups[i], i < groups.length - 1)
+    words.push(units[i] ? `${text} ${units[i]}` : text)
+  }
+  const sentence = `${words.join(' ')} đồng`
+  return sentence.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+}
+
+type DnttRow = { desc: string; unit: string; qty: string; price: string; invoice: string }
+const DNTT_ROLES = ['Trưởng bộ phận/ OM/ Quản lý đơn vị', 'Kế toán trưởng', 'Ban Giám đốc/ Ban Giám Hiệu']
+
+function ProposalDnttForm({ currentUser, users, onClose }: { currentUser: User; users: User[]; onClose: () => void }) {
+  const now = new Date()
+  const dateText = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`
+  const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)
+
+  const [dept, setDept] = useState(currentUser.department ?? '')
+  const [content, setContent] = useState('')
+  const [relatedInput, setRelatedInput] = useState('')
+  const [payMethod, setPayMethod] = useState<'cash' | 'bank' | ''>('')
+  const [rows, setRows] = useState<DnttRow[]>([{ desc: '', unit: '', qty: '1', price: '', invoice: '' }])
+  const [owner, setOwner] = useState('')
+  const [account, setAccount] = useState('')
+  const [bankName, setBankName] = useState('')
+  const [branch, setBranch] = useState('')
+  const [files, setFiles] = useState<File[]>([])
+  const [driveUrl, setDriveUrl] = useState('')
+  const [recipientId, setRecipientId] = useState(myManagers[0]?.id ?? '')
+  const [extraApprovers, setExtraApprovers] = useState<string[]>([])
+  const [approvalMode, setApprovalMode] = useState<'seq' | 'par'>('seq')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? ''
+  const money = (n: number) => Number(n || 0).toLocaleString('vi-VN')
+  const rowAmount = (r: DnttRow) => (Number(r.qty) || 0) * (Number(r.price) || 0)
+  const total = rows.reduce((s, r) => s + rowAmount(r), 0)
+  const approverIds = [recipientId, ...extraApprovers.filter(id => id !== recipientId)].filter(Boolean)
+  const roleOf = (i: number) => DNTT_ROLES[i] ?? `Người duyệt ${i + 1}`
+
+  const line = 'w-full bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500 py-0.5'
+  const ink = { color: '#111827' }
+  const th = 'border border-gray-500 px-1.5 py-1 text-xs font-bold text-center bg-gray-50'
+  const td = 'border border-gray-500 px-1 py-0.5 text-xs align-top'
+  const cell = 'w-full bg-transparent outline-none'
+
+  const updateRow = (i: number, patch: Partial<DnttRow>) => setRows(prev => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+
+  const pickFiles = (e: { target: HTMLInputElement }) => {
+    const picked = Array.from(e.target.files ?? [])
+    const tooBig = picked.find(f => f.size > MAX_FILE_MB * 1024 * 1024)
+    if (tooBig) { setError(`File "${tooBig.name}" lớn hơn ${MAX_FILE_MB}MB. Hãy dùng link Drive cho file lớn.`); e.target.value = ''; return }
+    if (files.length + picked.length > MAX_FILES) { setError(`Tối đa ${MAX_FILES} file.`); e.target.value = ''; return }
+    setError('')
+    setFiles(prev => [...prev, ...picked])
+    e.target.value = ''
+  }
+
+  const submit = async () => {
+    const cleanRows = rows.filter(r => r.desc.trim())
+    if (!content.trim()) { setError('Vui lòng nhập nội dung đề nghị thanh toán.'); return }
+    if (cleanRows.length === 0 || total <= 0) { setError('Vui lòng nhập ít nhất một dòng chi tiết có số tiền.'); return }
+    if (!payMethod) { setError('Vui lòng chọn hình thức thanh toán.'); return }
+    if (payMethod === 'bank' && (!owner.trim() || !account.trim())) { setError('Vui lòng nhập tên chủ tài khoản và số tài khoản.'); return }
+    if (!recipientId) { setError('Vui lòng chọn người duyệt đầu tiên.'); return }
+
+    const relatedCodes = Array.from(new Set((relatedInput.match(/R-TASK\d{6}-\d{2,}/gi) ?? []).map(c => c.toUpperCase())))
+    if (relatedInput.trim() && relatedCodes.length === 0) { setError('Số tờ trình liên quan phải có dạng R-TASKddmmyy-NN.'); return }
+    if (relatedCodes.length > 0) {
+      const { data: found } = await supabase.from('proposals').select('code').in('code', relatedCodes)
+      const missing = relatedCodes.filter(c => !(found ?? []).some((x: any) => x.code === c))
+      if (missing.length > 0) { setError(`Không tìm thấy tờ trình: ${missing.join(', ')}`); return }
+    }
+
+    setSaving(true); setError('')
+
+    let uploaded: { name: string; path: string; size: number; type: string }[] = []
+    try { uploaded = await uploadProposalFiles(currentUser.id, files) }
+    catch (err: any) { setSaving(false); setError('Tải file thất bại: ' + (err?.message ?? '')); return }
+
+    const items = cleanRows.map(r => ({
+      item: r.desc.trim().split('\n')[0],
+      cost: `${r.qty || ''} ${r.unit}`.trim() + (r.price ? ` × ${money(Number(r.price))}` : ''),
+      amount: rowAmount(r),
+    }))
+    const formData = {
+      dept, payMethod, dateText, rows: cleanRows,
+      bank: payMethod === 'bank' ? { owner: owner.trim(), account: account.trim(), bankName: bankName.trim(), branch: branch.trim() } : null,
+      bangChu: vnMoneyWords(total), total, relatedCodes,
+    }
+
+    let data: any = null
+    let insertError: any = null
+    for (let i = 0; i < 3; i++) {
+      const res = await supabase.from('proposals').insert({
+        title: content.trim().slice(0, 200),
+        description: content.trim().slice(0, 200),
+        drive_url: driveUrl.trim(),
+        submitted_by: currentUser.id, recipient_id: recipientId, status: 'pending',
+        participants: [currentUser.id, ...approverIds],
+        code: await generateProposalCode(currentUser.id),
+        group_name: 'Đề nghị thanh toán', department: dept || currentUser.department, company: null,
+        brief: content.trim().slice(0, 200), approval_mode: approvalMode,
+        attachments: uploaded, items, kind: 'dntt', form_data: formData,
+      }).select('id').single()
+      data = res.data; insertError = res.error
+      if (!insertError && data?.id) {
+        await supabase.from('proposal_steps').insert(approverIds.map((id, k) => ({
+          proposal_id: data.id, approver_id: id, step_order: k + 1,
+          status: k === 0 || approvalMode === 'par' ? 'pending' : 'waiting',
+        })))
+      }
+      if (!insertError || insertError.code !== '23505') break
+    }
+    setSaving(false)
+    if (insertError) { setError(insertError.message); return }
+
+    const notifyIds = approvalMode === 'par' ? approverIds : [recipientId]
+    for (const id of notifyIds) {
+      await supabase.from('notifications').insert({
+        message: `💳 ${currentUser.name} vừa gửi đề nghị thanh toán "${content.trim().slice(0, 80)}" cho bạn`,
+        target_user_id: id,
+        link_proposal_id: data?.id,
+      })
+    }
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
+      <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
+        <span className="text-sm font-bold text-gray-800">💳 Tạo đề nghị thanh toán (R-TASK)</span>
+        <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-[860px] mx-auto my-4 bg-white shadow-xl p-6 sm:p-10 text-[13px] leading-relaxed" style={{ ...ink, fontFamily: '"Times New Roman", Times, serif' }}>
+          <p className="font-bold text-[12px]">Công Ty Cổ Phần Tập Đoàn Đầu Tư Khôi Nguyên</p>
+          <p className="font-bold text-[11px]">414-416 Tân Phú, Khu Nam Thông 3-S14, KP6, P. Tân Phú, Q.7, Tp.HCM, Việt Nam</p>
+
+          <div className="text-center my-5">
+            <p className="text-lg font-bold">ĐỀ NGHỊ THANH TOÁN</p>
+            <p className="text-lg font-bold text-blue-600">(PAYMENT REQUEST)</p>
+            <p className="text-[11px] text-gray-500 mt-1">Số/No: <span className="font-mono">R-TASK… (tự sinh khi gửi)</span></p>
+          </div>
+
+          <div className="space-y-1.5 mb-3">
+            <p>Người đề nghị <i className="text-blue-600">(Requested by)</i>: <b>{currentUser.name}</b></p>
+            <div className="flex items-center gap-2">
+              <span className="shrink-0">Địa chỉ/Bộ phận <i className="text-blue-600">(Add/Dept)</i>:</span>
+              <input value={dept} onChange={e => setDept(e.target.value)} className={line} style={ink} />
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="shrink-0">Nội dung đề nghị thanh toán <i className="text-blue-600">(Requested About)</i>:</span>
+              <textarea value={content} onChange={e => setContent(e.target.value)} rows={2}
+                placeholder="VD: Thanh toán cước truy cập internet băng rộng tháng 08/2026"
+                className={`${line} resize-none`} style={ink} />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="shrink-0">Tờ trình liên quan <i className="text-blue-600">(Related proposal)</i>:</span>
+              <input value={relatedInput} onChange={e => setRelatedInput(e.target.value)}
+                placeholder="VD: R-TASK181026-01 (nhiều số thì cách nhau bằng dấu phẩy)"
+                className={line} style={ink} />
+            </div>
+            <div>
+              <p>Hình thức thanh toán <i className="text-blue-600">(Payment method)</i>:</p>
+              <div className="flex gap-8 pl-24 mt-1">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="payMethod" checked={payMethod === 'cash'} onChange={() => setPayMethod('cash')} /> Tiền mặt/Cash
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="payMethod" checked={payMethod === 'bank'} onChange={() => setPayMethod('bank')} /> Chuyển khoản/Bank transfer
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <p className="font-bold mb-1">Chi tiết mua hàng hóa, dịch vụ <i className="text-blue-600">(Detail of items)</i>:</p>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse" style={{ minWidth: 700 }}>
+              <thead>
+                <tr>
+                  <th className={th} style={{ width: 34 }}>STT<br /><i className="font-normal">No</i></th>
+                  <th className={th}>DIỄN GIẢI<br /><i className="font-normal">Description</i></th>
+                  <th className={th} style={{ width: 60 }}>ĐVT<br /><i className="font-normal">Unit</i></th>
+                  <th className={th} style={{ width: 70 }}>SỐ LƯỢNG<br /><i className="font-normal">Quantity</i></th>
+                  <th className={th} style={{ width: 100 }}>ĐƠN GIÁ<br /><i className="font-normal">Unit price</i></th>
+                  <th className={th} style={{ width: 110 }}>THÀNH TIỀN + VAT<br /><i className="font-normal">Amount incl. VAT</i></th>
+                  <th className={th} style={{ width: 90 }}>SỐ HOÁ ĐƠN<br /><i className="font-normal">Invoice no.</i></th>
+                  <th style={{ width: 22 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={i}>
+                    <td className={`${td} text-center`}>{i + 1}</td>
+                    <td className={td}><textarea value={r.desc} onChange={e => updateRow(i, { desc: e.target.value })} rows={3} className={`${cell} resize-none`} style={ink} placeholder="Diễn giải khoản thanh toán..." /></td>
+                    <td className={td}><input value={r.unit} onChange={e => updateRow(i, { unit: e.target.value })} className={cell} style={ink} /></td>
+                    <td className={td}><input type="number" min="0" value={r.qty} onChange={e => updateRow(i, { qty: e.target.value })} className={cell} style={ink} /></td>
+                    <td className={td}><input type="number" min="0" value={r.price} onChange={e => updateRow(i, { price: e.target.value })} className={cell} style={ink} /></td>
+                    <td className={`${td} text-right`}>{money(rowAmount(r))}</td>
+                    <td className={td}><input value={r.invoice} onChange={e => updateRow(i, { invoice: e.target.value })} className={cell} style={ink} /></td>
+                    <td className="text-center">
+                      {rows.length > 1 && <button type="button" onClick={() => setRows(prev => prev.filter((_, j) => j !== i))} className="text-red-500 text-xs">✕</button>}
+                    </td>
+                  </tr>
+                ))}
+                {payMethod === 'bank' && (
+                  <tr>
+                    <td className={td}></td>
+                    <td className={td} colSpan={6}>
+                      <p className="font-bold underline mb-1">THÔNG TIN CHUYỂN KHOẢN:</p>
+                      <div className="space-y-1">
+                        <div className="flex gap-2 items-center"><span className="shrink-0">- Tên chủ tài khoản:</span><input value={owner} onChange={e => setOwner(e.target.value)} className={line} style={ink} /></div>
+                        <div className="flex gap-2 items-center"><span className="shrink-0">- Số tài khoản:</span><input value={account} onChange={e => setAccount(e.target.value)} className={line} style={ink} /></div>
+                        <div className="flex gap-2 items-center"><span className="shrink-0">- Tên ngân hàng:</span><input value={bankName} onChange={e => setBankName(e.target.value)} className={line} style={ink} /></div>
+                        <div className="flex gap-2 items-center"><span className="shrink-0">- Tại chi nhánh:</span><input value={branch} onChange={e => setBranch(e.target.value)} className={line} style={ink} /></div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                <tr>
+                  <td className={`${td} font-bold text-center`} colSpan={5}>TỔNG CỘNG (TOTAL)</td>
+                  <td className={`${td} font-bold text-right`}>{money(total)}</td>
+                  <td className={td}></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <button type="button" onClick={() => setRows(prev => [...prev, { desc: '', unit: '', qty: '1', price: '', invoice: '' }])} className="text-xs text-blue-600 mt-1">+ Thêm dòng</button>
+          <p className="text-right font-bold mt-2">{vnMoneyWords(total)}</p>
+
+          <div className="mt-4">
+            <p className="font-bold text-xs mb-1">Chứng từ đính kèm (hóa đơn, báo giá, ủy nhiệm chi...):</p>
+            <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={pickFiles} className="text-xs" />
+            {files.length > 0 && (
+              <ul className="mt-1 space-y-0.5">
+                {files.map((f, i) => (
+                  <li key={i} className="flex items-center justify-between text-xs">
+                    <span className="truncate">☐ {f.name} ({(f.size / 1024 / 1024).toFixed(1)}MB)</span>
+                    <button type="button" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} className="text-red-500 px-1">✕</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <input value={driveUrl} onChange={e => setDriveUrl(e.target.value)} placeholder="Hoặc dán link Google Drive (file lớn)" className={`${line} mt-2 text-xs`} style={ink} />
+          </div>
+
+          <div className="grid gap-3 mt-8 text-center text-xs" style={{ gridTemplateColumns: `repeat(${Math.min(4, 1 + Math.max(approverIds.length, 1))}, minmax(0, 1fr))` }}>
+            <div>
+              <p className="font-bold">Người đề nghị</p>
+              <p className="italic text-blue-600">(Requested by)</p>
+              <p className="mt-8 font-semibold">{currentUser.name}</p>
+              <p className="text-gray-500">Ngày/ Date {dateText}</p>
+            </div>
+            {(approverIds.length > 0 ? approverIds : ['']).map((id, i) => (
+              <div key={i}>
+                <p className="font-bold">{roleOf(i)}</p>
+                <p className="italic text-blue-600">&nbsp;</p>
+                <p className="mt-8 font-semibold">{id ? nameOf(id) : '…………'}</p>
+                <p className="text-gray-500">Ngày/ Date ……/……/……</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="max-w-[860px] mx-auto mb-4 bg-white shadow-xl p-6 text-[13px] space-y-4" style={ink}>
+          <p className="font-bold">Luồng phê duyệt</p>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">1. Trưởng bộ phận / Quản lý đơn vị {myManagers.length > 0 ? '(quản lý phòng ban của bạn)' : ''} *</label>
+            <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
+              {myManagers.length === 0 && <option value="">-- Chọn người duyệt --</option>}
+              {myManagers.length > 0
+                ? myManagers.map(u => <option key={u.id} value={u.id}>{u.name} — {u.department}</option>)
+                : (
+                  <>
+                    {TEAMS.map(t => {
+                      const members = users.filter(u => u.id !== currentUser.id && u.teamId === t.id)
+                      return members.length === 0 ? null : (
+                        <optgroup key={t.id} label={`${t.emoji} ${t.name}`}>
+                          {members.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+                        </optgroup>
+                      )
+                    })}
+                    {users.some(u => u.id !== currentUser.id && !TEAMS.some(t => t.id === u.teamId)) && (
+                      <optgroup label="Khác">
+                        {users.filter(u => u.id !== currentUser.id && !TEAMS.some(t => t.id === u.teamId)).map(u => (
+                          <option key={u.id} value={u.id}>{u.name}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </>
+                )}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Người duyệt tiếp theo: chọn phòng ban rồi chọn lần lượt <b>Kế toán trưởng</b>, <b>Ban Giám đốc</b> (duyệt theo thứ tự trong danh sách)</label>
+            <ApproverPicker users={users} excludeIds={[currentUser.id, recipientId]} value={extraApprovers} onChange={setExtraApprovers} />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Luồng phê duyệt</label>
+            <select value={approvalMode} onChange={e => setApprovalMode(e.target.value as 'seq' | 'par')} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
+              <option value="seq">Nối tiếp (lần lượt)</option>
+              <option value="par">Song song (cùng lúc)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div className="shrink-0 px-4 py-3 flex items-center justify-end gap-3" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
+        {error && <span className="text-xs text-red-600 mr-auto">{error}</span>}
+        <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600">Hủy</button>
+        <button type="button" onClick={submit} disabled={saving}
+          className="px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40"
+          style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
+          {saving ? 'Đang gửi...' : 'Gửi đề nghị'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function ProposalGroupPicker({ onPick, onBack, onClose }: { onPick: (g: string) => void; onBack: () => void; onClose: () => void }) {
+  const opts: [string, string, string][] = [
+    ['Mua sắm', '🛒', 'Đề xuất mua sắm thiết bị, vật tư, dịch vụ'],
+    ['Nghỉ phép', '🏖️', 'Đơn xin nghỉ phép'],
+    ['Đi công tác', '✈️', 'Đề xuất đi công tác'],
+    ['Đề nghị thanh toán', '💳', 'Đề nghị thanh toán (ĐNTT) theo mẫu của công ty'],
+    ['Khác', '📝', 'Đề xuất khác, tự điền thông tin'],
+  ]
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }} onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl p-5 space-y-2.5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}
+        onClick={e => e.stopPropagation()}>
+        <h3 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>Chọn loại đề xuất</h3>
+        {opts.map(([name, icon, desc]) => (
+          <button key={name} type="button" onClick={() => onPick(name)}
+            className="w-full text-left rounded-xl p-3 hover:opacity-90"
+            style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
+            <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{icon} {name}</div>
+            <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{desc}</div>
+          </button>
+        ))}
+        <div className="flex justify-between pt-1">
+          <button type="button" onClick={onBack} className="text-sm" style={{ color: 'var(--text-muted)' }}>← Quay lại</button>
+          <button type="button" onClick={onClose} className="text-sm" style={{ color: 'var(--text-muted)' }}>Hủy</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ProposalDnttView({ p, users, currentUserId, onClose, canAct, onApprove, onReject, onRequestReview }: {
+  p: Proposal; users: User[]; currentUserId: string; onClose: () => void; canAct: boolean
+  onApprove: (note: string) => Promise<void>; onReject: (note: string) => Promise<void>; onRequestReview: (note: string) => Promise<void>
+}) {
+  const f: any = p.formData ?? {}
+  const [steps, setSteps] = useState<{ id: string; approverId: string; order: number; status: string; decidedAt?: string; note?: string }[]>([])
+  const [busy, setBusy] = useState(false)
+  const [myNote, setMyNote] = useState('')
+  const [warn, setWarn] = useState('')
+  const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? ''
+  const fmt = (d?: string) => (d ? new Date(d).toLocaleString('vi-VN') : '')
+  const money = (n: number) => Number(n || 0).toLocaleString('vi-VN')
+
+  useEffect(() => {
+    let alive = true
+    supabase.from('proposal_steps').select('*').eq('proposal_id', p.id).order('step_order').then(({ data }: any) => {
+      if (!alive) return
+      setSteps((data ?? []).map((s: any) => ({ id: s.id, approverId: s.approver_id, order: s.step_order, status: s.status, decidedAt: s.decided_at ?? undefined, note: s.note ?? undefined })))
+    })
+    return () => { alive = false }
+  }, [p.id, p.status, p.recipientId])
+
+  const flow = steps.length > 0 ? steps : [{
+    id: 'legacy', approverId: p.recipientId, order: 1,
+    status: p.status === 'approved' ? 'approved' : p.status === 'rejected' ? 'rejected' : 'pending',
+    decidedAt: undefined as string | undefined,
+    note: undefined as string | undefined,
+  }]
+  const STATUS: Record<string, string> = {
+    approved: '✓ Đã duyệt', pending: 'Chờ duyệt', waiting: 'Chưa đến lượt', rejected: '✕ Từ chối', revision: '🔁 Yêu cầu xem xét lại', skipped: 'Bỏ qua',
+  }
+  const STATUS_COLOR: Record<string, string> = {
+    approved: '#059669', pending: '#b45309', waiting: '#6b7280', rejected: '#dc2626', revision: '#b45309', skipped: '#6b7280',
+  }
+  const roleOf = (i: number) => DNTT_ROLES[i] ?? `Người duyệt ${i + 1}`
+
+  const rows: any[] = Array.isArray(f.rows) ? f.rows : []
+  const amt = (r: any) => (Number(r.qty) || 0) * (Number(r.price) || 0)
+  const total = rows.reduce((s, r) => s + amt(r), 0)
+
+  const ink = { color: '#111827' }
+  const th = 'border border-gray-500 px-1.5 py-1 text-xs font-bold text-center bg-gray-50'
+  const td = 'border border-gray-500 px-1.5 py-1 text-xs align-top'
+  const isReview = p.status === 'rejected' && !!p.rejectedReason?.startsWith('[REVIEW]')
+
+  const act = async (fn: (note: string) => Promise<void>, needNote = false) => {
+    if (needNote && !myNote.trim()) { setWarn('Hãy ghi ý kiến của bạn vào ô dưới tên bạn ở cuối đề nghị.'); return }
+    setWarn(''); setBusy(true)
+    try { await fn(myNote.trim()) } finally { setBusy(false) }
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
+      <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
+        <span className="text-sm font-bold text-gray-800">💳 Đề nghị thanh toán {p.code ?? ''}</span>
+        <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {isReview && (
+          <div className="max-w-[860px] mx-auto mt-4 rounded-lg px-4 py-3 text-sm" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d' }}>
+            🔁 <b>Người duyệt yêu cầu xem xét lại:</b> {(p.rejectedReason ?? '').replace('[REVIEW]', '').trim()}
+          </div>
+        )}
+        <div className="max-w-[860px] mx-auto my-4 bg-white shadow-xl p-6 sm:p-10 text-[13px] leading-relaxed" style={{ ...ink, fontFamily: '"Times New Roman", Times, serif' }}>
+          <p className="font-bold text-[12px]">Công Ty Cổ Phần Tập Đoàn Đầu Tư Khôi Nguyên</p>
+          <p className="font-bold text-[11px]">414-416 Tân Phú, Khu Nam Thông 3-S14, KP6, P. Tân Phú, Q.7, Tp.HCM, Việt Nam</p>
+
+          <div className="text-center my-5">
+            <p className="text-lg font-bold">ĐỀ NGHỊ THANH TOÁN</p>
+            <p className="text-lg font-bold text-blue-600">(PAYMENT REQUEST)</p>
+            <p className="text-[11px] text-gray-600 mt-1">Số/No: <span className="font-mono">{p.code ?? '—'}</span></p>
+          </div>
+
+          <div className="space-y-1.5 mb-3">
+            <p>Người đề nghị <i className="text-blue-600">(Requested by)</i>: <b>{nameOf(p.submittedBy)}</b></p>
+            <p>Địa chỉ/Bộ phận <i className="text-blue-600">(Add/Dept)</i>: {f.dept || p.department || '—'}</p>
+            <p>Nội dung đề nghị thanh toán <i className="text-blue-600">(Requested About)</i>: {p.title}</p>
+            {Array.isArray(f.relatedCodes) && f.relatedCodes.length > 0 && (
+              <p>Tờ trình liên quan <i className="text-blue-600">(Related proposal)</i>:{' '}
+                {f.relatedCodes.map((c: string, i: number) => (
+                  <span key={c}>{i > 0 && ', '}<ProposalCodeLink code={c} /></span>
+                ))}
+              </p>
+            )}
+            <div>
+              <p>Hình thức thanh toán <i className="text-blue-600">(Payment method)</i>:</p>
+              <div className="flex gap-8 pl-24 mt-1">
+                <span>{f.payMethod === 'cash' ? '☑' : '☐'} Tiền mặt/Cash</span>
+                <span>{f.payMethod === 'bank' ? '☑' : '☐'} Chuyển khoản/Bank transfer</span>
+              </div>
+            </div>
+          </div>
+
+          <p className="font-bold mb-1">Chi tiết mua hàng hóa, dịch vụ <i className="text-blue-600">(Detail of items)</i>:</p>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse" style={{ minWidth: 640 }}>
+              <thead>
+                <tr>
+                  <th className={th} style={{ width: 34 }}>STT</th><th className={th}>DIỄN GIẢI</th><th className={th}>ĐVT</th>
+                  <th className={th}>SỐ LƯỢNG</th><th className={th}>ĐƠN GIÁ</th><th className={th}>THÀNH TIỀN + VAT</th><th className={th}>SỐ HOÁ ĐƠN</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={i}>
+                    <td className={`${td} text-center`}>{i + 1}</td>
+                    <td className={`${td} whitespace-pre-wrap`}>{r.desc}</td>
+                    <td className={`${td} text-center`}>{r.unit}</td>
+                    <td className={`${td} text-center`}>{r.qty}</td>
+                    <td className={`${td} text-right`}>{r.price ? money(Number(r.price)) : ''}</td>
+                    <td className={`${td} text-right`}>{money(amt(r))}</td>
+                    <td className={td}>{r.invoice}</td>
+                  </tr>
+                ))}
+                {f.payMethod === 'bank' && f.bank && (
+                  <tr>
+                    <td className={td}></td>
+                    <td className={td} colSpan={6}>
+                      <p className="font-bold underline">THÔNG TIN CHUYỂN KHOẢN:</p>
+                      <p>- Tên chủ tài khoản: {f.bank.owner}</p>
+                      <p>- Số tài khoản: {f.bank.account}</p>
+                      <p>- Tên ngân hàng: {f.bank.bankName}</p>
+                      <p>- Tại chi nhánh: {f.bank.branch}</p>
+                    </td>
+                  </tr>
+                )}
+                <tr>
+                  <td className={`${td} font-bold text-center`} colSpan={5}>TỔNG CỘNG (TOTAL)</td>
+                  <td className={`${td} font-bold text-right`}>{money(total)}</td>
+                  <td className={td}></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="text-right font-bold mt-2">{f.bangChu || vnMoneyWords(total)}</p>
+
+          {((p.attachments ?? []).length > 0 || p.driveUrl) && (
+            <div className="mt-4">
+              <p className="font-bold text-xs mb-1">Chứng từ đính kèm:</p>
+              <div className="flex flex-col gap-1 items-start">
+                {(p.attachments ?? []).map(a => (
+                  <button key={a.path} type="button" onClick={() => openProposalFile(a.path)} className="text-xs underline text-blue-600">📎 {a.name}</button>
+                ))}
+                {p.driveUrl && <a href={p.driveUrl} target="_blank" rel="noopener noreferrer" className="text-xs underline text-blue-600">📁 Xem tài liệu đính kèm trên Drive</a>}
+              </div>
+            </div>
+          )}
+
+          <div className="grid gap-3 mt-8 text-center text-xs" style={{ gridTemplateColumns: `repeat(${Math.min(4, 1 + flow.length)}, minmax(0, 1fr))` }}>
+            <div>
+              <p className="font-bold">Người đề nghị</p>
+              <p className="italic text-blue-600">(Requested by)</p>
+              <p className="mt-8 font-semibold">{nameOf(p.submittedBy)}</p>
+              <p className="text-gray-500">Ngày/ Date {new Date(p.createdAt).toLocaleDateString('vi-VN')}</p>
+            </div>
+            {flow.map((s, i) => {
+              const mine = canAct && s.approverId === currentUserId && s.status === 'pending'
+              return (
+                <div key={s.id}>
+                  <p className="font-bold">{roleOf(i)}</p>
+                  <p className="italic text-blue-600">&nbsp;</p>
+                  <p className="mt-8 font-semibold">{nameOf(s.approverId)}</p>
+                  <p className="font-semibold" style={{ color: STATUS_COLOR[s.status] ?? '#6b7280' }}>{STATUS[s.status] ?? s.status}</p>
+                  {s.decidedAt && <p className="text-gray-500">Ngày/ Date {fmt(s.decidedAt)}</p>}
+                  {mine ? (
+                    <textarea value={myNote} onChange={e => setMyNote(e.target.value)} rows={3}
+                      placeholder="Ý kiến của bạn (VD: số tiền chưa khớp hóa đơn...)"
+                      className="mt-2 w-full text-xs border border-amber-300 rounded p-1.5 outline-none focus:border-amber-500 bg-amber-50" style={ink} />
+                  ) : (
+                    s.note && <p className="mt-1 italic" style={{ color: s.status === 'revision' ? '#b45309' : '#374151' }}>“{s.note}”</p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          {p.status === 'rejected' && p.rejectedReason && !isReview && (
+            <p className="mt-6 text-xs text-red-600">Lý do từ chối: {p.rejectedReason}</p>
+          )}
+        </div>
+      </div>
+
+      <div className="shrink-0 px-4 py-3 flex items-center justify-end gap-3" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
+        {warn && <span className="text-xs text-red-600 mr-auto">{warn}</span>}
+        <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600">Đóng</button>
+        {canAct && (
+          <>
+            <button type="button" disabled={busy} onClick={() => act(async n => { await onReject(n) })}
+              className="px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-40" style={{ background: '#fee2e2', color: '#dc2626' }}>Từ chối</button>
+            <button type="button" disabled={busy} onClick={() => act(onRequestReview, true)}
+              className="px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-40" style={{ background: '#fef3c7', color: '#b45309' }}>🔁 Yêu cầu xem xét lại</button>
+            <button type="button" disabled={busy} onClick={() => act(onApprove)}
+              className="px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40" style={{ background: '#059669' }}>✓ Duyệt</button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ApproverPicker({ users, excludeIds, value, onChange, tone = 'light' }: {
+  users: User[]; excludeIds: string[]; value: string[]; onChange: (v: string[]) => void; tone?: 'light' | 'dark'
+}) {
+  const [teamId, setTeamId] = useState('')
+  const [q, setQ] = useState('')
+  const dark = tone === 'dark'
+  const box = dark
+    ? { background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
+    : { background: '#ffffff', border: '1px solid #d1d5db', color: '#111827' }
+  const muted = dark ? 'var(--text-muted)' : '#6b7280'
+
+  const teamName = (u: User) => TEAMS.find(t => t.id === u.teamId)?.name ?? u.department ?? ''
+  const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? ''
+  const pool = users.filter(u => !excludeIds.includes(u.id) && !value.includes(u.id))
+  const query = q.trim().toLowerCase()
+  const shown = (query ? pool.filter(u => u.name.toLowerCase().includes(query)) : teamId ? pool.filter(u => u.teamId === teamId) : [])
+    .sort((a, b) => (b.role === 'manager' ? 1 : 0) - (a.role === 'manager' ? 1 : 0))
+
+  const move = (i: number, dir: -1 | 1) => {
+    const next = [...value]
+    const j = i + dir
+    if (j < 0 || j >= next.length) return
+    ;[next[i], next[j]] = [next[j], next[i]]
+    onChange(next)
+  }
+
+  return (
+    <div className="space-y-2">
+      {value.length > 0 && (
+        <ol className="space-y-1">
+          {value.map((id, i) => {
+            const u = users.find(x => x.id === id)
+            return (
+              <li key={id} className="flex items-center gap-2 text-xs rounded px-2 py-1" style={box}>
+                <b>{i + 2}.</b>
+                <span className="flex-1">{nameOf(id)} <span style={{ color: muted }}>— {u ? teamName(u) : ''}</span></span>
+                <button type="button" disabled={i === 0} onClick={() => move(i, -1)} className="px-1 disabled:opacity-30">↑</button>
+                <button type="button" disabled={i === value.length - 1} onClick={() => move(i, 1)} className="px-1 disabled:opacity-30">↓</button>
+                <button type="button" onClick={() => onChange(value.filter(x => x !== id))} className="px-1" style={{ color: '#dc2626' }}>✕</button>
+              </li>
+            )
+          })}
+        </ol>
+      )}
+      <div className="flex gap-2">
+        <select value={teamId} onChange={e => { setTeamId(e.target.value); setQ('') }}
+          className="flex-1 rounded px-2 py-1.5 text-xs outline-none" style={box}>
+          <option value="">-- Chọn phòng ban --</option>
+          {TEAMS.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
+        </select>
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="hoặc gõ tên để tìm"
+          className="flex-1 rounded px-2 py-1.5 text-xs outline-none" style={box} />
+      </div>
+      {(teamId || query) && (
+        <div className="flex flex-wrap gap-1.5">
+          {shown.length === 0 && <span className="text-xs" style={{ color: muted }}>Không có ai phù hợp.</span>}
+          {shown.map(u => (
+            <button key={u.id} type="button" onClick={() => onChange([...value, u.id])}
+              className="text-xs px-2.5 py-1 rounded-full" style={box}>
+              ＋ {u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+function ProposalKindPicker({ onPick, onClose }: { onPick: (k: 'dexuat' | 'totrinh') => void; onClose: () => void }) {
+  const Opt = ({ k, icon, title, desc }: { k: 'dexuat' | 'totrinh'; icon: string; title: string; desc: string }) => (
+    <button type="button" onClick={() => onPick(k)}
+      className="w-full text-left rounded-xl p-4 transition-colors hover:opacity-90"
+      style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
+      <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{icon} {title}</div>
+      <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{desc}</div>
+    </button>
+  )
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }} onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl p-5 space-y-3" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}
+        onClick={e => e.stopPropagation()}>
+        <h3 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>Bạn muốn tạo gì?</h3>
+        <Opt k="totrinh" icon="📜" title="Tờ trình" desc="Văn bản đầy đủ: Kính gửi, Căn cứ, Nội dung, Chi phí, Đề nghị phê duyệt." />
+        <Opt k="dexuat" icon="📝" title="Đề xuất" desc="Đề xuất ngắn gọn: mua sắm, nghỉ phép, công tác, thanh toán…" />
+        <button type="button" onClick={onClose} className="w-full py-2 rounded-xl text-sm" style={{ color: 'var(--text-muted)' }}>Hủy</button>
+      </div>
+    </div>
+  )
+}
+
+type CostRow = { item: string; unit?: string; qty?: string; price?: string; note?: string; amount?: number; extra?: boolean }
+type CostItem = { item: string; cost: string; amount: number; extra?: boolean }
+
+const hasCostRows = (fd: any) => Array.isArray(fd?.costRows) && fd.costRows.length > 0
+
+// costRows (bảng tờ trình) -> items (giữ tương thích với chỗ khác dùng items)
+const rowToItem = (r: CostRow): CostItem => {
+  const computed = `${[r.qty, r.unit].filter(Boolean).join(' ')}${r.price ? ` × ${toVnd(Number(r.price)).toLocaleString('vi-VN')}` : ''}`.trim()
+  return { item: (r.item || '').trim(), cost: computed || (r.note ?? ''), amount: costRowAmount(r), ...(r.extra ? { extra: true } : {}) }
+}
+// items cũ (đề xuất) -> costRows
+const itemToRow = (x: CostItem): CostRow =>
+  ({ item: x.item, unit: '', qty: '', price: '', note: x.cost, amount: x.amount, ...(x.extra ? { extra: true } : {}) })
+
+function ProposalCostSection({ p, canEdit }: { p: Proposal; canEdit: boolean }) {
+  const readRows = (): CostRow[] =>
+    hasCostRows(p.formData) ? (p.formData!.costRows as CostRow[]) : (p.items ?? []).map(itemToRow)
+
+  const [rows, setRows] = useState<CostRow[]>(readRows)
+  const [item, setItem] = useState('')
+  const [unit, setUnit] = useState('')
+  const [qty, setQty] = useState('')
+  const [price, setPrice] = useState('')
+  const [note, setNote] = useState('')
+
+  const total = rows.reduce((s, r) => s + costRowAmount(r), 0)
+  const fmt = (n: number) => toVnd(n).toLocaleString('vi-VN')
+
+  // Đồng bộ lại khi dữ liệu thay đổi (realtime / người khác sửa)
+  useEffect(() => { setRows(readRows()) }, [p.items, p.formData])
+
+  // Thành tiền xem trước ở ô nhập
+  const previewAmount = price === '' ? 0
+    : costRowAmount({ qty: qty === '' ? '1' : qty, price: String(toVnd(Number(price))) })
+
+  const save = async (change: (list: CostRow[]) => CostRow[]) => {
+    const { data: cur, error: readErr } = await supabase
+      .from('proposals').select('items, form_data').eq('id', p.id).single()
+    if (readErr || !cur) { alert('Không đọc được dữ liệu chi phí: ' + (readErr?.message ?? '')); return false }
+
+    const fd: any = cur.form_data ?? {}
+    const useRows = hasCostRows(fd)
+    const base: CostRow[] = useRows ? fd.costRows : ((cur.items ?? []) as CostItem[]).map(itemToRow)
+    const nextRows = change(base)
+
+    const payload: any = { items: nextRows.map(rowToItem) }
+    if (useRows || p.kind === 'totrinh') {
+      payload.form_data = { ...fd, costRows: nextRows }
+    }
+    const { error } = await supabase.from('proposals').update(payload).eq('id', p.id)
+    if (error) { alert('Không lưu được chi phí: ' + error.message); return false }
+    setRows(nextRows)
+    return true
+  }
+
+  const add = async () => {
+    if (!item.trim() || price === '') return
+    const row: CostRow = {
+      item: item.trim(), unit: unit.trim(),
+      qty: qty === '' ? '1' : qty,
+      price: String(toVnd(Number(price))),
+      note: note.trim(), extra: true,
+    }
+    const ok = await save(list => [...list, row])
+    if (ok) { setItem(''); setUnit(''); setQty(''); setPrice(''); setNote('') }
+  }
+  const remove = (i: number) => save(list => list.filter((_, j) => j !== i))
+
+  const inputStyle = { background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
+  const th = 'py-1.5 px-1.5 font-semibold text-left whitespace-nowrap'
+  const td = 'py-1.5 px-1.5 align-top'
+
+  return (
+    <section className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+      <h3 className="text-sm font-bold mb-3" style={{ color: 'var(--text-primary)' }}>Thông tin chi phí</h3>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs" style={{ minWidth: 560 }}>
+          <thead>
+            <tr style={{ color: 'var(--text-muted)' }}>
+              <th className={`${th} w-8`}>STT</th>
+              <th className={th}>Hạng mục</th>
+              <th className={th}>Đơn vị</th>
+              <th className={`${th} text-right`}>Số lượng</th>
+              <th className={`${th} text-right`}>Đơn giá (VNĐ)</th>
+              <th className={`${th} text-right`}>Thành tiền (VNĐ)</th>
+              <th className={th}>Ghi chú</th>
+              {canEdit && <th className="w-6"></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr><td colSpan={8} className="py-2" style={{ color: 'var(--text-muted)' }}>Chưa có hạng mục nào.</td></tr>
+            )}
+            {rows.map((r, i) => (
+              <tr key={i} style={{ borderTop: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                <td className={`${td} text-center`}>{i + 1}</td>
+                <td className={td}>
+                  {r.item}
+                  {r.extra && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#f59e0b22', color: '#b45309' }}>Phát sinh</span>}
+                </td>
+                <td className={td}>{r.unit}</td>
+                <td className={`${td} text-right`}>{r.qty}</td>
+                <td className={`${td} text-right`}>{r.price ? fmt(Number(r.price)) : ''}</td>
+                <td className={`${td} text-right`}>{fmt(costRowAmount(r))}</td>
+                <td className={td}>{r.note}</td>
+                {canEdit && (
+                  <td className={`${td} text-right`}>
+                    <button type="button" onClick={() => remove(i)} style={{ color: '#dc2626' }}>✕</button>
+                  </td>
+                )}
+              </tr>
+            ))}
+            {rows.length > 0 && (
+              <tr style={{ borderTop: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                <td className="py-2 px-1.5 font-bold" colSpan={5}>Tổng chi phí</td>
+                <td className="py-2 px-1.5 font-bold text-right">{fmt(total)}</td>
+                <td colSpan={canEdit ? 2 : 1}></td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {rows.length > 0 && (
+        <p className="text-xs italic mt-2" style={{ color: 'var(--text-muted)' }}>(Bằng chữ: {docSoThanhChu(total)})</p>
+      )}
+
+      {canEdit && (
+        <div className="mt-3">
+          <div className="flex gap-2 flex-wrap">
+            <input value={item} onChange={e => setItem(e.target.value)} placeholder="Hạng mục"
+              className="flex-1 min-w-[140px] px-2 py-1.5 rounded-lg text-xs outline-none" style={inputStyle} />
+            <input value={unit} onChange={e => setUnit(e.target.value)} placeholder="Đơn vị"
+              className="w-20 px-2 py-1.5 rounded-lg text-xs outline-none" style={inputStyle} />
+            <input type="number" min="0" value={qty} onChange={e => setQty(e.target.value)} placeholder="SL"
+              className="w-16 px-2 py-1.5 rounded-lg text-xs outline-none" style={inputStyle} />
+            <input type="number" min="0" value={price} onChange={e => setPrice(e.target.value)} placeholder="Đơn giá (VNĐ)"
+              className="w-32 px-2 py-1.5 rounded-lg text-xs outline-none" style={inputStyle} />
+          </div>
+          <div className="flex gap-2 flex-wrap mt-2 items-center">
+            <input value={note} onChange={e => setNote(e.target.value)} placeholder="Ghi chú"
+              className="flex-1 min-w-[140px] px-2 py-1.5 rounded-lg text-xs outline-none" style={inputStyle} />
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              Thành tiền: <b style={{ color: 'var(--text-primary)' }}>{fmt(previewAmount)}</b>
+            </span>
+            <button type="button" onClick={add} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#0891b2' }}>Thêm</button>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function ProposalRiskSection({ p, users, currentUser, canEdit }: { p: Proposal; users: User[]; currentUser: User; canEdit: boolean }) {
+  type Risk = { t: string; lv: string; u: string; at: string }
+  const [risks, setRisks] = useState<Risk[]>(p.risks ?? [])
+  const [text, setText] = useState('')
+  const [lv, setLv] = useState('Trung bình')
+  const COLORS: Record<string, [string, string]> = {
+    'Thấp': ['#34d39922', '#059669'], 'Trung bình': ['#f59e0b22', '#b45309'], 'Cao': ['#ef444422', '#dc2626'],
+  }
+  const add = async () => {
+    if (!text.trim()) return
+    const next = [...risks, { t: text.trim(), lv, u: currentUser.id, at: new Date().toISOString() }]
+    const { error } = await supabase.from('proposals').update({ risks: next }).eq('id', p.id)
+    if (error) { alert('Không lưu được rủi ro: ' + error.message); return }
+    setRisks(next)
+    setText('')
+  }
+  const inputStyle = { background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
+
+  return (
+    <section className="rounded-xl p-4 mt-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+      <h3 className="text-sm font-bold mb-3" style={{ color: 'var(--text-primary)' }}>Rủi ro</h3>
+      {risks.length === 0 && <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Chưa ghi nhận rủi ro nào.</p>}
+      <div className="space-y-2">
+        {risks.map((r, i) => (
+          <div key={i} className="flex items-start gap-2 text-xs">
+            <span className="px-2 py-0.5 rounded-md font-semibold shrink-0" style={{ background: (COLORS[r.lv] ?? COLORS['Trung bình'])[0], color: (COLORS[r.lv] ?? COLORS['Trung bình'])[1] }}>{r.lv}</span>
+            <span className="flex-1" style={{ color: 'var(--text-primary)' }}>{r.t}</span>
+            <span style={{ color: 'var(--text-muted)' }}>{users.find(u => u.id === r.u)?.name} · {new Date(r.at).toLocaleDateString('vi-VN')}</span>
+          </div>
+        ))}
+      </div>
+      {canEdit && (
+        <div className="flex gap-2 mt-3">
+          <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') add() }}
+            placeholder="Mô tả rủi ro" className="flex-1 px-2 py-1.5 rounded-lg text-xs outline-none" style={inputStyle} />
+          <select value={lv} onChange={e => setLv(e.target.value)} className="px-2 py-1.5 rounded-lg text-xs outline-none" style={inputStyle}>
+            <option>Thấp</option><option>Trung bình</option><option>Cao</option>
+          </select>
+          <button type="button" onClick={add} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#0891b2' }}>Thêm rủi ro</button>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function ProposalCommentsSection({ p, users, currentUser }: { p: Proposal; users: User[]; currentUser: User }) {
+  const [comments, setComments] = useState<{ id: string; userId: string; content: string; createdAt: string }[]>([])
+  const [text, setText] = useState('')
+  const load = async () => {
+    const { data } = await supabase.from('proposal_comments').select('*').eq('proposal_id', p.id).order('created_at')
+    setComments((data ?? []).map((c: any) => ({ id: c.id, userId: c.user_id, content: c.content, createdAt: c.created_at })))
+  }
+  useEffect(() => { load() }, [p.id])
+  const send = async () => {
+    const t = text.trim()
+    if (!t) return
+    const { error } = await supabase.from('proposal_comments').insert({ proposal_id: p.id, user_id: currentUser.id, content: t })
+    if (error) { alert('Không gửi được bình luận: ' + error.message); return }
+    setText('')
+    load()
+  }
+  return (
+    <section className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+      <h3 className="text-sm font-bold mb-3" style={{ color: 'var(--text-primary)' }}>Trao đổi</h3>
+      {comments.length === 0 && <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Chưa có trao đổi nào.</p>}
+      <div className="space-y-2 mb-3">
+        {comments.map(c => (
+          <div key={c.id} className="text-xs">
+            <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{users.find(u => u.id === c.userId)?.name}</span>
+            <span className="ml-2" style={{ color: 'var(--text-muted)' }}>{new Date(c.createdAt).toLocaleString('vi-VN')}</span>
+            <p style={{ color: 'var(--text-primary)' }}>{c.content}</p>
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') send() }}
+          placeholder="Viết bình luận..." className="flex-1 px-2 py-1.5 rounded-lg text-xs outline-none"
+          style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+        <button type="button" onClick={send} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#0891b2' }}>Gửi</button>
+      </div>
+    </section>
+  )
+}
+const PLAN_STATUS: [string, string][] = [
+  ['received', 'Receive'], ['processing', 'Process'], ['pending', 'Pending'], ['complete', 'Complete'], ['closed', 'Close'],
+]
+
+function ProposalPlanSection({ p, users, currentUser, flow }: {
+  p: Proposal; users: User[]; currentUser: User; flow: { id: string; approverId: string; status: string }[]
+}) {
+  const [planStatus, setPlanStatus] = useState(p.planStatus ?? 'received')
+  const [notes, setNotes] = useState<{ id: string; userId: string; note: string; createdAt: string }[]>([])
+  const [newNote, setNewNote] = useState('')
+  const userOf = (id?: string) => users.find(u => u.id === id)
+  const fmtD = (d?: string) => (d ? new Date(d).toLocaleDateString('vi-VN') : '—')
+  const canChange = currentUser.id === p.submittedBy || flow.some(s => s.approverId === currentUser.id) || !!currentUser.isDirector
+
+  const loadNotes = async () => {
+    const { data } = await supabase.from('proposal_work_notes').select('*').eq('proposal_id', p.id).order('created_at')
+    setNotes((data ?? []).map((n: any) => ({ id: n.id, userId: n.user_id, note: n.note, createdAt: n.created_at })))
+  }
+  useEffect(() => { loadNotes() }, [p.id])
+
+  const addNote = async () => {
+    const t = newNote.trim()
+    if (!t) return
+    const { error } = await supabase.from('proposal_work_notes').insert({ proposal_id: p.id, user_id: currentUser.id, note: t })
+    if (error) { alert('Không ghi được worknote: ' + error.message); return }
+    setNewNote('')
+    loadNotes()
+  }
+
+  const changeStatus = async (v: string) => {
+    const { error } = await supabase.from('proposals').update({ plan_status: v }).eq('id', p.id)
+    if (error) { alert('Không đổi được trạng thái: ' + error.message); return }
+    setPlanStatus(v)
+  }
+
+  const LABEL: Record<string, [string, string, string]> = {
+    pending: ['Chờ duyệt', '#f59e0b22', '#b45309'],
+    waiting: ['Chưa đến lượt', '#64748b22', '#64748b'],
+    approved: ['Đã duyệt', '#34d39922', '#059669'],
+    rejected: ['Từ chối', '#ef444422', '#dc2626'],
+        revision: ['Yêu cầu xem xét lại', '#f59e0b22', '#b45309'],
+    skipped: ['Bỏ qua', '#64748b22', '#64748b'],
+  }
+  const Badge = ({ s }: { s: string }) => {
+    const l = LABEL[s] ?? [s, '#64748b22', '#64748b']
+    return <span className="px-1.5 py-0.5 rounded-md text-[10px] font-semibold" style={{ background: l[1], color: l[2] }}>{l[0]}</span>
+  }
+  const Person = ({ id }: { id?: string }) => (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      <span className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white" style={{ background: '#7c3aed' }}>
+        {(userOf(id)?.name ?? '?').split(' ').slice(-2).map(w => w[0]).join('').toUpperCase()}
+      </span>
+      {userOf(id)?.name}
+    </span>
+  )
+  const th = { color: 'var(--text-muted)' }
+  const td = { color: 'var(--text-primary)', verticalAlign: 'top' as const }
+
+  return (
+    <section className="rounded-xl p-4 mt-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+      <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Kế hoạch</h3>
+      <p className="text-[11px] mb-3" style={{ color: 'var(--text-muted)' }}>
+        Tự tạo khi gửi đề xuất. Chỉ cần đổi trạng thái và cập nhật worknote: Receive → Process → Pending → Complete → Close
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs" style={{ minWidth: 980 }}>
+          <thead>
+            <tr className="text-left">
+              {['STT', 'ID TASK', 'Nội dung', 'Worknote', 'Start date', 'End date', 'Người đề xuất', 'Assign', 'Phê duyệt', 'Status'].map(h => (
+                <th key={h} className="py-2 pr-3 font-semibold" style={th}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr style={{ borderTop: '1px solid var(--border)' }}>
+              <td className="py-3 pr-3" style={td}>1</td>
+              <td className="py-3 pr-3 font-mono" style={td}>{p.code ?? '—'}</td>
+              <td className="py-3 pr-3 font-semibold" style={{ ...td, maxWidth: 180 }}>{p.brief || p.title}</td>
+              <td className="py-3 pr-3" style={{ ...td, minWidth: 260 }}>
+                {notes.length === 0
+                  ? <p className="mb-1.5" style={{ color: 'var(--text-muted)' }}>Chưa có cập nhật nào.</p>
+                  : notes.map(n => (
+                    <p key={n.id} className="mb-1">
+                      <span style={{ color: 'var(--text-muted)' }}>{fmtD(n.createdAt)} · {userOf(n.userId)?.name}: </span>{n.note}
+                    </p>
+                  ))}
+                <div className="flex gap-1.5">
+                  <input value={newNote} onChange={e => setNewNote(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') addNote() }}
+                    placeholder="Cập nhật worknote, VD: đã đưa tờ trình cho kế toán"
+                    className="flex-1 px-2 py-1.5 rounded-lg text-xs outline-none"
+                    style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+                  <button type="button" onClick={addNote} className="px-2.5 py-1.5 rounded-lg text-xs font-semibold"
+                    style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>Ghi</button>
+                </div>
+              </td>
+              <td className="py-3 pr-3" style={td}>{fmtD(p.createdAt)}</td>
+              <td className="py-3 pr-3" style={td}>{p.dueDate ? p.dueDate.split('-').reverse().join('/') : '—'}</td>
+              <td className="py-3 pr-3" style={td}><Person id={p.submittedBy} /></td>
+              <td className="py-3 pr-3" style={td}><Person id={p.submittedBy} /></td>
+              <td className="py-3 pr-3" style={td}>
+                <div className="space-y-1">
+                  <Badge s={p.status} />
+                  {flow.map(s => (
+                    <div key={s.id} className="flex items-center gap-1.5"><Person id={s.approverId} /><Badge s={s.status} /></div>
+                  ))}
+                </div>
+              </td>
+              <td className="py-3" style={td}>
+                <select value={planStatus} disabled={!canChange} onChange={e => changeStatus(e.target.value)}
+                  className="px-2 py-1.5 rounded-lg text-xs outline-none disabled:opacity-50"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                  {PLAN_STATUS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revisions, onClose }: {
+  proposal: Proposal; users: User[]; currentUser: User; approvals: ProposalApproval[]; revisions: ProposalRevision[]; onClose: () => void
+}) {
+  const [steps, setSteps] = useState<{ id: string; approverId: string; order: number; status: string; note?: string; decidedAt?: string }[]>([])
+  const userOf = (id?: string) => users.find(u => u.id === id)
+  const initials = (name?: string) => (name ?? '?').split(' ').slice(-2).map(w => w[0]).join('').toUpperCase()
+  const fmt = (d?: string) => (d ? new Date(d).toLocaleString('vi-VN') : '')
+
+  useEffect(() => {
+    let alive = true
+    supabase.from('proposal_steps').select('*').eq('proposal_id', p.id).order('step_order').then(({ data }) => {
+      if (!alive) return
+      setSteps((data ?? []).map((s: any) => ({
+        id: s.id, approverId: s.approver_id, order: s.step_order, status: s.status,
+        note: s.note ?? undefined, decidedAt: s.decided_at ?? undefined,
+      })))
+    })
+    return () => { alive = false }
+  }, [p.id, p.status, p.recipientId])
+
+  const flow = steps.length > 0 ? steps : [{
+    id: 'legacy', approverId: p.recipientId, order: 1,
+    status: p.status === 'approved' ? 'approved' : p.status === 'rejected' ? 'rejected' : 'pending',
+    note: p.rejectedReason, decidedAt: undefined as string | undefined,
+  }]
+
+  const LABEL: Record<string, [string, string, string]> = {
+    pending: ['Chờ duyệt', '#f59e0b22', '#b45309'],
+    waiting: ['Chưa đến lượt', '#64748b22', '#64748b'],
+    approved: ['Đã duyệt', '#34d39922', '#059669'],
+    rejected: ['Từ chối', '#ef444422', '#dc2626'],
+    skipped: ['Bỏ qua', '#64748b22', '#64748b'],
+  }
+  const Badge = ({ s }: { s: string }) => {
+    const l = LABEL[s] ?? [s, '#64748b22', '#64748b']
+    return <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold" style={{ background: l[1], color: l[2] }}>{l[0]}</span>
+  }
+  const Avatar = ({ id }: { id?: string }) => (
+    <span className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0" style={{ background: '#7c3aed' }}>
+      {initials(userOf(id)?.name)}
+    </span>
+  )
+  const Row = ({ k, v }: { k: string; v?: string | number | null }) => (
+    <div className="grid grid-cols-3 gap-2 text-xs py-1">
+      <span style={{ color: 'var(--text-muted)' }}>{k}</span>
+      <span className="col-span-2" style={{ color: 'var(--text-primary)' }}>{v || '—'}</span>
+    </div>
+  )
+
+  const events = [
+    { at: p.createdAt, text: `${userOf(p.submittedBy)?.name ?? ''} đã gửi đề xuất` },
+    ...approvals.filter(a => a.proposalId === p.id).map(a => ({
+      at: a.createdAt,
+      text: `${userOf(a.approverId)?.name ?? ''} ${a.action === 'approved' ? 'đã duyệt' : a.action === 'rejected' ? (a.note?.startsWith('[REVIEW]') ? 'yêu cầu xem xét lại' : 'đã từ chối') : 'đã chuyển tiếp'}${a.note ? `: ${a.note.replace('[REVIEW]', '').trim()}` : ''}`,
+    })),
+    ...revisions.filter(r => r.proposalId === p.id).map(r => ({
+      at: r.createdAt, text: `${userOf(r.editedBy)?.name ?? ''} đã gửi lại đề xuất`,
+    })),
+  ].sort((a, b) => a.at.localeCompare(b.at))
+
+  const card = { background: 'var(--bg-panel)', border: '1px solid var(--border)' }
+  const canEdit = currentUser.id === p.submittedBy || flow.some(s => s.approverId === currentUser.id) || !!currentUser.isDirector
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
+      <div className="max-w-5xl mx-auto">
+        <button onClick={onClose} className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>← Danh sách đề xuất</button>
+        <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
+          {p.code ? `${p.code}: ` : ''}{p.title}
+        </h2>
+        <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>{p.kind === 'totrinh' ? 'Tờ trình' : (p.groupName ? `Đề xuất ${p.groupName.toLowerCase()}` : 'Đề xuất')}</p>
+
+        <div className="grid md:grid-cols-3 gap-4">
+          <div className="md:col-span-2 space-y-4">
+            <section className="rounded-xl p-4" style={card}>
+              <div className="flex items-center gap-2 mb-3">
+                <Badge s={p.status === 'rejected' && p.rejectedReason?.startsWith('[REVIEW]') ? 'revision' : p.status} />
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Gửi bởi</span>
+                <Avatar id={p.submittedBy} />
+                <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{userOf(p.submittedBy)?.name}</span>
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>lúc {fmt(p.createdAt)}</span>
+              </div>
+              <Row k="Nhóm đề xuất" v={p.groupName} />
+              <Row k="Phòng ban" v={p.department} />
+              <Row k="Công ty" v={p.company} />
+              <Row k="Thời gian cần" v={p.days ? `${p.days} ngày` : undefined} />
+              <Row k="Hạn kết thúc" v={p.dueDate} />
+              <Row k="Mô tả ngắn" v={p.brief} />
+              <Row k="Mô tả dài" v={p.description} />
+              {p.status === 'rejected' && p.rejectedReason && <Row k="Lý do từ chối" v={p.rejectedReason} />}
+              <ProposalAttachments p={p} users={users} />
+              {p.driveUrl && (
+                <div className="pt-2">
+                  <a href={p.driveUrl} target="_blank" rel="noopener noreferrer" className="text-xs underline" style={{ color: '#3b82f6' }}>📁 Link Drive</a>
+                </div>
+              )}
+            </section>
+            <ProposalSupplementSection p={p} currentUser={currentUser} flow={flow} />
+            <ProposalCostSection p={p} canEdit={canEdit} />
+            <ProposalCommentsSection p={p} users={users} currentUser={currentUser} />
+          </div>
+
+          <div className="space-y-4">
+            <section className="rounded-xl p-4" style={card}>
+              <h3 className="text-sm font-bold mb-1" style={{ color: 'var(--text-primary)' }}>Luồng phê duyệt</h3>
+              <p className="text-[11px] mb-3" style={{ color: 'var(--text-muted)' }}>
+                {p.approvalMode === 'par' ? 'Duyệt song song: cùng lúc.' : 'Duyệt nối tiếp: lần lượt từng người.'}
+              </p>
+              <div className="space-y-3">
+                {flow.map(s => (
+                  <div key={s.id} className="flex gap-2">
+                    <Avatar id={s.approverId} />
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
+                        {userOf(s.approverId)?.name} <span className="font-normal" style={{ color: 'var(--text-muted)' }}>{userOf(s.approverId)?.department}</span>
+                      </p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <Badge s={s.status} />
+                        {s.decidedAt && <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{fmt(s.decidedAt)}</span>}
+                      </div>
+                      {s.note && <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}><LinkifyCodes text={s.note} /></p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="rounded-xl p-4" style={card}>
+              <h3 className="text-sm font-bold mb-3" style={{ color: 'var(--text-primary)' }}>Lịch sử</h3>
+              <div className="space-y-2">
+                {events.map((e, i) => (
+                  <div key={i}>
+                    <p className="text-xs" style={{ color: 'var(--text-primary)' }}>{e.text}</p>
+                    <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{fmt(e.at)}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const MAX_FILES = 5
+const MAX_FILE_MB = 10
+
+async function compressImage(file: File): Promise<File> {
+  if (!file.type.startsWith('image/') || file.type === 'image/gif') return file
+  try {
+    const bmp = await createImageBitmap(file)
+    const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(bmp.width * scale)
+    canvas.height = Math.round(bmp.height * scale)
+    canvas.getContext('2d')!.drawImage(bmp, 0, 0, canvas.width, canvas.height)
+    const blob: Blob | null = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.8))
+    if (!blob || blob.size >= file.size) return file
+    return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' })
+  } catch {
+    return file
+  }
+}
+
+async function uploadProposalFiles(userId: string, files: File[]) {
+    const out: { name: string; path: string; size: number; type: string; at?: string; by?: string }[] = []
+    for (const f of files) {
+    const small = await compressImage(f)
+    const safe = small.name.replace(/[^\w.\-]+/g, '_')
+    const path = `${userId}/${Date.now()}_${safe}`
+    const { error } = await supabase.storage.from('proposal-files').upload(path, small, { contentType: small.type || undefined })
+    if (error) throw error
+    out.push({ name: small.name, path, size: small.size, type: small.type, at: new Date().toISOString(), by: userId })
+  }
+  return out
+}
+
+async function openProposalFile(path: string) {
+  if (/^https?:\/\//i.test(path)) { window.open(path, '_blank', 'noopener'); return }
+  const { data, error } = await supabase.storage.from('proposal-files').createSignedUrl(path, 3600)
+  if (error || !data) { alert('Không mở được file: ' + (error?.message ?? '')); return }
+  window.open(data.signedUrl, '_blank', 'noopener')
+}
+
+const PROPOSAL_GROUPS = ['Mua sắm', 'Nghỉ phép', 'Đi công tác', 'Đề nghị thanh toán', 'Khác']
+const COMPANIES = ['KNI Office', 'Genki House', 'Genki Farm', 'First Steps', 'Les Sens Phú Quốc', 'ACVN']
+
+async function generateProposalCode(userId: string): Promise<string> {
+  const d = new Date()
+  const ds = String(d.getDate()).padStart(2, '0') + String(d.getMonth() + 1).padStart(2, '0') + String(d.getFullYear()).slice(-2)
+  const prefix = `R-TASK${ds}-`
+  const { count } = await supabase.from('proposals')
+    .select('id', { count: 'exact', head: true }).eq('submitted_by', userId).like('code', `${prefix}%`)
+  return `${prefix}${String((count ?? 0) + 1).padStart(2, '0')}`
+}
+
+function ProposalModal({ currentUser, users, editingProposal, onClose, kind = 'dexuat', initialGroup = '' }: { currentUser: User; users: User[]; editingProposal?: Proposal | null; onClose: () => void; kind?: 'dexuat' | 'totrinh'; initialGroup?: string }) {
   const [title, setTitle] = useState(editingProposal?.title ?? '')
   const [description, setDescription] = useState(editingProposal?.description ?? '')
   const [driveUrl, setDriveUrl] = useState(editingProposal?.driveUrl ?? '')
   const [revisionNote, setRevisionNote] = useState('')
-  const [recipientId, setRecipientId] = useState(editingProposal?.recipientId ?? '')
+  const [recipientId, setRecipientId] = useState(
+    editingProposal?.recipientId ??
+    (users.find(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)?.id ?? '')
+  )
   const [resubmitTeamId, setResubmitTeamId] = useState(
     editingProposal ? (users.find(u => u.id === editingProposal.recipientId)?.teamId ?? '') : ''
   )
   const [addedNote, setAddedNote] = useState('')
   const [editedNote, setEditedNote] = useState('')
   const [error, setError] = useState('')
+  const [groupName, setGroupName] = useState(editingProposal?.groupName ?? initialGroup)
+  const [company, setCompany] = useState(editingProposal?.company ?? '')
+  const [days, setDays] = useState('')
+  const [brief, setBrief] = useState(editingProposal?.brief ?? '')
+  const [files, setFiles] = useState<File[]>([])
+  const [costItems, setCostItems] = useState<{ item: string; cost: string; amount: number }[]>([])
+  const [ciItem, setCiItem] = useState('')
+  const [ciCost, setCiCost] = useState('')
+  const [ciAmount, setCiAmount] = useState('')
+  const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)
+  const [extraApprovers, setExtraApprovers] = useState<string[]>([])
+  const [approvalMode, setApprovalMode] = useState<'seq' | 'par'>('seq')
   const [saving, setSaving] = useState(false)
 
 
   const managersInResubmitTeam = users.filter(u => u.role === 'manager' && u.teamId === resubmitTeamId)
 
   const handleSubmit = async () => {
-    if (!title.trim() || !description.trim() || !driveUrl.trim() || !recipientId) {
+    if (!title.trim() || !recipientId || (!editingProposal && (!brief.trim() || !groupName.trim()))) {
       setError('Vui lòng điền đầy đủ các trường bắt buộc.')
       return
     }
@@ -10312,7 +12646,7 @@ function ProposalModal({ currentUser, users, editingProposal, onClose }: { curre
       setError('Vui lòng ghi rõ ít nhất một trong hai: nội dung đã bổ sung hoặc đã chỉnh sửa.')
       return
     }
-    if (!/^https?:\/\//i.test(driveUrl.trim())) {
+    if (driveUrl.trim() && !/^https?:\/\//i.test(driveUrl.trim())) {
       setError('Link Drive không hợp lệ.')
       return
     }
@@ -10345,11 +12679,38 @@ function ProposalModal({ currentUser, users, editingProposal, onClose }: { curre
         link_proposal_id: editingProposal.id,
       })
     } else {
-      const { data, error: insertError } = await supabase.from('proposals').insert({
-        title: title.trim(), description: description.trim(), drive_url: driveUrl.trim(),
-        submitted_by: currentUser.id, recipient_id: recipientId, status: 'pending',
-        participants: [currentUser.id, recipientId],
-      }).select('id').single()
+      const dueDate = days ? new Date(Date.now() + Number(days) * 864e5).toISOString().slice(0, 10) : null
+      const finalItems = ciItem.trim() && ciAmount !== ''
+        ? [...costItems, { item: ciItem.trim(), cost: ciCost.trim(), amount: Number(ciAmount) }]
+        : costItems
+      let uploaded: { name: string; path: string; size: number; type: string }[] = []
+      try { uploaded = await uploadProposalFiles(currentUser.id, files) }
+      catch (err: any) { setSaving(false); setError('Tải file thất bại: ' + (err?.message ?? '')); return }
+      let data: any = null
+      let insertError: any = null
+      for (let i = 0; i < 3; i++) {
+        const res = await supabase.from('proposals').insert({
+          title: title.trim(), description: description.trim(), drive_url: driveUrl.trim(),
+          submitted_by: currentUser.id, recipient_id: recipientId, status: 'pending',
+          participants: [currentUser.id, recipientId, ...extraApprovers],
+          code: await generateProposalCode(currentUser.id),
+          group_name: groupName, department: currentUser.department, company: company || null,
+          brief: brief.trim(), days: days ? Number(days) : null, due_date: dueDate,
+          approval_mode: approvalMode,
+          attachments: uploaded,
+          items: finalItems,
+          kind,
+        }).select('id').single()
+        data = res.data; insertError = res.error
+                if (!insertError && data?.id) {
+          const approverIds = [recipientId, ...extraApprovers.filter(id => id !== recipientId)]
+          await supabase.from('proposal_steps').insert(approverIds.map((id, i) => ({
+            proposal_id: data.id, approver_id: id, step_order: i + 1,
+            status: i === 0 || approvalMode === 'par' ? 'pending' : 'waiting',
+          })))
+        }
+        if (!insertError || insertError.code !== '23505') break
+      }
       setSaving(false)
       if (insertError) { setError(insertError.message); return }
 
@@ -10358,6 +12719,15 @@ function ProposalModal({ currentUser, users, editingProposal, onClose }: { curre
         target_user_id: recipientId,
         link_proposal_id: data?.id,
       })
+            if (approvalMode === 'par') {
+        for (const id of extraApprovers) {
+          await supabase.from('notifications').insert({
+            message: `📜 ${currentUser.name} vừa trình tờ trình "${title.trim()}" cho bạn`,
+            target_user_id: id,
+            link_proposal_id: data?.id,
+          })
+        }
+      }
     }
     onClose()
   }
@@ -10367,7 +12737,7 @@ function ProposalModal({ currentUser, users, editingProposal, onClose }: { curre
       <div className="w-full max-w-md rounded-2xl p-6 max-h-[90vh] overflow-y-auto" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
         <div className="flex justify-between items-center mb-5">
           <h3 className="font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
-            {editingProposal ? '✏️ Chỉnh sửa & Gửi lại tờ trình' : '📜 Trình tờ trình mới'}
+            {editingProposal ? '✏️ Chỉnh sửa & Gửi lại tờ trình' : (kind === 'totrinh' ? '📜 Tạo tờ trình mới (R-TASK)' : '📜 Tạo đề xuất mới (R-TASK)')}
           </h3>
           <button onClick={onClose} className="text-2xl leading-none hover:opacity-70" style={{ color: 'var(--text-muted)' }}>×</button>
         </div>
@@ -10403,23 +12773,95 @@ function ProposalModal({ currentUser, users, editingProposal, onClose }: { curre
 
         <div className="space-y-3.5">
           <div>
-            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Tiêu đề tờ trình *</label>
+            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Tên đề xuất *</label>
             <input value={title} onChange={e => setTitle(e.target.value)}
               placeholder="VD: Đề xuất ngân sách marketing Q4"
               className="w-full px-3 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
               style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
           </div>
 
+          {!editingProposal && (
+            <>
+              <div>
+                <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Nhóm đề xuất *</label>
+                <select value={groupName} onChange={e => setGroupName(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                  <option value="">-- Chọn nhóm --</option>
+                  {PROPOSAL_GROUPS.map(g => <option key={g} value={g}>{g}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Phòng ban</label>
+                  <div className="px-3 py-2.5 rounded-lg text-sm" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                    {currentUser.department || '—'}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Công ty</label>
+                  <select value={company} onChange={e => setCompany(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                    style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                    <option value="">--</option>
+                    {COMPANIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Mô tả ngắn *</label>
+                  <input value={brief} onChange={e => setBrief(e.target.value)} placeholder="Tóm tắt 1 dòng"
+                    className="w-full px-3 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
+                    style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+                </div>
+                <div>
+                  <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Thời gian cần (ngày)</label>
+                  <input type="number" min="0" step="0.5" value={days} onChange={e => setDays(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                    style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+                </div>
+              </div>
+            </>
+          )}
+
           <div>
-            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Nội dung tóm tắt *</label>
+            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Mô tả dài (nội dung)</label>
             <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3}
               placeholder="Mô tả ngắn gọn nội dung tờ trình..."
               className="w-full px-3 py-2.5 rounded-lg text-sm outline-none resize-none placeholder-[color:var(--text-muted)]"
               style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
           </div>
 
+                    {!editingProposal && (
+            <div>
+              <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Tải file / hình ảnh lên (tối đa 5 file, mỗi file ≤ 10MB)</label>
+              <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+                onChange={e => {
+                  const picked = Array.from(e.target.files ?? [])
+                  const tooBig = picked.find(f => f.size > MAX_FILE_MB * 1024 * 1024)
+                  if (tooBig) { setError(`File "${tooBig.name}" lớn hơn ${MAX_FILE_MB}MB. Hãy dùng link Drive cho file lớn.`); e.target.value = ''; return }
+                  if (files.length + picked.length > MAX_FILES) { setError(`Tối đa ${MAX_FILES} file.`); e.target.value = ''; return }
+                  setError('')
+                  setFiles(prev => [...prev, ...picked])
+                  e.target.value = ''
+                }}
+                className="w-full text-xs" style={{ color: 'var(--text-muted)' }} />
+              {files.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {files.map((f, i) => (
+                    <li key={i} className="flex items-center justify-between text-xs rounded-lg px-2 py-1" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-primary)' }}>
+                      <span className="truncate">{f.name} ({(f.size / 1024 / 1024).toFixed(1)}MB)</span>
+                      <button type="button" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} style={{ color: '#dc2626' }}>✕</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           <div>
-            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Link Google Drive tờ trình *</label>
+            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Hoặc dán link Google Drive (file lớn)</label>
             <input value={driveUrl} onChange={e => setDriveUrl(e.target.value)}
               placeholder="https://drive.google.com/file/d/..."
               className="w-full px-3 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
@@ -10441,6 +12883,72 @@ function ProposalModal({ currentUser, users, editingProposal, onClose }: { curre
             </div>
           )}
 
+                              {!editingProposal && (
+            <div>
+              <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Chi phí dự kiến (nếu có)</label>
+              {costItems.length > 0 && (
+                <ul className="mb-2 space-y-1">
+                  {costItems.map((x, i) => (
+                    <li key={i} className="flex items-center justify-between text-xs rounded-lg px-2 py-1" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-primary)' }}>
+                      <span className="truncate">{x.item}{x.cost ? ` · ${x.cost}` : ''} — {x.amount.toLocaleString('vi-VN')}</span>
+                      <button type="button" onClick={() => setCostItems(prev => prev.filter((_, j) => j !== i))} style={{ color: '#dc2626' }}>✕</button>
+                    </li>
+                  ))}
+                  <li className="text-xs font-bold px-2" style={{ color: 'var(--text-primary)' }}>
+                    Tổng: {costItems.reduce((s, x) => s + x.amount, 0).toLocaleString('vi-VN')} VND
+                  </li>
+                </ul>
+              )}
+              <div className="flex gap-2 flex-wrap">
+                <input value={ciItem} onChange={e => setCiItem(e.target.value)} placeholder="Hạng mục"
+                  className="flex-1 min-w-[100px] px-2 py-2 rounded-lg text-xs outline-none"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+                <input value={ciCost} onChange={e => setCiCost(e.target.value)} placeholder="Chi phí (loại / ghi chú)"
+                  className="flex-1 min-w-[100px] px-2 py-2 rounded-lg text-xs outline-none"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+                <input type="number" min="0" value={ciAmount} onChange={e => setCiAmount(e.target.value)} placeholder="Số tiền (VNĐ)"
+                  className="w-24 px-2 py-2 rounded-lg text-xs outline-none"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+                <button type="button"
+                  onClick={() => {
+                    if (!ciItem.trim() || ciAmount === '') return
+                    setCostItems(prev => [...prev, { item: ciItem.trim(), cost: ciCost.trim(), amount: Number(ciAmount) }])
+                    setCiItem(''); setCiCost(''); setCiAmount('')
+                  }}
+                  className="px-3 py-2 rounded-lg text-xs font-bold text-white" style={{ background: '#0891b2' }}>Thêm</button>
+              </div>
+              <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>Có chi phí phát sinh sau này thì thêm ở trang chi tiết.</p>
+            </div>
+          )}
+          {!editingProposal && (
+            <>
+              <div>
+                <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Người duyệt đầu tiên (quản lý phòng ban của bạn) *</label>
+                <select value={recipientId} disabled={myManagers.length === 1} onChange={e => setRecipientId(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                  {myManagers.length === 0 && <option value="">-- Chọn người duyệt --</option>}
+                  {(myManagers.length > 0 ? myManagers : users.filter(u => u.id !== currentUser.id)).map(u => (
+                    <option key={u.id} value={u.id}>{u.name} — {u.department}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Người duyệt tiếp theo (không bắt buộc)</label>
+                <ApproverPicker tone="dark" users={users} excludeIds={[currentUser.id, recipientId]} value={extraApprovers} onChange={setExtraApprovers} />
+              </div>
+              <div>
+                <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Luồng phê duyệt</label>
+                <select value={approvalMode} onChange={e => setApprovalMode(e.target.value as 'seq' | 'par')}
+                  className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                  <option value="seq">Nối tiếp (lần lượt)</option>
+                  <option value="par">Song song (cùng lúc)</option>
+                </select>
+              </div>
+            </>
+          )}
+          {editingProposal && (<>
           <div>
             <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Chọn phòng ban *</label>
             <select value={resubmitTeamId} onChange={e => { setResubmitTeamId(e.target.value); setRecipientId('') }}
@@ -10466,7 +12974,7 @@ function ProposalModal({ currentUser, users, editingProposal, onClose }: { curre
               )}
             </div>
           )}
-
+                    </>)}
           {error && <p className="text-xs" style={{ color: '#dc2626' }}>{error}</p>}
 
           <div className="flex gap-3 pt-1">
@@ -10566,6 +13074,180 @@ function ForwardApprovalModal({ proposal, currentUser, users, onClose }: {
   )
 }
 
+type TrackerStep = { id: string; proposal_id: string; approver_id: string; step_order: number; status: string }
+
+function ProposalTracker({ proposals, users, approvals, kindTab, isMyTurn, onOpenDetail, onOpenDoc }: {
+  proposals: Proposal[]; users: User[]; approvals: ProposalApproval[]; kindTab: 'totrinh' | 'dexuat'
+  isMyTurn: (p: Proposal) => boolean; onOpenDetail: (p: Proposal) => void; onOpenDoc: (p: Proposal) => void
+}) {
+  const [steps, setSteps] = useState<TrackerStep[]>([])
+  const [q, setQ] = useState('')
+  const [filter, setFilter] = useState<'all' | 'pending' | 'mine' | 'approved' | 'rejected' | 'overdue'>('all')
+  const [, setClock] = useState(0)
+
+  useEffect(() => {
+    const load = async () => {
+      const { data } = await supabase.from('proposal_steps').select('*').order('step_order')
+      setSteps((data ?? []) as TrackerStep[])
+    }
+    load()
+    const ch = supabase.channel(`proposal-tracker-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'proposal_steps' }, () => { load() })
+      .subscribe()
+    const tick = setInterval(() => setClock(c => c + 1), 30000)
+    return () => { supabase.removeChannel(ch); clearInterval(tick) }
+  }, [])
+
+  const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
+  const groupOf = (p: Proposal) => p.groupName ?? (p.kind === 'totrinh' ? 'Tờ trình' : 'Đề xuất')
+  const fmtDay = (s: string) => new Date(s).toLocaleDateString('vi-VN')
+  const fmtSpan = (ms: number) => {
+    const m = Math.max(0, Math.floor(ms / 60000))
+    const d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mm = m % 60
+    return d > 0 ? `${d} ngày ${h} giờ` : h > 0 ? `${h} giờ ${mm} phút` : `${mm} phút`
+  }
+  const dueMs = (d?: string) => {
+    if (!d) return NaN
+    return /^\d{4}-\d{2}-\d{2}$/.test(d) ? new Date(`${d}T23:59:59`).getTime() : new Date(d).getTime()
+  }
+  const isReview = (p: Proposal) => p.status === 'rejected' && !!p.rejectedReason?.startsWith('[REVIEW]')
+  const stateOf = (p: Proposal): [string, string, string] => {
+    if (p.status === 'pending') return ['⏳ Chờ duyệt', '#fbbf2422', '#d97706']
+    if (isReview(p)) return ['🔁 Cần xem xét lại', '#fbbf2433', '#b45309']
+    if (p.status === 'rejected') return ['❌ Bị từ chối', '#f8717122', '#dc2626']
+    return ['✅ Đã duyệt', '#34d39922', '#059669']
+  }
+  const stepIcon = (s: string) =>
+    s === 'approved' ? '✅' : s === 'pending' ? '⏳' : s === 'rejected' ? '❌' : s === 'revision' ? '🔁' : s === 'skipped' ? '⏭' : '○'
+
+  const timeInfo = (p: Proposal): { text: string; color: string; over: boolean } => {
+    const now = Date.now()
+    const created = new Date(p.createdAt).getTime()
+    if (p.status === 'pending') {
+      const due = dueMs(p.dueDate)
+      if (!Number.isNaN(due)) {
+        if (due < now) return { text: `⚠️ Quá hạn ${fmtSpan(now - due)}`, color: '#dc2626', over: true }
+        return { text: `Còn ${fmtSpan(due - now)} (hạn ${new Date(due).toLocaleDateString('vi-VN')})`, color: due - now < 86400000 ? '#d97706' : '#059669', over: false }
+      }
+      return { text: `Đã chờ ${fmtSpan(now - created)}`, color: 'var(--text-muted)', over: false }
+    }
+    const last = approvals.filter(a => a.proposalId === p.id).map(a => a.createdAt).sort().pop()
+    if (last) {
+      return { text: `${p.status === 'approved' ? 'Duyệt xong sau' : 'Xử lý sau'} ${fmtSpan(new Date(last).getTime() - created)}`, color: 'var(--text-muted)', over: false }
+    }
+    return { text: '—', color: 'var(--text-muted)', over: false }
+  }
+
+  const base = proposals.filter(p => (kindTab === 'totrinh' ? p.kind === 'totrinh' : p.kind !== 'totrinh'))
+  const matchFilter = (p: Proposal, f: typeof filter) =>
+    f === 'all' ? true
+    : f === 'pending' ? p.status === 'pending'
+    : f === 'mine' ? (p.status === 'pending' && isMyTurn(p))
+    : f === 'approved' ? p.status === 'approved'
+    : f === 'rejected' ? p.status === 'rejected'
+    : timeInfo(p).over
+  const rows = base
+    .filter(p => !q.trim() || `${p.code ?? ''} ${p.title} ${nameOf(p.submittedBy)}`.toLowerCase().includes(q.trim().toLowerCase()))
+    .filter(p => matchFilter(p, filter))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+
+  const th = 'px-2 py-2 text-xs font-bold text-white text-center border border-white/30 whitespace-nowrap'
+  const td = 'px-2 py-2 text-xs align-top border'
+  const cellBorder = { borderColor: 'var(--border)', color: 'var(--text-primary)' }
+  const filters: [typeof filter, string][] = [
+    ['all', 'Tất cả'], ['pending', 'Chờ duyệt'], ['mine', 'Cần tôi duyệt'], ['approved', 'Đã duyệt'], ['rejected', 'Từ chối'], ['overdue', 'Quá hạn'],
+  ]
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 Tìm theo mã, tên hoặc người gửi..."
+          className="flex-1 min-w-[220px] px-3 py-2 rounded-lg text-sm outline-none"
+          style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+        {filters.map(([k, label]) => {
+          const n = base.filter(p => matchFilter(p, k)).length
+          const hot = (k === 'overdue' || k === 'mine') && n > 0
+          return (
+            <button key={k} type="button" onClick={() => setFilter(k)} className="px-3 py-1.5 rounded-lg text-xs font-semibold"
+              style={{ background: filter === k ? '#7c3aed' : 'var(--bg-panel)', color: filter === k ? '#fff' : (hot ? (k === 'overdue' ? '#dc2626' : '#7c3aed') : 'var(--text-muted)'), border: '1px solid var(--border)' }}>
+              {label} ({n})
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="overflow-x-auto rounded-xl" style={{ border: '1px solid var(--border)' }}>
+        <table className="w-full border-collapse" style={{ minWidth: 1250 }}>
+          <thead>
+            <tr style={{ background: '#6d9eeb' }}>
+              <th className={th} style={{ width: 44 }}>STT</th>
+              <th className={th} style={{ width: 150 }}>Mã</th>
+              <th className={th}>Tiêu đề</th>
+              <th className={th} style={{ width: 130 }}>Nhóm</th>
+              <th className={th} style={{ width: 130 }}>Người gửi</th>
+              <th className={th} style={{ width: 95 }}>Ngày gửi</th>
+              <th className={th} style={{ width: 260 }}>Tiến trình duyệt</th>
+              <th className={th} style={{ width: 135, background: '#3c78d8' }}>Trạng thái</th>
+              <th className={th} style={{ width: 200, background: '#cc4125' }}>Hạn / Thời gian</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && (
+              <tr><td colSpan={9} className="py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>
+                Chưa có {kindTab === 'totrinh' ? 'tờ trình' : 'đề xuất'} nào khớp.
+              </td></tr>
+            )}
+            {rows.map((p, i) => {
+              const flow = steps.filter(s => s.proposal_id === p.id).sort((a, b) => a.step_order - b.step_order)
+              const okCount = flow.filter(s => s.status === 'approved').length
+              const [stLabel, stBg, stColor] = stateOf(p)
+              const ti = timeInfo(p)
+              return (
+                <tr key={p.id} style={ti.over ? { background: '#dc262612' } : undefined}>
+                  <td className={`${td} text-center`} style={cellBorder}>{i + 1}</td>
+                  <td className={`${td} font-mono`} style={cellBorder}>{p.code ?? '—'}</td>
+                  <td className={td} style={cellBorder}>
+                    <button type="button" onClick={() => onOpenDetail(p)} className="text-left font-semibold underline" style={{ color: '#7c3aed' }}>{p.title}</button>
+                    {(p.kind === 'totrinh' || p.kind === 'dntt') && (
+                      <button type="button" onClick={() => onOpenDoc(p)} title={p.kind === 'dntt' ? 'Xem đề nghị thanh toán' : 'Xem tờ trình'} className="ml-2">📄</button>
+                    )}
+                  </td>
+                  <td className={td} style={cellBorder}>{groupOf(p)}</td>
+                  <td className={td} style={cellBorder}>{nameOf(p.submittedBy)}</td>
+                  <td className={`${td} text-center`} style={cellBorder}>{fmtDay(p.createdAt)}</td>
+                  <td className={td} style={cellBorder}>
+                    {flow.length > 0 ? (
+                      <>
+                        <div className="text-[11px] font-semibold mb-1">{okCount}/{flow.length} đã duyệt</div>
+                        <div className="flex flex-wrap gap-1">
+                          {flow.map(s => (
+                            <span key={s.id} className="text-[11px] px-1.5 py-0.5 rounded"
+                              style={{ background: s.status === 'pending' ? '#fbbf2433' : 'var(--bg-card-alt)', fontWeight: s.status === 'pending' ? 700 : 400 }}>
+                              {stepIcon(s.status)} {nameOf(s.approver_id)}
+                            </span>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <span className="text-[11px]">→ {nameOf(p.recipientId)}</span>
+                    )}
+                  </td>
+                  <td className={`${td} text-center`} style={cellBorder}>
+                    <span className="px-2 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap" style={{ background: stBg, color: stColor }}>{stLabel}</span>
+                  </td>
+                  <td className={`${td} text-center`} style={cellBorder}>
+                    <span className="font-semibold" style={{ color: ti.color }}>{ti.text}</span>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 function ProposalsView({ currentUser, users, proposals, proposalApprovals, proposalRevisions, onJoinDiscussion, highlightProposalId, clearHighlightProposalId }: {
   currentUser: User; users: User[]; proposals: Proposal[]; proposalApprovals: ProposalApproval[]
   proposalRevisions: ProposalRevision[]
@@ -10575,8 +13257,34 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   const [showModal, setShowModal] = useState(false)
   const [forwardingProposal, setForwardingProposal] = useState<Proposal | null>(null)
   const [editingProposal, setEditingProposal] = useState<Proposal | null>(null)
+  const [detailProposal, setDetailProposal] = useState<Proposal | null>(null)
+  const [docProposal, setDocProposal] = useState<Proposal | null>(null)
+  const [createKind, setCreateKind] = useState<'dexuat' | 'totrinh' | null>(null)
+  const [createGroup, setCreateGroup] = useState<string | null>(null)
+  const [listTab, setListTab] = useState<'totrinh' | 'dexuat'>('totrinh')
+  const [viewMode, setViewMode] = useState<'list' | 'tracker'>('list')
   const [signingProposal, setSigningProposal] = useState<Proposal | null>(null)
+  const [pendingMine, setPendingMine] = useState<string[]>([])
+  const loadPendingMine = async () => {
+    const { data } = await supabase.from('proposal_steps').select('proposal_id').eq('approver_id', currentUser.id).eq('status', 'pending')
+    setPendingMine((data ?? []).map((s: any) => s.proposal_id))
+  }
+  useEffect(() => {
+    loadPendingMine()
+    const ch = supabase.channel(`steps-${currentUser.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'proposal_steps' }, () => { loadPendingMine() })
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [currentUser.id, proposals])
+  const isMyTurn = (p: Proposal) => p.recipientId === currentUser.id || pendingMine.includes(p.id)
   const getUserById = (id?: string) => users.find(u => u.id === id)
+  const openByCode = (raw: string) => {
+  const code = raw.trim().toUpperCase()
+  const target = proposals.find(x => (x.code ?? '').toUpperCase() === code)
+  if (!target) { alert(`Không tìm thấy tờ trình ${code}, hoặc bạn không có quyền xem.`); return }
+  if (target.kind === 'totrinh' || target.kind === 'dntt') { setDetailProposal(null); setDocProposal(target) }
+  else { setDocProposal(null); setDetailProposal(target) }
+  }
   const proposalRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [flashProposalId, setFlashProposalId] = useState<string | null>(null)
 
@@ -10597,41 +13305,131 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
     return () => clearTimeout(t)
   }, [highlightProposalId])
 
-  const received = proposals.filter(p => p.recipientId === currentUser.id)
-  const sent = proposals.filter(p => p.submittedBy === currentUser.id)
-  const processedByMe = proposals.filter(p =>
-    p.recipientId !== currentUser.id &&
+  const receivedAll = proposals.filter(p => isMyTurn(p))
+  const sentAll = proposals.filter(p => p.submittedBy === currentUser.id)
+    const processedAll = proposals.filter(p =>
+    !isMyTurn(p) &&
     p.submittedBy !== currentUser.id &&
     proposalApprovals.some(a => a.proposalId === p.id && a.approverId === currentUser.id)
   )
 
-  const handleApprove = async (p: Proposal) => {
-    await supabase.from('proposals').update({ status: 'approved' }).eq('id', p.id)
-    await supabase.from('proposal_approvals').insert({
-      proposal_id: p.id, approver_id: currentUser.id, action: 'approved',
-    })
-    await supabase.from('notifications').insert({
-      message: `✅ ${currentUser.name} đã duyệt tờ trình "${p.title}"`,
-      target_user_id: p.submittedBy,
-      link_proposal_id: p.id,
-    })
+    type StepRow = { id: string; approver_id: string; step_order: number; status: string }
+
+  const loadSteps = async (proposalId: string): Promise<StepRow[]> => {
+    const { data } = await supabase.from('proposal_steps').select('*').eq('proposal_id', proposalId).order('step_order')
+    return (data ?? []) as StepRow[]
   }
 
-  const handleReject = async (p: Proposal) => {
-    const reason = window.prompt('Lý do từ chối:') ?? ''
-    await supabase.from('proposals').update({ status: 'rejected', rejected_reason: reason }).eq('id', p.id)
+   const handleApprove = async (p: Proposal, note?: string) => {
+    const steps = await loadSteps(p.id)
+    const mine = steps.find(s => s.approver_id === currentUser.id && s.status === 'pending')
+
+    // Đề xuất cũ (chưa có luồng nhiều người): duyệt như trước
+    if (!mine) {
+      await supabase.from('proposals').update({ status: 'approved' }).eq('id', p.id)
+      await supabase.from('proposal_approvals').insert({ proposal_id: p.id, approver_id: currentUser.id, action: 'approved', note: note || null })
+      await supabase.from('notifications').insert({
+        message: `✅ ${currentUser.name} đã duyệt tờ trình "${p.title}"`,
+        target_user_id: p.submittedBy,
+        link_proposal_id: p.id,
+      })
+      return
+    }
+
+    await supabase.from('proposal_steps').update({ status: 'approved', decided_at: new Date().toISOString(), note: note || null }).eq('id', mine.id)
+    await supabase.from('proposal_approvals').insert({ proposal_id: p.id, approver_id: currentUser.id, action: 'approved', note: note || null })
+
+    const rest = steps.filter(s => s.id !== mine.id)
+    let nextStep: StepRow | undefined
+    let allDone = false
+    if ((p.approvalMode ?? 'seq') === 'par') {
+      allDone = rest.every(s => s.status === 'approved')
+    } else {
+      nextStep = rest.filter(s => s.status === 'waiting').sort((a, b) => a.step_order - b.step_order)[0]
+      allDone = !nextStep
+    }
+
+    if (allDone) {
+      await supabase.from('proposals').update({ status: 'approved' }).eq('id', p.id)
+      await supabase.from('notifications').insert({
+        message: `✅ Tờ trình "${p.title}" đã được tất cả người duyệt thông qua`,
+        target_user_id: p.submittedBy,
+        link_proposal_id: p.id,
+      })
+    } else if (nextStep) {
+      await supabase.from('proposal_steps').update({ status: 'pending' }).eq('id', nextStep.id)
+      await supabase.from('proposals').update({
+        recipient_id: nextStep.approver_id,
+        participants: p.participants.includes(nextStep.approver_id) ? p.participants : [...p.participants, nextStep.approver_id],
+      }).eq('id', p.id)
+      await supabase.from('notifications').insert({
+        message: `📜 Tờ trình "${p.title}" của ${getUserById(p.submittedBy)?.name} đã qua ${currentUser.name}, đến lượt bạn duyệt`,
+        target_user_id: nextStep.approver_id,
+        link_proposal_id: p.id,
+      })
+      await supabase.from('notifications').insert({
+        message: `✅ ${currentUser.name} đã duyệt tờ trình "${p.title}", đã chuyển cho ${getUserById(nextStep.approver_id)?.name}`,
+        target_user_id: p.submittedBy,
+        link_proposal_id: p.id,
+      })
+    } else {
+      await supabase.from('notifications').insert({
+        message: `✅ ${currentUser.name} đã duyệt tờ trình "${p.title}" (còn chờ người duyệt khác)`,
+        target_user_id: p.submittedBy,
+        link_proposal_id: p.id,
+      })
+    }
+    loadPendingMine()
+  }
+
+    const declineProposal = async (p: Proposal, kind: 'rejected' | 'revision', text: string) => {
+    const steps = await loadSteps(p.id)
+    const mine = steps.find(s => s.approver_id === currentUser.id && s.status === 'pending')
+    if (mine) {
+      await supabase.from('proposal_steps').update({ status: kind, decided_at: new Date().toISOString(), note: text || null }).eq('id', mine.id)
+      const others = steps.filter(s => s.id !== mine.id && (s.status === 'waiting' || s.status === 'pending')).map(s => s.id)
+      if (others.length > 0) await supabase.from('proposal_steps').update({ status: 'skipped' }).in('id', others)
+    }
+    const stored = kind === 'revision' ? `[REVIEW] ${text}` : text
+    await supabase.from('proposals').update({ status: 'rejected', rejected_reason: stored }).eq('id', p.id)
     await supabase.from('proposal_approvals').insert({
-      proposal_id: p.id, approver_id: currentUser.id, action: 'rejected', note: reason || null,
+      proposal_id: p.id, approver_id: currentUser.id, action: 'rejected', note: stored || null,
     })
     await supabase.from('notifications').insert({
-      message: `❌ ${currentUser.name} đã từ chối tờ trình "${p.title}"${reason ? `: ${reason}` : ''}`,
+      message: kind === 'revision'
+        ? `🔁 ${currentUser.name} yêu cầu xem xét lại tờ trình "${p.title}"${text ? `: ${text}` : ''}`
+        : `❌ ${currentUser.name} đã từ chối tờ trình "${p.title}"${text ? `: ${text}` : ''}`,
       target_user_id: p.submittedBy,
       link_proposal_id: p.id,
     })
+    loadPendingMine()
   }
+
+  const handleReject = async (p: Proposal, note?: string) => {
+    const reason = note && note.trim() ? note.trim() : (window.prompt('Lý do từ chối:') ?? '')
+    await declineProposal(p, 'rejected', reason)
+  }
+
+  const handleRequestReview = async (p: Proposal, note: string) => {
+    await declineProposal(p, 'revision', note)
+  }
+  
+  const tabList = (list: Proposal[]) =>
+    list
+      .filter(p => (listTab === 'totrinh' ? p.kind === 'totrinh' : p.kind !== 'totrinh'))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const received = tabList(receivedAll)
+  const sent = tabList(sentAll)
+  const processedByMe = tabList(processedAll)
+  const relevant = Array.from(new Map([...receivedAll, ...sentAll, ...processedAll].map(p => [p.id, p] as [string, Proposal])).values())
+  const countTotrinh = relevant.filter(p => p.kind === 'totrinh').length
+  const countDexuat = relevant.length - countTotrinh
+  const needTotrinh = receivedAll.filter(p => p.kind === 'totrinh' && p.status === 'pending').length
+  const needDexuat = receivedAll.filter(p => p.kind !== 'totrinh' && p.status === 'pending').length
 
   const statusBadge = (p: Proposal) => {
     if (p.status === 'pending') return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#fbbf2422', color: '#d97706' }}>⏳ Chờ duyệt</span>
+    if (p.status === 'rejected' && p.rejectedReason?.startsWith('[REVIEW]')) return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#fbbf2433', color: '#b45309' }}>🔁 Cần xem xét lại</span>
     if (p.status === 'rejected') return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#f8717122', color: '#dc2626' }}>❌ Bị từ chối</span>
     return <span className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: '#34d39922', color: '#059669' }}>✅ Đã duyệt</span>
   }
@@ -10656,7 +13454,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
                 <span style={{ color: 'var(--text-primary)' }}>
                   {getUserById(a.approverId)?.name} ({TEAMS.find(t => t.id === getUserById(a.approverId)?.teamId)?.name})
                 </span>
-                <span style={{ color: 'var(--text-muted)' }}>· {new Date(a.createdAt).toLocaleDateString('vi-VN')}</span>
+                <span style={{ color: 'var(--text-muted)' }}>· {new Date(a.createdAt).toLocaleString('vi-VN')}</span>
               </div>
             )
           }
@@ -10666,7 +13464,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
               <div className="flex items-center gap-1.5">
                 <span>📝</span>
                 <span className="font-medium" style={{ color: '#b45309' }}>{getUserById(r.editedBy)?.name}</span>
-                <span style={{ color: 'var(--text-muted)' }}>đã gửi lại · {new Date(r.createdAt).toLocaleDateString('vi-VN')}</span>
+                <span style={{ color: 'var(--text-muted)' }}>đã gửi lại · {new Date(r.createdAt).toLocaleString('vi-VN')}</span>
               </div>
               {r.addedNote && <p style={{ color: 'var(--text-muted)' }}>➕ <b style={{ color: 'var(--text-primary)' }}>Đã bổ sung:</b> {r.addedNote}</p>}
               {r.editedNote && <p style={{ color: 'var(--text-muted)' }}>✏️ <b style={{ color: 'var(--text-primary)' }}>Đã chỉnh sửa:</b> {r.editedNote}</p>}
@@ -10688,7 +13486,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
       }}>
       <div className="flex items-start justify-between gap-3 mb-2">
         <div>
-          <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{p.title}</h3>
+          <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{p.code && <span className="font-mono text-xs mr-2" style={{ color: 'var(--text-muted)' }}>[{p.code}]</span>}{p.title}</h3>
           <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
             {getUserById(p.submittedBy)?.name} → {getUserById(p.recipientId)?.name}
           </p>
@@ -10696,15 +13494,34 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
         {statusBadge(p)}
       </div>
       <p className="text-xs mb-3 leading-relaxed" style={{ color: 'var(--text-muted)' }}>{p.description}</p>
+      <button type="button" onClick={() => setDetailProposal(p)}
+        className="text-xs font-semibold mb-3 underline" style={{ color: '#7c3aed' }}>🔍 Xem chi tiết</button>
+      {(p.kind === 'totrinh' || p.kind === 'dntt') && (
+        <button type="button" onClick={() => setDocProposal(p)}
+          className="text-xs font-semibold mb-3 ml-4 underline" style={{ color: '#059669' }}>
+          {p.kind === 'dntt' ? '📄 Xem đề nghị thanh toán' : '📄 Xem tờ trình'}
+        </button>
+      )}
       {p.status === 'rejected' && p.rejectedReason && (
-        <p className="text-xs mb-3" style={{ color: '#dc2626' }}>Lý do: {p.rejectedReason}</p>
+        p.rejectedReason.startsWith('[REVIEW]')
+          ? <p className="text-xs mb-3" style={{ color: '#b45309' }}>🔁 Người duyệt yêu cầu xem xét lại: {p.rejectedReason.slice(8).trim()}</p>
+          : <p className="text-xs mb-3" style={{ color: '#dc2626' }}>Lý do: {p.rejectedReason}</p>
       )}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-3 flex-wrap">
-          <a href={p.driveUrl} target="_blank" rel="noopener noreferrer"
-            className="text-xs underline" style={{ color: '#3b82f6' }}>
-            📁 Xem tờ trình trên Drive
-          </a>
+          {p.driveUrl && (
+            <a href={p.driveUrl} target="_blank" rel="noopener noreferrer"
+              className="text-xs underline" style={{ color: '#3b82f6' }}>
+              📁 Xem tài liệu đính kèm trên Drive
+            </a>
+          )}
+          {(p.attachments ?? []).map(a => (
+            <button key={a.path} type="button" onClick={() => openProposalFile(a.path)}
+              title={a.at ? `Tải lên ${new Date(a.at).toLocaleString('vi-VN')}` : undefined}
+              className="text-xs underline" style={{ color: '#3b82f6' }}>
+              📎 {a.name}{(a.round ?? 0) > 0 && a.at ? ` (bổ sung lần ${a.round} · ${new Date(a.at).toLocaleString('vi-VN')})` : ''}
+            </button>
+          ))}
           {p.signedFileUrl && (
             <a href={p.signedFileUrl} target="_blank" rel="noopener noreferrer"
               className="text-xs underline" style={{ color: '#0e7490' }}>
@@ -10741,7 +13558,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
               ✏️ Chỉnh sửa & Gửi lại
             </button>
           )}
-          {p.recipientId === currentUser.id && (p.status === 'pending' || p.status === 'approved') && (
+          {isMyTurn(p) && (p.status === 'pending' || p.status === 'approved') && (
             <button onClick={() => setSigningProposal(p)}
               className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#0891b222', color: '#0e7490' }}>
               🖊 Ký tờ trình
@@ -10754,19 +13571,48 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   )
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <ProposalLinkContext.Provider value={openByCode}>
+    <div className={`p-6 ${viewMode === 'tracker' ? 'max-w-7xl' : 'max-w-4xl'} mx-auto`}>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>📜 Tờ trình</h2>
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{proposals.length} tờ trình</p>
+          <h2 className="text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>📜 Tờ trình & Đề xuất</h2>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{countTotrinh} tờ trình · {countDexuat} đề xuất</p>
         </div>
         <button onClick={() => setShowModal(true)}
           className="px-4 py-2.5 rounded-xl font-bold text-white text-sm"
           style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', boxShadow: '0 0 20px #7c3aed40' }}>
-          + Trình tờ trình mới
+          + Tạo mới
         </button>
       </div>
 
+            <div className="flex gap-2 mb-5">
+        {([['totrinh', '📜 Tờ trình', countTotrinh, needTotrinh], ['dexuat', '📝 Đề xuất', countDexuat, needDexuat]] as const).map(([key, label, count, need]) => (
+          <button key={key} type="button" onClick={() => setListTab(key)}
+            className="px-4 py-2 rounded-xl text-sm font-bold"
+            style={{
+              background: listTab === key ? 'linear-gradient(135deg, #7c3aed, #5b21b6)' : 'var(--bg-card-alt)',
+              color: listTab === key ? '#fff' : 'var(--text-muted)',
+              border: '1px solid var(--border)',
+            }}>
+            {label} <span className="opacity-70">({count})</span>
+            {need > 0 && <span className="ml-2 px-1.5 py-0.5 rounded-full text-[10px] bg-red-500 text-white">{need}</span>}
+          </button>
+        ))}
+        <div className="ml-auto flex gap-1.5">
+          {([['list', '📋 Danh sách'], ['tracker', '📊 Tracker']] as const).map(([k, label]) => (
+            <button key={k} type="button" onClick={() => setViewMode(k)} className="px-3 py-2 rounded-xl text-sm font-semibold"
+              style={{ background: viewMode === k ? '#0891b2' : 'var(--bg-card-alt)', color: viewMode === k ? '#fff' : 'var(--text-muted)', border: '1px solid var(--border)' }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {viewMode === 'tracker' ? (
+        <ProposalTracker
+          proposals={currentUser.isDirector ? proposals : relevant}
+          users={users} approvals={proposalApprovals} kindTab={listTab}
+          isMyTurn={isMyTurn} onOpenDetail={setDetailProposal} onOpenDoc={setDocProposal} />
+      ) : (<>
       {received.length > 0 && (
         <div className="mb-6">
           <h3 className="font-bold mb-3 text-sm" style={{ color: 'var(--text-muted)' }}>📥 Cần bạn duyệt</h3>
@@ -10791,11 +13637,48 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
       {received.length === 0 && sent.length === 0 && processedByMe.length === 0 && (
         <div className="text-center py-16" style={{ color: 'var(--text-muted)' }}>
           <div className="text-4xl mb-3">📜</div>
-          <div className="text-sm">Chưa có tờ trình nào</div>
+          <div className="text-sm">Chưa có {listTab === 'totrinh' ? 'tờ trình' : 'đề xuất'} nào</div>
         </div>
       )}
+      </>)}
 
-      {showModal && <ProposalModal currentUser={currentUser} users={users} onClose={() => setShowModal(false)} />}
+      {showModal && !createKind && (
+        <ProposalKindPicker onPick={k => { setCreateGroup(null); setCreateKind(k) }}
+          onClose={() => setShowModal(false)} />
+      )}
+      {showModal && createKind === 'dexuat' && !createGroup && (
+        <ProposalGroupPicker onPick={g => setCreateGroup(g)} onBack={() => setCreateKind(null)}
+          onClose={() => { setShowModal(false); setCreateKind(null); setCreateGroup(null) }} />
+      )}
+      {showModal && createKind === 'dexuat' && createGroup && createGroup !== 'Đề nghị thanh toán' && (
+        <ProposalModal kind="dexuat" initialGroup={createGroup === 'Khác' ? '' : createGroup} currentUser={currentUser} users={users}
+          onClose={() => { setShowModal(false); setCreateKind(null); setCreateGroup(null) }} />
+      )}
+      {showModal && createKind === 'dexuat' && createGroup === 'Đề nghị thanh toán' && (
+        <ProposalDnttForm currentUser={currentUser} users={users}
+          onClose={() => { setShowModal(false); setCreateKind(null); setCreateGroup(null) }} />
+      )}
+      {showModal && createKind === 'totrinh' && (
+        <ProposalDocForm currentUser={currentUser} users={users}
+          onClose={() => { setShowModal(false); setCreateKind(null); setCreateGroup(null) }} />
+      )}
+              {detailProposal && (
+        <ProposalDetailModal
+          proposal={proposals.find(x => x.id === detailProposal.id) ?? detailProposal}
+          users={users} currentUser={currentUser} approvals={proposalApprovals} revisions={proposalRevisions}
+          onClose={() => setDetailProposal(null)} />
+      )}
+      {docProposal && (() => {
+        const cur = proposals.find(x => x.id === docProposal.id) ?? docProposal
+        const common = {
+          p: cur, users, currentUserId: currentUser.id, onClose: () => setDocProposal(null),
+          canAct: isMyTurn(cur) && cur.status === 'pending',
+          onApprove: async (note: string) => { await handleApprove(cur, note) },
+          onReject: async (note: string) => { await handleReject(cur, note) },
+          onRequestReview: async (note: string) => { await handleRequestReview(cur, note) },
+        }
+        return cur.kind === 'dntt' ? <ProposalDnttView {...common} /> : <ProposalDocView {...common} />
+      })()}
       {editingProposal && (
         <ProposalModal currentUser={currentUser} users={users} editingProposal={editingProposal} onClose={() => setEditingProposal(null)} />
       )}
@@ -10806,6 +13689,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
         <SignDocumentModal currentUser={currentUser} proposal={signingProposal} onClose={() => setSigningProposal(null)} />
       )}
     </div>
+    </ProposalLinkContext.Provider>
   )
 }
 function ProfileView({ currentUser, setCurrentUser, tasks }: {
@@ -11004,11 +13888,980 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
   )
 }
 
+// ==================== PROJECTS ====================
+
+const PROJECT_COMPANIES = ['KNI', 'GENKI', 'FIRSTSTEPS', 'ACVN', 'AMERYS']
+const PROJECT_STATUS: Record<string, [string, string, string]> = {
+  planning: ['Lập kế hoạch', '#3b82f622', '#2563eb'],
+  active: ['Đang chạy', '#34d39922', '#059669'],
+  on_hold: ['Tạm dừng', '#f59e0b22', '#b45309'],
+  done: ['Hoàn thành', '#8b5cf622', '#7c3aed'],
+  closed: ['Đóng', '#64748b22', '#64748b'],
+}
+const PROJECT_RISK: Record<string, [string, string]> = {
+  low: ['Thấp', '#059669'], medium: ['Trung bình', '#b45309'], high: ['Cao', '#dc2626'],
+}
+
+interface Project {
+  id: string
+  code: string
+  name: string
+  company?: string
+  cls: string
+  status: string
+  priority: string
+  objective?: string
+  description?: string
+  ownerId?: string
+  managerId?: string
+  teamId?: string
+  affected?: string
+  plannedStart?: string
+  plannedEnd?: string
+  budget: number
+  supplierName?: string
+  supplierRef?: string
+  riskLevel: string
+  createdBy?: string
+  createdAt: string
+  memberIds: string[]
+}
+
+function mapDbProject(p: any, memberIds: string[]): Project {
+  return {
+    id: p.id, code: p.code ?? '', name: p.name, company: p.company ?? undefined, cls: p.class ?? 'project',
+    status: p.status ?? 'planning', priority: p.priority ?? 'P3', objective: p.objective ?? undefined,
+    description: p.description ?? undefined, ownerId: p.owner_id ?? undefined, managerId: p.manager_id ?? undefined,
+    teamId: p.team_id ?? undefined, affected: p.affected ?? undefined, plannedStart: p.planned_start ?? undefined,
+    plannedEnd: p.planned_end ?? undefined, budget: Number(p.budget) || 0, supplierName: p.supplier_name ?? undefined,
+    supplierRef: p.supplier_ref ?? undefined, riskLevel: p.risk_level ?? 'medium', createdBy: p.created_by ?? undefined,
+    createdAt: p.created_at, memberIds,
+  }
+}
+
+function ProjectMemberPicker({ users, excludeIds, value, onChange }: {
+  users: User[]; excludeIds: string[]; value: string[]; onChange: (v: string[]) => void
+}) {
+  const [teamId, setTeamId] = useState('')
+  const [q, setQ] = useState('')
+  const box = { background: '#ffffff', border: '1px solid #d1d5db', color: '#111827' }
+  const pool = users.filter(u => !excludeIds.includes(u.id) && !value.includes(u.id))
+  const query = q.trim().toLowerCase()
+  const shown = query ? pool.filter(u => u.name.toLowerCase().includes(query)) : teamId ? pool.filter(u => u.teamId === teamId) : []
+  const teamName = (u?: User) => TEAMS.find(t => t.id === u?.teamId)?.name ?? u?.department ?? ''
+  return (
+    <div className="space-y-2">
+      {value.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {value.map(id => {
+            const u = users.find(x => x.id === id)
+            return (
+              <span key={id} className="text-xs px-2.5 py-1 rounded-full flex items-center gap-1.5" style={box}>
+                {u?.name} <span className="text-gray-500">· {teamName(u)}</span>
+                <button type="button" onClick={() => onChange(value.filter(x => x !== id))} style={{ color: '#dc2626' }}>✕</button>
+              </span>
+            )
+          })}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <select value={teamId} onChange={e => { setTeamId(e.target.value); setQ('') }} className="flex-1 rounded px-2 py-1.5 text-xs outline-none" style={box}>
+          <option value="">-- Chọn phòng ban --</option>
+          {TEAMS.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
+        </select>
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="hoặc gõ tên để tìm" className="flex-1 rounded px-2 py-1.5 text-xs outline-none" style={box} />
+      </div>
+      {(teamId || query) && (
+        <div className="flex flex-wrap gap-1.5">
+          {shown.length === 0 && <span className="text-xs text-gray-500">Không có ai phù hợp.</span>}
+          {shown.map(u => (
+            <button key={u.id} type="button" onClick={() => onChange([...value, u.id])} className="text-xs px-2.5 py-1 rounded-full" style={box}>
+              ＋ {u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ProjectForm({ currentUser, users, onClose, onCreated }: {
+  currentUser: User; users: User[]; onClose: () => void; onCreated: () => void
+}) {
+  const [name, setName] = useState('')
+  const [company, setCompany] = useState('')
+  const [cls, setCls] = useState('project')
+  const [priority, setPriority] = useState('P3')
+  const [status, setStatus] = useState('planning')
+  const [objective, setObjective] = useState('')
+  const [description, setDescription] = useState('')
+  const [ownerId, setOwnerId] = useState('')
+  const [managerId, setManagerId] = useState(currentUser.id)
+  const [teamId, setTeamId] = useState(currentUser.teamId)
+  const [members, setMembers] = useState<string[]>([])
+  const [affected, setAffected] = useState('')
+  const [plannedStart, setPlannedStart] = useState('')
+  const [plannedEnd, setPlannedEnd] = useState('')
+  const [budget, setBudget] = useState('')
+  const [supplierName, setSupplierName] = useState('')
+  const [supplierRef, setSupplierRef] = useState('')
+  const [riskLevel, setRiskLevel] = useState('medium')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const box = 'w-full border border-gray-300 rounded px-2 py-1.5 bg-white text-sm outline-none focus:border-blue-500'
+  const ink = { color: '#111827' }
+  const label = 'block text-xs font-semibold text-gray-600 mb-1'
+  const userOptions = (
+    <>
+      <option value="">-- Chọn --</option>
+      {TEAMS.map(t => {
+        const list = users.filter(u => u.teamId === t.id)
+        return list.length === 0 ? null : (
+          <optgroup key={t.id} label={`${t.emoji} ${t.name}`}>
+            {list.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+          </optgroup>
+        )
+      })}
+    </>
+  )
+
+  const submit = async () => {
+    if (!name.trim()) { setError('Vui lòng nhập tên dự án.'); return }
+    if (!company) { setError('Vui lòng chọn công ty.'); return }
+    if (!managerId) { setError('Vui lòng chọn quản lý dự án.'); return }
+    if (plannedStart && plannedEnd && plannedEnd < plannedStart) { setError('Ngày kết thúc phải sau ngày bắt đầu.'); return }
+    setSaving(true); setError('')
+    const now = new Date()
+    const ds = String(now.getDate()).padStart(2, '0') + String(now.getMonth() + 1).padStart(2, '0') + String(now.getFullYear()).slice(-2)
+    const prefix = `PRJ-${ds}-`
+    let created: any = null
+    let insertError: any = null
+    for (let i = 0; i < 3; i++) {
+      const { data: sameDay } = await supabase.from('projects').select('code').like('code', `${prefix}%`)
+      const maxN = (sameDay ?? []).reduce((m: number, r: any) => Math.max(m, parseInt(String(r.code).slice(prefix.length), 10) || 0), 0)
+      const code = `${prefix}${String(maxN + 1 + i).padStart(2, '0')}`
+      const res = await supabase.from('projects').insert({
+        code, name: name.trim(), company, class: cls, status, priority,
+        objective: objective.trim() || null, description: description.trim() || null,
+        owner_id: ownerId || null, manager_id: managerId, team_id: teamId || null,
+        affected: affected.trim() || null, planned_start: plannedStart || null, planned_end: plannedEnd || null,
+        budget: Number(budget) || 0, supplier_name: supplierName.trim() || null, supplier_ref: supplierRef.trim() || null,
+        risk_level: riskLevel, created_by: currentUser.id,
+      }).select('id').single()
+      created = res.data; insertError = res.error
+      if (!insertError || insertError.code !== '23505') break
+    }
+    if (insertError || !created) { setSaving(false); setError(insertError?.message ?? 'Không tạo được dự án.'); return }
+    const memberIds = Array.from(new Set([managerId, ...(ownerId ? [ownerId] : []), ...members]))
+    await supabase.from('project_members').insert(memberIds.map(uid => ({ project_id: created.id, user_id: uid, role: uid === managerId ? 'manager' : 'member' })))
+    setSaving(false)
+    onCreated()
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
+      <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
+        <span className="text-sm font-bold text-gray-800">🗂️ Tạo dự án mới</span>
+        <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-[860px] mx-auto my-4 bg-white shadow-xl p-6 sm:p-8 space-y-5 text-[13px]" style={ink}>
+          <div>
+            <label className={label}>Tên dự án *</label>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="VD: Nâng cấp hạ tầng mạng văn phòng ACVN Hà Nội" className={box} style={ink} />
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div>
+              <label className={label}>Công ty *</label>
+              <select value={company} onChange={e => setCompany(e.target.value)} className={box} style={ink}>
+                <option value="">-- Chọn --</option>
+                {PROJECT_COMPANIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={label}>Loại</label>
+              <select value={cls} onChange={e => setCls(e.target.value)} className={box} style={ink}>
+                <option value="project">Dự án (Project)</option>
+                <option value="bau">Vận hành thường xuyên (BAU)</option>
+              </select>
+            </div>
+            <div>
+              <label className={label}>Ưu tiên</label>
+              <select value={priority} onChange={e => setPriority(e.target.value)} className={box} style={ink}>
+                {['P1', 'P2', 'P3', 'P4'].map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={label}>Trạng thái</label>
+              <select value={status} onChange={e => setStatus(e.target.value)} className={box} style={ink}>
+                {Object.entries(PROJECT_STATUS).map(([k, v]) => <option key={k} value={k}>{v[0]}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className={label}>Mục tiêu và lý do thực hiện</label>
+            <textarea value={objective} onChange={e => setObjective(e.target.value)} rows={3} className={`${box} resize-none`} style={ink}
+              placeholder="Lợi ích mang lại có vượt trội rủi ro không? Mục tiêu cần đạt?" />
+          </div>
+          <div>
+            <label className={label}>Mô tả chi tiết</label>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={4} className={`${box} resize-none`} style={ink} />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className={label}>Người yêu cầu / chủ dự án</label>
+              <select value={ownerId} onChange={e => setOwnerId(e.target.value)} className={box} style={ink}>{userOptions}</select>
+            </div>
+            <div>
+              <label className={label}>Quản lý dự án (PM) *</label>
+              <select value={managerId} onChange={e => setManagerId(e.target.value)} className={box} style={ink}>{userOptions}</select>
+            </div>
+            <div>
+              <label className={label}>Phòng ban chịu trách nhiệm chính</label>
+              <select value={teamId} onChange={e => setTeamId(e.target.value)} className={box} style={ink}>
+                <option value="">-- Chọn --</option>
+                {TEAMS.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className={label}>Thành viên tham gia (chọn phòng ban rồi chọn người)</label>
+            <ProjectMemberPicker users={users} excludeIds={[managerId, ownerId]} value={members} onChange={setMembers} />
+          </div>
+          <div>
+            <label className={label}>Công ty / khách hàng bị ảnh hưởng</label>
+            <input value={affected} onChange={e => setAffected(e.target.value)} className={box} style={ink} />
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div>
+              <label className={label}>Dự kiến bắt đầu</label>
+              <input type="date" value={plannedStart} onChange={e => setPlannedStart(e.target.value)} className={box} style={ink} />
+            </div>
+            <div>
+              <label className={label}>Dự kiến kết thúc</label>
+              <input type="date" value={plannedEnd} onChange={e => setPlannedEnd(e.target.value)} className={box} style={ink} />
+            </div>
+            <div>
+              <label className={label}>Ngân sách (VNĐ)</label>
+              <input type="number" min="0" value={budget} onChange={e => setBudget(e.target.value)} className={box} style={ink} />
+            </div>
+            <div>
+              <label className={label}>Mức rủi ro</label>
+              <select value={riskLevel} onChange={e => setRiskLevel(e.target.value)} className={box} style={ink}>
+                {Object.entries(PROJECT_RISK).map(([k, v]) => <option key={k} value={k}>{v[0]}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className={label}>Nhà cung cấp (nếu có)</label>
+              <input value={supplierName} onChange={e => setSupplierName(e.target.value)} className={box} style={ink} />
+            </div>
+            <div>
+              <label className={label}>Mã tham chiếu nhà cung cấp</label>
+              <input value={supplierRef} onChange={e => setSupplierRef(e.target.value)} className={box} style={ink} />
+            </div>
+          </div>
+          <p className="text-xs text-gray-500">Mã dự án <b>PRJ-ngàytháng năm-số thứ tự</b> (ví dụ PRJ-201026-01) sẽ tự sinh khi lưu.</p>
+        </div>
+      </div>
+      <div className="shrink-0 px-4 py-3 flex items-center justify-end gap-3" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
+        {error && <span className="text-xs text-red-600 mr-auto">{error}</span>}
+        <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600">Hủy</button>
+        <button type="button" onClick={submit} disabled={saving}
+          className="px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
+          {saving ? 'Đang lưu...' : 'Tạo dự án'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// Mã task con: TASK-<mã dự án>.<số thứ tự>, ví dụ TASK-PRJ-201026-01.1
+async function generateProjectTaskCode(projectId: string, projectCode: string, skip = 0): Promise<string> {
+  const prefix = `TASK-${projectCode}.`
+  const { data } = await supabase.from('tasks').select('task_code').eq('project_id', projectId)
+  let maxN = 0
+  ;(data ?? []).forEach((r: any) => {
+    const c = String(r.task_code ?? '')
+    if (!c.startsWith(prefix)) return
+    const n = parseInt(c.slice(prefix.length), 10)
+    if (!Number.isNaN(n) && n > maxN) maxN = n
+  })
+  return `${prefix}${maxN + 1 + skip}`
+}
+
+function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
+  project: Project; users: User[]; currentUser: User; canAssign: boolean; onClose: () => void
+}) {
+  const todayStr = new Date().toISOString().split('T')[0]
+  const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
+  const [assignees, setAssignees] = useState<string[]>(canAssign ? [] : [currentUser.id])
+  const [priority, setPriority] = useState<TaskPriority>('medium')
+  const [exp, setExp] = useState(getExpRange('medium', false, false).suggested)
+  const [startDate, setStartDate] = useState(todayStr)
+  const [dueDate, setDueDate] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const inp = { background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
+  const lab = 'text-xs font-semibold mb-1 block'
+  const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? id
+  const range = getExpRange(priority, false, false)
+  const memberUsers = users.filter(u => project.memberIds.includes(u.id))
+  const otherUsers = users.filter(u => !project.memberIds.includes(u.id))
+
+  const changePriority = (p: TaskPriority) => { setPriority(p); setExp(getExpRange(p, false, false).suggested) }
+
+  const submit = async () => {
+    if (!title.trim()) { setError('Vui lòng nhập tên task.'); return }
+    if (assignees.length === 0) { setError('Vui lòng chọn ít nhất một người phụ trách.'); return }
+    if (dueDate && dueDate < startDate) { setError('Hạn hoàn thành phải sau ngày bắt đầu.'); return }
+    if (exp < range.min || exp > range.max) {
+      setError(`Điểm EXP phải nằm trong khoảng ${range.min}–${range.max} cho mức độ "${PRIORITY_CONFIG[priority].label}".`)
+      return
+    }
+    setSaving(true); setError('')
+    const creatingForSelf = !canAssign
+    const finalDue = dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]
+
+    let newTask: any = null
+    let lastError: any = null
+    let code = ''
+    for (let i = 0; i < 3; i++) {
+      code = await generateProjectTaskCode(project.id, project.code, i)
+      const res = await supabase.from('tasks').insert({
+        title: title.trim(), description: description.trim(), exp_reward: exp,
+        task_code: code, project_id: project.id,
+        work_status: 'received', status: 'open',
+        assigned_to: assignees,
+        project_manager: project.managerId ? [project.managerId] : [],
+        supporters: [],
+        created_by: currentUser.id,
+        start_date: startDate, due_date: finalDue,
+        category: 'development', priority, self_created: creatingForSelf,
+        important: false, urgent: false, is_team_project: false,
+        cross_dept_pending: false, target_team_id: null,
+        drive_folder_created: false, drive_folder_name: null,
+      }).select('id').single()
+      newTask = res.data; lastError = res.error
+      if (!lastError || lastError.code !== '23505') break
+    }
+    if (lastError || !newTask) { setSaving(false); setError(lastError?.message ?? 'Không tạo được task.'); return }
+
+    // Người được giao mà chưa là thành viên thì tự thêm vào dự án
+    const missing = assignees.filter(uid => !project.memberIds.includes(uid))
+    if (missing.length > 0) {
+      await supabase.from('project_members').insert(missing.map(uid => ({ project_id: project.id, user_id: uid, role: 'member' })))
+    }
+
+    // Thông báo: người được giao và quản lý dự án
+    const where = `trong dự án [${project.code}] ${project.name}`
+    const notified = new Set<string>()
+    if (canAssign) {
+      for (const uid of assignees) {
+        if (uid === currentUser.id) continue
+        notified.add(uid)
+        await supabase.from('notifications').insert({
+          message: `📋 ${currentUser.name} vừa giao task [${code}] cho bạn ${where}: ${title.trim()}`,
+          target_user_id: uid, link_task_id: newTask.id,
+        })
+      }
+    }
+    if (project.managerId && project.managerId !== currentUser.id && !notified.has(project.managerId)) {
+      await supabase.from('notifications').insert({
+        message: creatingForSelf
+          ? `🎯 ${currentUser.name} vừa tự tạo task [${code}] ${where}: ${title.trim()}`
+          : `🗂️ ${currentUser.name} vừa tạo task [${code}] ${where}, giao cho ${assignees.map(nameOf).join(', ')}: ${title.trim()}`,
+        target_user_id: project.managerId, link_task_id: newTask.id,
+      })
+    }
+    setSaving(false)
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }}>
+      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>＋ Thêm task vào dự án</h3>
+          <button type="button" onClick={onClose} style={{ color: 'var(--text-muted)' }}>✕</button>
+        </div>
+        <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
+          <span className="font-mono">[{project.code}]</span> {project.name} · mã task sẽ là <b>TASK-{project.code}.số</b> (tự sinh khi lưu)
+        </p>
+        <div className="space-y-3">
+          <div>
+            <label className={lab} style={{ color: 'var(--text-muted)' }}>Tên task *</label>
+            <input value={title} onChange={e => setTitle(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inp} />
+          </div>
+          <div>
+            <label className={lab} style={{ color: 'var(--text-muted)' }}>Mô tả</label>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3} className="w-full px-3 py-2 rounded-lg text-sm outline-none resize-none" style={inp} />
+          </div>
+
+          <div>
+            <label className={lab} style={{ color: 'var(--text-muted)' }}>Người phụ trách *</label>
+            {canAssign ? (
+              <>
+                <div className="flex flex-wrap gap-1.5 mb-1.5">
+                  {assignees.map(id => (
+                    <span key={id} className="text-xs px-2 py-0.5 rounded-full flex items-center gap-1" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-primary)' }}>
+                      {nameOf(id)}
+                      <button type="button" onClick={() => setAssignees(a => a.filter(x => x !== id))} style={{ color: '#dc2626' }}>✕</button>
+                    </span>
+                  ))}
+                </div>
+                <select value="" onChange={e => { const v = e.target.value; if (v && !assignees.includes(v)) setAssignees(a => [...a, v]) }}
+                  className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inp}>
+                  <option value="">＋ Thêm người phụ trách...</option>
+                  {memberUsers.length > 0 && (
+                    <optgroup label="⭐ Thành viên dự án">
+                      {memberUsers.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+                    </optgroup>
+                  )}
+                  {TEAMS.map(t => {
+                    const list = otherUsers.filter(u => u.teamId === t.id)
+                    return list.length === 0 ? null : (
+                      <optgroup key={t.id} label={`${t.emoji} ${t.name}`}>
+                        {list.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+                      </optgroup>
+                    )
+                  })}
+                </select>
+                <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>Người chưa trong dự án sẽ tự được thêm vào thành viên.</p>
+              </>
+            ) : (
+              <p className="text-sm" style={{ color: 'var(--text-primary)' }}>{currentUser.name} (bạn tự nhận)</p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={lab} style={{ color: 'var(--text-muted)' }}>Mức độ</label>
+              <select value={priority} onChange={e => changePriority(e.target.value as TaskPriority)} className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inp}>
+                {(['low', 'medium', 'high'] as TaskPriority[]).map(p => <option key={p} value={p}>{PRIORITY_CONFIG[p].label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={lab} style={{ color: 'var(--text-muted)' }}>EXP ({range.min}–{range.max})</label>
+              <input type="number" value={exp} onChange={e => setExp(Number(e.target.value))} className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inp} />
+            </div>
+            <div>
+              <label className={lab} style={{ color: 'var(--text-muted)' }}>Ngày bắt đầu</label>
+              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inp} />
+            </div>
+            <div>
+              <label className={lab} style={{ color: 'var(--text-muted)' }}>Hạn hoàn thành</label>
+              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inp} />
+            </div>
+          </div>
+        </div>
+        {error && <p className="text-xs mt-3" style={{ color: '#dc2626' }}>{error}</p>}
+        <div className="flex justify-end gap-2 mt-4">
+          <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>Hủy</button>
+          <button type="button" onClick={submit} disabled={saving} className="px-4 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-60" style={{ background: '#7c3aed' }}>
+            {saving ? 'Đang lưu...' : 'Tạo task'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ===== Thảo luận của dự án =====
+function ProjectDiscussion({ project, currentUser, users }: { project: Project; currentUser: User; users: User[] }) {
+  const [comments, setComments] = useState<{ id: string; userId: string; content: string; createdAt: string }[]>([])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [sending, setSending] = useState(false)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  const mapC = (c: any) => ({ id: c.id as string, userId: c.user_id as string, content: c.content as string, createdAt: c.created_at as string })
+  const addUnique = (c: { id: string; userId: string; content: string; createdAt: string }) =>
+    setComments(prev => (prev.some(x => x.id === c.id) ? prev : [...prev, c]))
+  const fmtWhen = (s: string) => new Date(s).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+
+  useEffect(() => {
+    setLoading(true)
+    supabase.from('project_comments').select('*').eq('project_id', project.id).order('created_at')
+      .then(({ data }) => { setComments((data ?? []).map(mapC)); setLoading(false) })
+    const ch = supabase.channel(`project-comments-${project.id}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'project_comments', filter: `project_id=eq.${project.id}` },
+        payload => addUnique(mapC(payload.new)))
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [project.id])
+
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight
+  }, [comments.length])
+
+  const send = async () => {
+    const content = input.trim()
+    if (!content || sending) return
+    setSending(true)
+    const { data, error } = await supabase.from('project_comments')
+      .insert({ project_id: project.id, user_id: currentUser.id, content }).select('*').single()
+    setSending(false)
+    if (error) { alert('Không gửi được bình luận: ' + error.message); return }
+    setInput('')
+    if (data) addUnique(mapC(data))
+  }
+
+  return (
+    <section className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+      <h3 className="text-sm font-bold mb-3" style={{ color: 'var(--text-primary)' }}>💬 Thảo luận ({comments.length})</h3>
+      {loading ? (
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Đang tải...</p>
+      ) : (
+        <div ref={listRef} className="space-y-3 max-h-80 overflow-y-auto mb-3 pr-1">
+          {comments.length === 0 && <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>Chưa có bình luận nào. Hãy là người đầu tiên.</p>}
+          {comments.map(c => {
+            const u = users.find(x => x.id === c.userId)
+            return (
+              <div key={c.id} className="flex items-start gap-2">
+                {u && <CharAvatar user={u} size={26} />}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-1.5 flex-wrap">
+                    <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{u?.name ?? 'Ẩn danh'}</span>
+                    {c.userId === project.managerId && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#7c3aed22', color: '#7c3aed' }}>PM</span>
+                    )}
+                    <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{fmtWhen(c.createdAt)}</span>
+                  </div>
+                  <p className="text-xs break-words whitespace-pre-wrap" style={{ color: 'var(--text-primary)' }}>{c.content}</p>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      <div className="flex gap-1.5">
+        <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()}
+          placeholder="Viết bình luận cho cả dự án..."
+          className="flex-1 min-w-0 px-3 py-2 rounded-lg text-xs outline-none"
+          style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+        <button type="button" onClick={send} disabled={!input.trim() || sending}
+          className="px-4 py-2 rounded-lg text-xs font-bold disabled:opacity-40 flex-shrink-0" style={{ background: '#7c3aed', color: '#fff' }}>Gửi</button>
+      </div>
+    </section>
+  )
+}
+
+// ===== Tờ trình & đề xuất liên quan đến dự án =====
+function ProjectProposals({ project, proposals, users, currentUser, canManage, onOpenProposal }: {
+  project: Project; proposals: Proposal[]; users: User[]; currentUser: User; canManage: boolean
+  onOpenProposal?: (proposalId: string) => void
+}) {
+  const [code, setCode] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const me = currentUser.id
+  const isDir = !!currentUser.isDirector
+  const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
+  const involved = (p: Proposal) => p.submittedBy === me || p.recipientId === me || p.participants.includes(me)
+  const canView = (p: Proposal) => canManage || isDir || involved(p)
+  const groupOf = (p: Proposal) => p.groupName ?? (p.kind === 'totrinh' ? 'Tờ trình' : 'Đề xuất')
+  const chip = (p: Proposal): [string, string, string] =>
+    p.status === 'pending' ? ['⏳ Chờ duyệt', '#fbbf2422', '#d97706']
+    : p.status === 'rejected' && p.rejectedReason?.startsWith('[REVIEW]') ? ['🔁 Xem xét lại', '#fbbf2433', '#b45309']
+    : p.status === 'rejected' ? ['❌ Từ chối', '#f8717122', '#dc2626']
+    : ['✅ Đã duyệt', '#34d39922', '#059669']
+
+  const allLinked = proposals.filter(p => p.projectId === project.id)
+  const linked = allLinked.filter(canView).sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  const hidden = allLinked.length - linked.length
+  const candidates = proposals.filter(p => !p.projectId && p.code && (isDir || involved(p)))
+
+  const link = async () => {
+    const c = code.trim().toUpperCase()
+    if (!c) return
+    setMsg('')
+    const p = proposals.find(x => (x.code ?? '').toUpperCase() === c)
+    if (!p || !(isDir || involved(p))) { setMsg(`Không tìm thấy tờ trình ${c}, hoặc bạn không có quyền gắn.`); return }
+    if (p.projectId === project.id) { setMsg('Tờ trình này đã gắn vào dự án rồi.'); return }
+    if (p.projectId) { setMsg('Tờ trình này đã gắn vào một dự án khác. Hãy gỡ ở dự án đó trước.'); return }
+    setBusy(true)
+    const { error } = await supabase.from('proposals').update({ project_id: project.id }).eq('id', p.id)
+    setBusy(false)
+    if (error) { setMsg('Không gắn được: ' + error.message); return }
+    setCode('')
+  }
+  const unlink = async (p: Proposal) => {
+    if (!window.confirm(`Gỡ ${p.code ?? 'tờ trình'} khỏi dự án này?`)) return
+    const { error } = await supabase.from('proposals').update({ project_id: null }).eq('id', p.id)
+    if (error) alert('Không gỡ được: ' + error.message)
+  }
+
+  return (
+    <section className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+      <h3 className="text-sm font-bold mb-3" style={{ color: 'var(--text-primary)' }}>📜 Tờ trình & Đề xuất liên quan ({linked.length})</h3>
+      {linked.length === 0 && (
+        <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Chưa có tờ trình hay đề xuất nào gắn vào dự án này.</p>
+      )}
+      {linked.map(p => {
+        const [label, bg, color] = chip(p)
+        return (
+          <div key={p.id} className="py-2" style={{ borderTop: '1px solid var(--border)' }}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
+                  <span className="font-mono text-[11px] mr-2" style={{ color: 'var(--text-muted)' }}>{p.code ?? ''}</span>{p.title}
+                </p>
+                <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                  {groupOf(p)} · {nameOf(p.submittedBy)} · {new Date(p.createdAt).toLocaleDateString('vi-VN')}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="px-2 py-0.5 rounded-lg text-[11px] font-semibold whitespace-nowrap" style={{ background: bg, color }}>{label}</span>
+                {onOpenProposal && <button type="button" onClick={() => onOpenProposal(p.id)} className="text-[11px] underline" style={{ color: '#2563eb' }}>Mở</button>}
+                {(canManage || p.submittedBy === me) && (
+                  <button type="button" onClick={() => unlink(p)} className="text-[11px]" style={{ color: '#dc2626' }}>Gỡ</button>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })}
+      {hidden > 0 && (
+        <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>+ {hidden} tờ trình khác thuộc dự án nhưng bạn không liên quan nên không hiển thị.</p>
+      )}
+      <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+        <div className="flex gap-1.5">
+          <input list="project-proposal-codes" value={code} onChange={e => setCode(e.target.value)} onKeyDown={e => e.key === 'Enter' && link()}
+            placeholder="Chọn hoặc dán mã tờ trình (VD: R-TASK201026-01)"
+            className="flex-1 min-w-0 px-3 py-2 rounded-lg text-xs outline-none"
+            style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+          <datalist id="project-proposal-codes">
+            {candidates.map(p => <option key={p.id} value={p.code}>{p.title}</option>)}
+          </datalist>
+          <button type="button" onClick={link} disabled={!code.trim() || busy}
+            className="px-4 py-2 rounded-lg text-xs font-bold disabled:opacity-40 flex-shrink-0" style={{ background: '#7c3aed', color: '#fff' }}>＋ Gắn</button>
+        </div>
+        {msg && <p className="text-[11px] mt-1.5" style={{ color: '#dc2626' }}>{msg}</p>}
+      </div>
+    </section>
+  )
+}
+
+function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit, onClose, onChanged, onOpenTask, onOpenProposal }: {
+  project: Project; users: User[]; tasks: Task[]; proposals: Proposal[]; currentUser: User; canEdit: boolean
+  onClose: () => void; onChanged: () => void; onOpenTask?: (taskId: string) => void; onOpenProposal?: (proposalId: string) => void
+}) {
+  const [showTaskForm, setShowTaskForm] = useState(false)
+  const [taskFilter, setTaskFilter] = useState<'all' | 'mine' | 'waiting' | 'overdue' | 'done'>('all')
+  const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
+  const money = (n: number) => Number(n || 0).toLocaleString('vi-VN')
+  const fmtD = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN') : '—')
+  const st = PROJECT_STATUS[project.status] ?? PROJECT_STATUS.planning
+  const rk = PROJECT_RISK[project.riskLevel] ?? PROJECT_RISK.medium
+  const todayStr = new Date().toISOString().split('T')[0]
+  const isOverdue = (t: Task) => t.status !== 'completed' && !!t.dueDate && t.dueDate < todayStr
+  const seq = (t: Task) => { const m = (t.taskCode ?? '').match(/\.(\d+)$/); return m ? parseInt(m[1], 10) : 0 }
+  const list = tasks.filter(t => t.projectId === project.id).sort((a, b) => seq(a) - seq(b))
+  const done = list.filter(t => t.status === 'completed').length
+  const waiting = list.filter(t => t.status === 'submitted').length
+  const overdue = list.filter(isOverdue).length
+  const working = list.length - done - waiting
+  const pct = list.length ? Math.round((done / list.length) * 100) : 0
+  const team = TEAMS.find(t => t.id === project.teamId)
+  const canAssign = canEdit || currentUser.role === 'manager'
+  const projectOpen = project.status !== 'closed' && project.status !== 'done'
+
+  const shown = list.filter(t =>
+    taskFilter === 'all' ? true
+    : taskFilter === 'mine' ? (t.assignedTo.includes(currentUser.id) || t.createdBy === currentUser.id)
+    : taskFilter === 'waiting' ? t.status === 'submitted'
+    : taskFilter === 'overdue' ? isOverdue(t)
+    : t.status === 'completed')
+
+  const stateOf = (t: Task): [string, string] => {
+    if (t.status === 'completed') return ['✅ Hoàn thành', '#059669']
+    if (t.status === 'submitted') return ['📤 Chờ duyệt', '#7c3aed']
+    const w = WORK_STATUS_CONFIG[t.workStatus ?? 'received']
+    return [w.label, w.color]
+  }
+  const canOpen = (t: Task) => t.assignedTo.includes(currentUser.id) || t.projectManager.includes(currentUser.id) || t.createdBy === currentUser.id
+
+  const row = (k: string, v: string) => (
+    <div className="grid grid-cols-3 gap-2 py-1 text-xs">
+      <span style={{ color: 'var(--text-muted)' }}>{k}</span>
+      <span className="col-span-2" style={{ color: 'var(--text-primary)' }}>{v || '—'}</span>
+    </div>
+  )
+  const changeStatus = async (v: string) => {
+    const { error } = await supabase.from('projects').update({ status: v }).eq('id', project.id)
+    if (error) { alert('Không đổi được trạng thái: ' + error.message); return }
+    onChanged()
+  }
+  const card = { background: 'var(--bg-panel)', border: '1px solid var(--border)' }
+  const tile = (label: string, value: number, color: string) => (
+    <div className="rounded-lg px-3 py-2 text-center flex-1 min-w-[80px]" style={{ background: 'var(--bg-card-alt)' }}>
+      <div className="text-lg font-bold" style={{ color }}>{value}</div>
+      <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{label}</div>
+    </div>
+  )
+  const filterBtn = (id: typeof taskFilter, label: string) => (
+    <button key={id} type="button" onClick={() => setTaskFilter(id)} className="px-2.5 py-1 rounded-lg text-[11px] font-semibold"
+      style={{ background: taskFilter === id ? '#7c3aed' : 'var(--bg-card-alt)', color: taskFilter === id ? '#fff' : 'var(--text-muted)' }}>{label}</button>
+  )
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
+      <div className="max-w-5xl mx-auto">
+        <button type="button" onClick={onClose} className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>← Danh sách dự án</button>
+        <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
+          <span className="font-mono text-sm mr-2" style={{ color: 'var(--text-muted)' }}>[{project.code}]</span>{project.name}
+        </h2>
+        <div className="flex items-center gap-2 mt-1 mb-4">
+          <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
+          <span className="text-xs font-bold" style={{ color: 'var(--text-muted)' }}>{project.priority}</span>
+          <span className="text-xs font-semibold" style={{ color: rk[1] }}>Rủi ro: {rk[0]}</span>
+          {canEdit && (
+            <select value={project.status} onChange={e => changeStatus(e.target.value)} className="ml-auto px-2 py-1 rounded-lg text-xs outline-none"
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+              {Object.entries(PROJECT_STATUS).map(([k, v]) => <option key={k} value={k}>{v[0]}</option>)}
+            </select>
+          )}
+        </div>
+        <div className="grid md:grid-cols-3 gap-4">
+          <div className="md:col-span-2 space-y-4">
+            <section className="rounded-xl p-4" style={card}>
+              <h3 className="text-sm font-bold mb-2" style={{ color: 'var(--text-primary)' }}>Thông tin dự án</h3>
+              {row('Công ty', project.company ?? '')}
+              {row('Loại', project.cls === 'bau' ? 'Vận hành thường xuyên (BAU)' : 'Dự án (Project)')}
+              {row('Mục tiêu và lý do', project.objective ?? '')}
+              {row('Mô tả', project.description ?? '')}
+              {row('Bên bị ảnh hưởng', project.affected ?? '')}
+              {row('Nhà cung cấp', [project.supplierName, project.supplierRef].filter(Boolean).join(' · '))}
+            </section>
+
+            <section className="rounded-xl p-4" style={card}>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Task của dự án ({list.length})</h3>
+                {projectOpen ? (
+                  <button type="button" onClick={() => setShowTaskForm(true)} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#7c3aed' }}>＋ Thêm task</button>
+                ) : (
+                  <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Dự án đã đóng, không thêm task mới</span>
+                )}
+              </div>
+              <div className="flex gap-2 mb-3 flex-wrap">
+                {tile('Tổng', list.length, 'var(--text-primary)')}
+                {tile('Đang làm', working, '#2563eb')}
+                {tile('Chờ duyệt', waiting, waiting > 0 ? '#7c3aed' : 'var(--text-muted)')}
+                {tile('Quá hạn', overdue, overdue > 0 ? '#dc2626' : 'var(--text-muted)')}
+                {tile('Hoàn thành', done, '#059669')}
+              </div>
+              <div className="flex gap-1.5 mb-2 flex-wrap">
+                {filterBtn('all', 'Tất cả')}
+                {filterBtn('mine', 'Của tôi')}
+                {filterBtn('waiting', 'Chờ duyệt')}
+                {filterBtn('overdue', 'Quá hạn')}
+                {filterBtn('done', 'Hoàn thành')}
+              </div>
+              {shown.length === 0 && (
+                <p className="text-xs py-2" style={{ color: 'var(--text-muted)' }}>
+                  {list.length === 0 ? 'Chưa có task nào. Bấm "＋ Thêm task" để tạo task đầu tiên của dự án.' : 'Không có task nào khớp bộ lọc.'}
+                </p>
+              )}
+              {shown.map(t => {
+                const [stLabel, stColor] = stateOf(t)
+                return (
+                  <div key={t.id} className="py-2" style={{ borderTop: '1px solid var(--border)' }}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
+                          <span className="font-mono text-[11px] mr-2" style={{ color: 'var(--text-muted)' }}>{t.taskCode ?? ''}</span>{t.title}
+                        </p>
+                        <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                          {t.assignedTo.length > 0 ? t.assignedTo.map(id => nameOf(id)).join(', ') : 'Chưa giao'}
+                          {t.selfCreated ? ' · tự tạo' : ''} · Hạn {fmtD(t.dueDate)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {isOverdue(t) && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#dc262618', color: '#dc2626' }}>⚠️ Quá hạn</span>}
+                        <span className="text-[11px] font-semibold" style={{ color: stColor }}>{stLabel}</span>
+                        {onOpenTask && canOpen(t) && (
+                          <button type="button" onClick={() => onOpenTask(t.id)} className="text-[11px] underline" style={{ color: '#2563eb' }}>Mở</button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </section>
+          </div>
+
+          <div className="space-y-4">
+            <section className="rounded-xl p-4" style={card}>
+              <h3 className="text-sm font-bold mb-2" style={{ color: 'var(--text-primary)' }}>Tiến độ</h3>
+              <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--bg-card-alt)' }}>
+                <div className="h-full" style={{ width: `${pct}%`, background: '#059669' }} />
+              </div>
+              <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{pct}% · {done}/{list.length} task hoàn thành</p>
+              {row('Dự kiến bắt đầu', fmtD(project.plannedStart))}
+              {row('Dự kiến kết thúc', fmtD(project.plannedEnd))}
+              {row('Ngân sách', `${money(project.budget)} VNĐ`)}
+            </section>
+            <section className="rounded-xl p-4" style={card}>
+              <h3 className="text-sm font-bold mb-2" style={{ color: 'var(--text-primary)' }}>Con người</h3>
+              {row('Chủ dự án', nameOf(project.ownerId))}
+              {row('Quản lý dự án', nameOf(project.managerId))}
+              {row('Phòng ban chính', team ? `${team.emoji} ${team.name}` : '')}
+              <p className="text-xs mt-2 mb-1 font-semibold" style={{ color: 'var(--text-muted)' }}>Thành viên ({project.memberIds.length})</p>
+              <div className="flex flex-wrap gap-1.5">
+                {project.memberIds.map(id => (
+                  <span key={id} className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-primary)' }}>{nameOf(id)}</span>
+                ))}
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+      <div className="max-w-5xl mx-auto grid md:grid-cols-3 gap-4 mt-4 pb-8">
+        <div className="md:col-span-2 space-y-4">
+          <ProjectProposals project={project} proposals={proposals} users={users} currentUser={currentUser} canManage={canAssign} onOpenProposal={onOpenProposal} />
+          <ProjectDiscussion project={project} currentUser={currentUser} users={users} />
+        </div>
+      </div>
+      {showTaskForm && <ProjectTaskForm project={project} users={users} currentUser={currentUser} canAssign={canAssign} onClose={() => setShowTaskForm(false)} />}
+    </div>
+  )
+}
+
+function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpenProposal }: {
+  currentUser: User; users: User[]; tasks: Task[]; proposals: Proposal[]
+  onOpenTask?: (taskId: string) => void; onOpenProposal?: (proposalId: string) => void
+}) {
+  const [projects, setProjects] = useState<Project[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [openId, setOpenId] = useState<string | null>(null)
+  const [fCompany, setFCompany] = useState('')
+  const [fStatus, setFStatus] = useState('')
+  const [q, setQ] = useState('')
+
+  const load = async () => {
+    const [p, m] = await Promise.all([
+      supabase.from('projects').select('*').order('created_at', { ascending: false }),
+      supabase.from('project_members').select('project_id, user_id'),
+    ])
+    const byProject: Record<string, string[]> = {}
+    ;(m.data ?? []).forEach((x: any) => { (byProject[x.project_id] ??= []).push(x.user_id) })
+    setProjects((p.data ?? []).map((x: any) => mapDbProject(x, byProject[x.id] ?? [])))
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    load()
+    const ch = supabase.channel('projects-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, () => { load() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_members' }, () => { load() })
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [])
+
+  const isDir = !!currentUser.isDirector
+  const isMgr = currentUser.role === 'manager'
+  const canSee = (p: Project) =>
+    isDir || p.createdBy === currentUser.id || p.managerId === currentUser.id || p.ownerId === currentUser.id ||
+    p.memberIds.includes(currentUser.id) || (isMgr && p.teamId === currentUser.teamId)
+  const canEditProject = (p: Project) => isDir || p.managerId === currentUser.id || p.createdBy === currentUser.id
+  const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
+
+  const visible = projects.filter(canSee)
+    .filter(p => !fCompany || p.company === fCompany)
+    .filter(p => !fStatus || p.status === fStatus)
+    .filter(p => !q.trim() || `${p.code} ${p.name}`.toLowerCase().includes(q.trim().toLowerCase()))
+  const open = projects.find(p => p.id === openId)
+  const sel = { background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
+
+  return (
+    <div className="p-6 max-w-5xl mx-auto">
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h2 className="text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>🗂️ Dự án</h2>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{visible.length} dự án</p>
+        </div>
+        {(isMgr || isDir) && (
+          <button type="button" onClick={() => setShowForm(true)} className="px-4 py-2.5 rounded-xl font-bold text-white text-sm"
+            style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', boxShadow: '0 0 20px #7c3aed40' }}>+ Tạo dự án</button>
+        )}
+      </div>
+
+      <div className="flex flex-wrap gap-2 mb-4">
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 Tìm theo mã hoặc tên dự án..." className="flex-1 min-w-[200px] px-3 py-2 rounded-lg text-sm outline-none" style={sel} />
+        <select value={fCompany} onChange={e => setFCompany(e.target.value)} className="px-2 py-2 rounded-lg text-sm outline-none" style={sel}>
+          <option value="">Tất cả công ty</option>
+          {PROJECT_COMPANIES.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select value={fStatus} onChange={e => setFStatus(e.target.value)} className="px-2 py-2 rounded-lg text-sm outline-none" style={sel}>
+          <option value="">Mọi trạng thái</option>
+          {Object.entries(PROJECT_STATUS).map(([k, v]) => <option key={k} value={k}>{v[0]}</option>)}
+        </select>
+      </div>
+
+      {loading && <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Đang tải...</p>}
+      {!loading && visible.length === 0 && (
+        <div className="text-center py-16" style={{ color: 'var(--text-muted)' }}>
+          <div className="text-4xl mb-3">🗂️</div>
+          <div className="text-sm">Chưa có dự án nào</div>
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {visible.map(p => {
+          const st = PROJECT_STATUS[p.status] ?? PROJECT_STATUS.planning
+          const rk = PROJECT_RISK[p.riskLevel] ?? PROJECT_RISK.medium
+          const list = tasks.filter(t => t.projectId === p.id)
+          const done = list.filter(t => t.status === 'completed').length
+          const pct = list.length ? Math.round((done / list.length) * 100) : 0
+          return (
+            <button key={p.id} type="button" onClick={() => setOpenId(p.id)} className="w-full text-left rounded-xl p-4 hover:opacity-90"
+              style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
+                    <span className="font-mono text-xs mr-2" style={{ color: 'var(--text-muted)' }}>[{p.code}]</span>{p.name}
+                  </p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                    {p.company ?? '—'} · PM: {nameOf(p.managerId)} · {p.plannedStart ? new Date(p.plannedStart).toLocaleDateString('vi-VN') : '—'} → {p.plannedEnd ? new Date(p.plannedEnd).toLocaleDateString('vi-VN') : '—'}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-xs font-bold" style={{ color: 'var(--text-muted)' }}>{p.priority}</span>
+                  <span className="text-[11px] font-semibold" style={{ color: rk[1] }}>● {rk[0]}</span>
+                  <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
+                </div>
+              </div>
+              <div className="mt-3 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--bg-card-alt)' }}>
+                <div className="h-full" style={{ width: `${pct}%`, background: '#059669' }} />
+              </div>
+              <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                {pct}% · {done}/{list.length} task · {p.memberIds.length} thành viên
+                {list.some(t => t.status === 'submitted') && <span style={{ color: '#7c3aed' }}> · 📤 {list.filter(t => t.status === 'submitted').length} chờ duyệt</span>}
+                {list.some(t => t.status !== 'completed' && t.dueDate && t.dueDate < new Date().toISOString().split('T')[0]) && <span style={{ color: '#dc2626' }}> · ⚠️ {list.filter(t => t.status !== 'completed' && t.dueDate && t.dueDate < new Date().toISOString().split('T')[0]).length} quá hạn</span>}
+              </p>
+            </button>
+          )
+        })}
+      </div>
+
+      {showForm && <ProjectForm currentUser={currentUser} users={users} onClose={() => setShowForm(false)} onCreated={load} />}
+      {open && <ProjectDetail project={open} users={users} tasks={tasks} proposals={proposals} currentUser={currentUser} canEdit={canEditProject(open)} onClose={() => setOpenId(null)} onChanged={load} onOpenTask={onOpenTask} onOpenProposal={onOpenProposal} />}
+    </div>
+  )
+}
 // ==================== APP SHELL ====================
 
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: '🏠' },
   { id: 'tasks', label: 'Task', icon: '📋' },
+  { id: 'projects', label: 'Dự án', icon: '🗂️' },
   { id: 'proposals', label: 'Tờ trình', icon: '📜' },
   { id: 'leaderboard', label: 'Xếp hạng', icon: '🏆' },
   { id: 'rewards', label: 'Quà', icon: '🎁' },
@@ -11173,6 +15026,9 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
         <TasksView {...sharedProps} collaborations={collaborations}
           highlightTaskId={highlightTaskId} clearHighlightTaskId={() => setHighlightTaskId(null)} />
       )
+      case 'projects': return <ProjectsView currentUser={currentUser} users={users} tasks={tasks} proposals={proposals}
+        onOpenTask={id => { setView('tasks'); setHighlightTaskId(id) }}
+        onOpenProposal={id => { setView('proposals'); setHighlightProposalId(id) }} />
       case 'leaderboard': return <LeaderboardView users={users} tasks={tasks} />
       case 'rewards': return <RewardsView currentUser={currentUser} redemptions={redemptions} users={users} />
       case 'social': return (
@@ -11376,6 +15232,9 @@ export default function App() {
     ticketInProcessAt: t.ticket_in_process_at ?? undefined,
     ticketCompletedAt: t.ticket_completed_at ?? undefined,
     taskCode: t.task_code ?? undefined,
+    company: t.company ?? undefined,
+    projectId: t.project_id ?? undefined,
+    createdAt: t.created_at ?? undefined,
     slaLevel: t.sla_level ?? undefined,
     workStatus: t.work_status ?? 'received',
     startedAt: t.started_at ?? undefined,
@@ -11399,6 +15258,21 @@ function mapDbProposal(p: any): Proposal {
     participants: p.participants ?? [],
     createdAt: p.created_at,
     signedFileUrl: p.signed_file_url ?? undefined,
+    code: p.code ?? undefined,
+    groupName: p.group_name ?? undefined,
+    department: p.department ?? undefined,
+    company: p.company ?? undefined,
+    brief: p.brief ?? undefined,
+    days: p.days ?? undefined,
+    dueDate: p.due_date ?? undefined,
+    approvalMode: p.approval_mode ?? 'seq',
+    items: p.items ?? [],
+    risks: p.risks ?? [],
+    planStatus: p.plan_status ?? 'received',
+    kind: p.kind ?? 'dexuat',
+    projectId: p.project_id ?? undefined,
+    formData: p.form_data ?? {},
+    attachments: p.attachments ?? [],
   }
 }
 function mapDbProposalApproval(a: any): ProposalApproval {
