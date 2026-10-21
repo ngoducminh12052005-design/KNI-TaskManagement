@@ -1509,6 +1509,12 @@ const myTasks = tasks.filter(t =>
     ? pending
     : myTasks.filter(t => (!isTaskGated(t) || needMyApproval(t)) && statusBucket(t) === bucketFilter)
 
+  const [dateFilter, setDateFilter] = useState<DateFilterValue>(EMPTY_DATE_FILTER)
+  const dateActive = dateFilter.year !== null || dateFilter.month !== null || dateFilter.day !== null
+  const tableRows = shown
+    .filter(t => matchDateFilter(t, dateFilter))
+    .slice(0, bucketFilter === 'all' && !dateActive ? 5 : 50)
+
   // Task quản lý đã duyệt (Duyệt cho làm hoặc Close)
   const approvedByMe = showPeople
     ? tasks
@@ -1592,68 +1598,31 @@ const myTasks = tasks.filter(t =>
                 <button type="button" onClick={() => setView('tasks')} className="text-xs font-semibold" style={{ color: '#8b5cf6' }}>Xem tất cả →</button>
               </div>
             </div>
-            <div className="space-y-2">
-              {shown.slice(0, bucketFilter === 'all' ? 5 : 50).map(task => {
-                const bucket = BUCKET_META[statusBucket(task)]
-                return (
-                  <div key={task.id} className={`p-3 rounded-lg flex items-center gap-3 group ${onOpenTask ? 'cursor-pointer hover:opacity-80' : ''}`}
-                    onClick={() => onOpenTask?.(task.id)}
-                    style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
-                    <div className="w-1.5 h-8 rounded-full flex-shrink-0" style={{ background: PRIORITY_CONFIG[task.priority].color }} />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
-                        {task.taskCode && <span className="font-mono text-[11px] mr-2" style={{ color: 'var(--text-muted)' }}>{task.taskCode}</span>}
-                        {task.title}
-                        {task.selfCreated && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#10b98122', color: '#10b981' }}>Tự tạo</span>}
-                        {task.urgent && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#f8717122', color: '#f87171' }}>⏰ GẤP</span>}
-                        {task.important && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#fbbf2422', color: '#d97706' }}>🔥 Quan trọng</span>}
-                      </div>
-                      <div className="text-xs mt-0.5">
-                        <span style={{ color: bucket.color }}>{bucket.label}</span>
-                        <span className="mx-1" style={{ color: 'var(--text-muted)' }}>·</span>
-                        <span style={{ color: 'var(--text-muted)' }}>Hạn {fmtDate(task.dueDate)}</span>
-                      </div>
+            {/* Chờ bạn duyệt: giữ nút Duyệt / Từ chối nhanh ngay trên Dashboard */}
+            {shown.some(needMyApproval) && (
+              <div className="space-y-2 mb-3">
+                {shown.filter(needMyApproval).map(task => (
+                  <div key={task.id} className="p-3 rounded-lg flex items-center gap-3"
+                    style={{ background: '#fbbf2414', border: '1px solid #fbbf2455' }}>
+                    <div className="flex-1 min-w-0 text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                      <span className="font-mono text-[11px] mr-2" style={{ color: 'var(--text-muted)' }}>{task.taskCode}</span>
+                      {task.title}
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0" onClick={e => e.stopPropagation()}>
-                        <span className="text-amber-500 font-bold text-sm" style={{ fontFamily: 'Rajdhani, sans-serif' }}>+{task.expReward}</span>
-
-                        {/* Quản lý: duyệt / từ chối task nhân viên tự tạo */}
-                        {needMyApproval(task) && (
-                          <>
-                            <button onClick={() => rejectSelfTask(task, currentUser)}
-                              className="text-xs px-2.5 py-1 rounded-lg font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>
-                              Từ chối
-                            </button>
-                            <button onClick={() => approveSelfTask(task, currentUser)}
-                              className="text-xs px-2.5 py-1 rounded-lg font-bold" style={{ background: '#34d39922', color: '#059669' }}>
-                              ✓ Duyệt cho làm
-                            </button>
-                          </>
-                        )}
-
-                        {/* Nhân viên: báo đang chờ quản lý duyệt */}
-                        {task.creationApproval === 'pending' && task.createdBy === currentUser.id && (
-                          <span className="text-[10px] px-2 py-1 rounded-lg font-semibold" style={{ background: '#fbbf2422', color: '#d97706' }}>
-                            ⏳ Chờ quản lý duyệt
-                          </span>
-                        )}
-
-                        {task.assignedTo.includes(currentUser.id) && task.status === 'in-progress' && (
-                        <button onClick={() => setView('tasks')}
-                          className="text-xs px-3 py-1 rounded-lg font-semibold" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>
-                          Vào nộp task →
-                        </button>
-                      )}
-                    </div>
+                    <button onClick={() => rejectSelfTask(task, currentUser)}
+                      className="text-xs px-2.5 py-1 rounded-lg font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>Từ chối</button>
+                    <button onClick={() => approveSelfTask(task, currentUser)}
+                      className="text-xs px-2.5 py-1 rounded-lg font-bold" style={{ background: '#34d39922', color: '#059669' }}>✓ Duyệt cho làm</button>
                   </div>
-                )
-              })}
-              {shown.length === 0 && (
-                <div className="text-center py-8" style={{ color: 'var(--text-muted)' }}>
-                  <div className="text-3xl mb-2">{bucketFilter === 'all' ? '🎉' : '📭'}</div>
-                  <div className="text-sm">{bucketFilter === 'all' ? 'Tất cả task đã hoàn thành!' : 'Không có task nào ở trạng thái này'}</div>
-                </div>
-              )}
+                ))}
+              </div>
+            )}
+
+            <TaskDateFilter tasks={myTasks} value={dateFilter} onChange={setDateFilter} />
+
+            <div className="mt-3 overflow-x-auto">
+              <div style={{ minWidth: 900 }}>
+                <TaskListTable tasks={tableRows} users={users} currentUser={currentUser} onOpen={t => onOpenTask?.(t.id)} />
+              </div>
             </div>
           </div>
                     {/* Task bạn đã duyệt (chỉ quản lý) */}
