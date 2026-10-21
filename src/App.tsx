@@ -2434,6 +2434,7 @@
 //     }).eq('id', editingTask.id)
 //   } else {
 //       const creatingForSelf = !isManager || selfMode
+// const needsApproval = creatingForSelf && currentUser.role === 'employee'
 //       const assignedUsers = form.assignedTo.map(uid => users.find(u => u.id === uid)).filter(Boolean) as User[]
 //       const outsideAssignees = assignedUsers.filter(u => u.teamId !== currentUser.teamId)
 //       const isCrossDept = !creatingForSelf && !currentUser.isDirector && outsideAssignees.length > 0
@@ -5809,6 +5810,9 @@ interface Task {
   crossDeptRejected?: boolean
   crossDeptRejectedReason?: string
   crossDeptRejectedBy?: string
+  creationApproval?: 'pending' | 'approved' | 'rejected'
+  creationApprovedBy?: string
+  creationRejectedReason?: string
   targetTeamId?: string
   submissionOwnFolderUrl?: string
   driveFolderCreated?: boolean
@@ -5940,9 +5944,7 @@ const OUTFIT_COLORS = ['#4f46e5', '#059669', '#dc2626', '#d97706', '#0891b2', '#
 const HAIR_STYLE_LABELS = ['Ngắn', 'Vừa', 'Dài', 'Xoăn', 'Afro', 'Đuôi ngựa']
 const ACCESSORY_LABELS = ['Không', 'Kính tròn', 'Kính mát', 'Mũ', 'Băng đầu']
 
-function randomDicebearSeed() {
-  return 'kni-' + Math.random().toString(36).slice(2, 10)
-}
+
 
 const DEFAULT_AVATAR: AvatarConfig = {
   type: 'custom', skinTone: '#E8A87C', hairStyle: 1, hairColor: '#1a1a1a', outfitColor: '#4f46e5', accessory: 0,
@@ -6127,10 +6129,38 @@ function CharacterSVG({ config, w = 100, h = 120, vb = '0 0 100 120' }: {
   )
 }
 
-// Sinh URL avatar từ DiceBear (style Notionists) dựa theo seed lưu trong hồ sơ
-function buildDicebearUrl(avatar: AvatarConfig) {
-  const seed = avatar.dicebearSeed || 'kni-default'
-  return `https://api.dicebear.com/9.x/notionists/svg?seed=${encodeURIComponent(seed)}&backgroundColor=transparent`
+// Chữ cái đầu của tên (bỏ phần trong ngoặc, ví dụ "(IT)")
+function getInitials(name: string) {
+  const clean = name.replace(/\(.*?\)/g, ' ').trim()
+  return clean.split(/\s+/).filter(Boolean).slice(-2).map(w => w[0]).join('').toUpperCase() || '?'
+}
+
+// Cắt vuông ở giữa và thu nhỏ ảnh còn tối đa 256px (JPEG) trước khi lưu vào hồ sơ
+function resizeImageToDataUrl(file: File, maxSize = 256): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('Không đọc được file ảnh.'))
+    reader.onload = () => {
+      const img = new Image()
+      img.onerror = () => reject(new Error('File không phải ảnh hợp lệ.'))
+      img.onload = () => {
+        const side = Math.min(img.width, img.height)
+        const sx = (img.width - side) / 2
+        const sy = (img.height - side) / 2
+        const out = Math.min(maxSize, side)
+        const canvas = document.createElement('canvas')
+        canvas.width = out; canvas.height = out
+        const ctx = canvas.getContext('2d')
+        if (!ctx) { reject(new Error('Trình duyệt không hỗ trợ xử lý ảnh.')); return }
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, out, out)
+        ctx.drawImage(img, sx, sy, side, side, 0, 0, out, out)
+        resolve(canvas.toDataURL('image/jpeg', 0.85))
+      }
+      img.src = reader.result as string
+    }
+    reader.readAsDataURL(file)
+  })
 }
 
 // Compact avatar (head crop) used in cards, chat, lists
@@ -6138,147 +6168,97 @@ function CharAvatar({ user, size = 40 }: { user: User; size?: number }) {
   if (user.avatar.type === 'photo' && user.avatar.photoUrl) {
     return (
       <img src={user.avatar.photoUrl} alt={user.name}
-        style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, border: '2px solid rgba(255,255,255,0.12)', display: 'block' }} />
+        style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, border: '1px solid var(--border)', display: 'block' }} />
     )
   }
+  const palette: [string, string][] = [
+    ['#ede9fe', '#5b21b6'], ['#dbeafe', '#1d4ed8'], ['#dcfce7', '#15803d'],
+    ['#fef3c7', '#b45309'], ['#fce7f3', '#be185d'], ['#e0f2fe', '#0369a1'],
+  ]
+  const seed = Array.from(user.id).reduce((s, c) => s + c.charCodeAt(0), 0)
+  const [bg, fg] = palette[seed % palette.length]
+  const initials = getInitials(user.name)
   return (
-    <div style={{
-      width: size, height: size, borderRadius: '50%', overflow: 'hidden', flexShrink: 0,
-      border: `2px solid ${user.avatar.outfitColor}40`, background: `${user.avatar.outfitColor}18`,
-    }}>
-      <img src={buildDicebearUrl(user.avatar)} alt={user.name}
-        style={{ width: '100%', height: '100%', display: 'block', objectFit: 'cover' }} />
-    </div>
+    <div title={user.name} style={{
+      width: size, height: size, borderRadius: '50%', flexShrink: 0, background: bg, color: fg,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontWeight: 700, fontSize: Math.max(10, Math.round(size * 0.38)), letterSpacing: 0.3,
+    }}>{initials}</div>
   )
 }
 
-// Large avatar used in profile/login preview
-function FullAvatar({ avatar, size = 120 }: { avatar: AvatarConfig; size?: number }) {
+// Ảnh đại diện lớn dùng ở hồ sơ, dashboard. Chưa có ảnh thì hiện chữ cái đầu của tên
+function FullAvatar({ avatar, size = 120, name }: { avatar: AvatarConfig; size?: number; name?: string }) {
   if (avatar.type === 'photo' && avatar.photoUrl) {
     return (
-      <img src={avatar.photoUrl} alt="avatar"
-        style={{ width: size, height: size, borderRadius: '12px', objectFit: 'cover', border: '2px solid rgba(255,255,255,0.12)', display: 'block' }} />
+      <img src={avatar.photoUrl} alt={name ?? 'avatar'}
+        style={{ width: size, height: size, borderRadius: '12px', objectFit: 'cover', display: 'block' }} />
     )
   }
   return (
-    <img src={buildDicebearUrl(avatar)} alt="avatar"
-      style={{ width: size, height: size, display: 'block' }} />
+    <div title={name} style={{
+      width: size, height: size, borderRadius: '12px', background: `${avatar.outfitColor}22`, color: avatar.outfitColor,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontWeight: 800, fontSize: Math.round(size * 0.38), letterSpacing: 1,
+    }}>{name ? getInitials(name) : '?'}</div>
   )
 }
 
 // ==================== AVATAR CREATOR ====================
 
-function AvatarCreator({ value, onChange }: { value: AvatarConfig; onChange: (a: AvatarConfig) => void }) {
-  const [tab, setTab] = useState<'custom' | 'photo'>(value.type === 'photo' ? 'photo' : 'custom')
+// ==================== AVATAR UPLOADER (chỉ tải ảnh, không còn nhân vật) ====================
+
+function AvatarCreator({ value, onChange, name }: { value: AvatarConfig; onChange: (a: AvatarConfig) => void; name?: string }) {
   const fileRef = useRef<HTMLInputElement>(null)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const hasPhoto = value.type === 'photo' && !!value.photoUrl
 
-  const update = (patch: Partial<AvatarConfig>) =>
-    onChange({ ...value, type: 'custom', photoUrl: undefined, ...patch })
-
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
+    e.target.value = ''
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = ev => onChange({ ...value, type: 'photo', photoUrl: ev.target?.result as string })
-    reader.readAsDataURL(file)
+    if (!file.type.startsWith('image/')) { setError('Vui lòng chọn file ảnh (JPG, PNG, WebP).'); return }
+    if (file.size > 10 * 1024 * 1024) { setError('Ảnh lớn hơn 10MB, vui lòng chọn ảnh nhỏ hơn.'); return }
+    setError(''); setBusy(true)
+    try {
+      const url = await resizeImageToDataUrl(file)
+      onChange({ ...value, type: 'photo', photoUrl: url })
+    } catch (err: any) {
+      setError(err?.message ?? 'Không xử lý được ảnh.')
+    }
+    setBusy(false)
   }
+  const removePhoto = () => onChange({ ...value, type: 'custom', photoUrl: undefined })
 
   return (
     <div>
-      {/* Tab switcher */}
-      <div className="flex gap-1 p-0.5 rounded-xl mb-4" style={{ background: '#0a0a1a', border: '1px solid #1e1e3a' }}>
-        {[['custom', '🧑 Nhân vật'], ['photo', '📷 Tải ảnh lên']].map(([id, label]) => (
-          <button key={id} onClick={() => setTab(id as 'custom' | 'photo')}
-            className="flex-1 py-2 rounded-lg text-sm font-medium transition-all"
-            style={{ background: tab === id ? '#7c3aed' : 'transparent', color: tab === id ? '#fff' : '#6b7280' }}>
-            {label}
-          </button>
-        ))}
-      </div>
-
-      <div className="flex gap-5">
-        {/* Preview */}
+      <p className="text-gray-500 text-[10px] uppercase tracking-widest mb-2">Ảnh đại diện</p>
+      <div className="flex gap-5 items-center">
         <div className="flex-shrink-0 flex flex-col items-center gap-2">
-          <div
-            className="rounded-2xl overflow-hidden flex items-center justify-center"
-            style={{
-              width: 110, height: 110,
-              background: `${value.outfitColor}22`,
-              border: `2px solid ${value.outfitColor}50`,
-            }}
-          >
-            <FullAvatar avatar={value} size={96} />
+          <div className="rounded-2xl overflow-hidden flex items-center justify-center"
+            style={{ width: 110, height: 110, background: `${value.outfitColor}22`, border: `2px solid ${value.outfitColor}50` }}>
+            <FullAvatar avatar={value} size={102} name={name} />
           </div>
           <span className="text-gray-600 text-[10px]">Xem trước</span>
         </div>
 
-        {/* Controls */}
-        <div className="flex-1 space-y-3.5 min-w-0">
-          {tab === 'custom' ? (
-            <>
-              <div>
-                <p className="text-gray-500 text-[10px] uppercase tracking-widest mb-2">Nhân vật</p>
-                <button onClick={() => update({ dicebearSeed: randomDicebearSeed() })}
-                  className="w-full py-2.5 rounded-lg text-sm font-semibold transition-all hover:scale-[1.02]"
-                  style={{ background: '#14143a', border: '1px solid #2a2a5a', color: '#a78bfa' }}>
-                  🎲 Đổi nhân vật ngẫu nhiên
-                </button>
-              </div>
-
-              <div>
-                <p className="text-gray-500 text-[10px] uppercase tracking-widest mb-1.5">Màu viền / chủ đạo</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {OUTFIT_COLORS.map(c => (
-                    <button key={c} onClick={() => update({ outfitColor: c })}
-                      className="w-6 h-6 rounded-full transition-all hover:scale-110"
-                      style={{
-                        background: c,
-                        border: `2px solid ${value.outfitColor === c ? 'white' : '#1e1e4a'}`,
-                        boxShadow: value.outfitColor === c ? `0 0 6px ${c}` : 'none',
-                      }} />
-                  ))}
-                </div>
-              </div>
-            </>
-          ) : (
-            /* Photo upload */
-            <div className="flex flex-col gap-3">
-              {value.type === 'photo' && value.photoUrl ? (
-                <div className="text-center">
-                  <img src={value.photoUrl} alt="preview"
-                    className="w-20 h-20 rounded-full object-cover mx-auto mb-2"
-                    style={{ border: '3px solid #7c3aed', boxShadow: '0 0 20px #7c3aed50' }} />
-                  <p className="text-green-400 text-xs mb-1">✓ Đã tải lên thành công</p>
-                </div>
-              ) : (
-                <div
-                  className="rounded-xl flex flex-col items-center justify-center gap-2 cursor-pointer py-6"
-                  style={{ border: '1.5px dashed #2a2a5a', background: '#0a0a1a' }}
-                  onClick={() => fileRef.current?.click()}
-                >
-                  <span className="text-3xl">📷</span>
-                  <p className="text-gray-500 text-xs text-center">Click để chọn ảnh của bạn<br /><span className="text-gray-700">JPG, PNG, WebP</span></p>
-                </div>
-              )}
-
-              <div className="flex gap-2">
-                <button onClick={() => fileRef.current?.click()}
-                  className="flex-1 py-2 rounded-lg text-sm text-violet-400 font-medium"
-                  style={{ background: '#14143a', border: '1px solid #2a2a5a' }}>
-                  {value.type === 'photo' && value.photoUrl ? 'Đổi ảnh' : 'Chọn ảnh'}
-                </button>
-                {value.type === 'photo' && value.photoUrl && (
-                  <button onClick={() => onChange({ ...DEFAULT_AVATAR, dicebearSeed: randomDicebearSeed() })}
-                    className="px-3 py-2 rounded-lg text-xs text-gray-500"
-                    style={{ background: '#14143a', border: '1px solid #1e1e4a' }}>
-                    Dùng nhân vật
-                  </button>
-                )}
-              </div>
-
-              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
-            </div>
-          )}
+        <div className="flex-1 min-w-0 space-y-2.5">
+          <div className="flex gap-2">
+            <button type="button" onClick={() => fileRef.current?.click()} disabled={busy}
+              className="flex-1 py-2.5 rounded-lg text-sm font-semibold disabled:opacity-60"
+              style={{ background: '#14143a', border: '1px solid #2a2a5a', color: '#a78bfa' }}>
+              {busy ? 'Đang xử lý...' : hasPhoto ? '📷 Đổi ảnh' : '📷 Chọn ảnh'}
+            </button>
+            {hasPhoto && (
+              <button type="button" onClick={removePhoto}
+                className="px-3 py-2 rounded-lg text-xs text-gray-400"
+                style={{ background: '#14143a', border: '1px solid #1e1e4a' }}>Xóa ảnh</button>
+            )}
+          </div>
+          <p className="text-gray-600 text-[11px]">JPG, PNG, WebP. Ảnh sẽ tự được cắt vuông và thu nhỏ.</p>
+          {error && <p className="text-xs" style={{ color: '#f87171' }}>{error}</p>}
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
         </div>
       </div>
     </div>
@@ -6660,7 +6640,7 @@ function LoginScreen({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [step] = useState<'setup'>('setup')
   const [role, setRole] = useState<Role>('employee')
   const [name, setName] = useState('')
-  const [avatar, setAvatar] = useState<AvatarConfig>({ ...DEFAULT_AVATAR, dicebearSeed: randomDicebearSeed() })
+  const [avatar, setAvatar] = useState<AvatarConfig>({ ...DEFAULT_AVATAR })
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -6822,7 +6802,7 @@ const handleSignIn = async () => {
           /* --- BƯỚC 2 CỦA ĐĂNG KÝ: tên, avatar + email/password mới --- */
           <div className="rounded-2xl p-6 animate-slide-up" style={{ background: '#0e0e24', border: '1px solid #1e1e4a' }}>
             <div className="mb-5">
-              <h2 className="text-white text-xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif' }}>Tạo hồ sơ nhân vật</h2>
+              <h2 className="text-white text-xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif' }}>Tạo hồ sơ</h2>
             </div>
 
             <div className="grid grid-cols-2 gap-3 mb-4">
@@ -6864,7 +6844,7 @@ const handleSignIn = async () => {
                 style={{ background: '#14143a', border: '1px solid #2a2a5a' }} />
             </div>
 
-            <AvatarCreator value={avatar} onChange={setAvatar} />
+            <AvatarCreator value={avatar} onChange={setAvatar} name={name} />
 
             <label className="flex items-start gap-2.5 mt-5 cursor-pointer select-none">
               <input type="checkbox" checked={agreedTerms} onChange={e => setAgreedTerms(e.target.checked)}
@@ -6918,7 +6898,7 @@ function DashboardView({ currentUser, tasks, users, setTasks, setCurrentUser, se
         <div className="flex items-center gap-5">
           <div className="rounded-2xl overflow-hidden flex-shrink-0"
             style={{ width: 80, height: 96, background: `${currentUser.avatar.outfitColor}20`, border: `2px solid ${currentUser.avatar.outfitColor}40`, boxShadow: `0 0 30px ${currentUser.avatar.outfitColor}30` }}>
-            <FullAvatar avatar={currentUser.avatar} size={72} />
+            <FullAvatar avatar={currentUser.avatar} name={currentUser.name} size={72} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
@@ -7632,6 +7612,52 @@ function MultiUserSelect({ label, options, selected, onToggle, placeholder = 'Ch
 
 //==================== TASKS COMMENTS =====================
 //==================== TASKS COMMENTS =====================
+// ===== Task nhân viên tự tạo phải được quản lý duyệt trước khi làm =====
+const isTaskGated = (t: Task) => t.creationApproval === 'pending' || t.creationApproval === 'rejected'
+
+// Những người được quyền duyệt: quản lý cùng phòng ban với người tạo + quản lý được chọn làm PM của task
+const getTaskApproverIds = (creatorId: string, projectManagerIds: string[], users: User[]) => {
+  const creator = users.find(u => u.id === creatorId)
+  const ids = new Set<string>()
+  users.forEach(u => { if (u.role === 'manager' && creator && u.teamId === creator.teamId && u.id !== creatorId) ids.add(u.id) })
+  projectManagerIds.forEach(id => {
+    const u = users.find(x => x.id === id)
+    if (u?.role === 'manager' && id !== creatorId) ids.add(id)
+  })
+  return Array.from(ids)
+}
+
+const canApproveSelfTask = (task: Task, user: User, users: User[]) => {
+  if (task.creationApproval !== 'pending' || user.id === task.createdBy) return false
+  if (user.isDirector) return true
+  return getTaskApproverIds(task.createdBy, task.projectManager, users).includes(user.id)
+}
+
+async function approveSelfTask(task: Task, approver: User) {
+  const { error } = await supabase.from('tasks').update({
+    creation_approval: 'approved', creation_approved_by: approver.id,
+    creation_approved_at: new Date().toISOString(), creation_rejected_reason: null,
+  }).eq('id', task.id).eq('creation_approval', 'pending')
+  if (error) { alert('Không duyệt được task: ' + error.message); return }
+  await supabase.from('notifications').insert({
+    message: `✅ ${approver.name} đã duyệt task [${task.taskCode ?? task.title}] bạn tự tạo, bạn có thể bắt đầu làm`,
+    target_user_id: task.createdBy, link_task_id: task.id,
+  })
+}
+
+async function rejectSelfTask(task: Task, approver: User) {
+  const reason = window.prompt('Lý do từ chối (người tạo sẽ thấy lý do này):') ?? ''
+  if (reason.trim() === '' && !window.confirm('Bạn chưa nhập lý do, vẫn muốn từ chối?')) return
+  const { error } = await supabase.from('tasks').update({
+    creation_approval: 'rejected', creation_approved_by: approver.id,
+    creation_approved_at: new Date().toISOString(), creation_rejected_reason: reason.trim() || null,
+  }).eq('id', task.id).eq('creation_approval', 'pending')
+  if (error) { alert('Không từ chối được task: ' + error.message); return }
+  await supabase.from('notifications').insert({
+    message: `❌ ${approver.name} đã từ chối task [${task.taskCode ?? task.title}] bạn tự tạo${reason.trim() ? `: ${reason.trim()}` : ''}. Hãy sửa lại rồi gửi duyệt lại`,
+    target_user_id: task.createdBy, link_task_id: task.id,
+  })
+}
 function TaskCommentsPanel({ taskId, currentUser, users }: { taskId: string; currentUser: User; users: User[] }) {
   const [comments, setComments] = useState<{ id: string; userId: string; content: string; createdAt: string }[]>([])
   const [input, setInput] = useState('')
@@ -8353,6 +8379,8 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   }).sort(byCreatedDesc)
 
   const handleStart = async (id: string) => {
+    const t0 = tasks.find(x => x.id === id)
+    if (t0 && isTaskGated(t0)) { alert('Task này chưa được quản lý duyệt nên chưa thể bắt đầu.'); return }
     const now = new Date().toISOString()
     const { error } = await supabase.from('tasks').update({
       status: 'in-progress',
@@ -8516,6 +8544,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   }
 
   const updateWorkStatus = async (task: Task, newStatus: string) => {
+    if (isTaskGated(task)) { alert('Task này chưa được quản lý duyệt nên chưa thể đổi trạng thái.'); return }
     // Xin tạm dừng: phải nhập lý do, và chỉ thực sự chuyển sang "pending" sau khi quản lý duyệt
     if (newStatus === 'pending') {
       if (task.pendingRequestedAt) return // đang chờ duyệt rồi, không gửi lại
@@ -8657,18 +8686,29 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     }
 
     if (editingTask) {
+      const resubmit = editingTask.creationApproval === 'rejected' && editingTask.selfCreated && editingTask.createdBy === currentUser.id
       await supabase.from('tasks').update({
         title: finalTitle, company: form.company || null, description: form.description, exp_reward: form.expReward,
         assigned_to: form.assignedTo, project_manager: form.projectManager, supporters: form.supporters,
         start_date: form.startDate, due_date: form.dueDate,
+        ...(resubmit ? { creation_approval: 'pending', creation_rejected_reason: null } : {}),
         category: form.category, priority: form.priority,
         important: form.important, urgent: form.urgent, is_team_project: form.isTeamProject,
               drive_folder_created: form.driveFolderCreated,
       drive_folder_name: form.driveFolderCreated ? (form.driveFolderName.trim() || null) : null,
       sla_level: form.slaLevel || null,
     }).eq('id', editingTask.id)
+    if (resubmit) {
+      for (const mgrId of getTaskApproverIds(currentUser.id, form.projectManager, users)) {
+        await supabase.from('notifications').insert({
+          message: `🔁 ${currentUser.name} đã chỉnh sửa và gửi duyệt lại task [${editingTask.taskCode ?? finalTitle}]`,
+          target_user_id: mgrId, link_task_id: editingTask.id,
+        })
+      }
+    }
   } else {
       const creatingForSelf = !isManager || selfMode
+      const needsApproval = creatingForSelf && currentUser.role === 'employee'
       const assignedUsers = form.assignedTo.map(uid => users.find(u => u.id === uid)).filter(Boolean) as User[]
       const outsideAssignees = assignedUsers.filter(u => u.teamId !== currentUser.teamId)
       const isCrossDept = !creatingForSelf && !currentUser.isDirector && outsideAssignees.length > 0
@@ -8688,6 +8728,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
         category: form.category, priority: form.priority, self_created: creatingForSelf,
         important: form.important, urgent: form.urgent, is_team_project: form.isTeamProject,
         cross_dept_pending: isCrossDept,
+        creation_approval: needsApproval ? 'pending' : 'approved',
         target_team_id: targetTeamId,
         drive_folder_created: !creatingForSelf && form.driveFolderCreated,
         drive_folder_name: (!creatingForSelf && form.driveFolderCreated) ? (form.driveFolderName.trim() || null) : null,
@@ -8727,11 +8768,12 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
         }
       } else if (creatingForSelf) {
         const taskContent = form.description.trim() || form.title
-        const teamManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)
-        for (const mgr of teamManagers) {
+        for (const mgrId of getTaskApproverIds(currentUser.id, form.projectManager, users)) {
           await supabase.from('notifications').insert({
-            message: `🎯 ${currentUser.name} vừa tự tạo task [${taskCode}]: ${taskContent}`,
-            target_user_id: mgr.id,
+            message: needsApproval
+              ? `🎯 ${currentUser.name} vừa tự tạo task [${taskCode}] và đang chờ bạn duyệt trước khi làm: ${taskContent}`
+              : `🎯 ${currentUser.name} vừa tự tạo task [${taskCode}]: ${taskContent}`,
+            target_user_id: mgrId,
             link_task_id: newTaskId,
           })
         }
@@ -8888,7 +8930,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
 
               <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                 <select value={task.workStatus ?? 'received'}
-                  disabled={!!task.pendingRequestedAt || !!task.isLocked}
+                  disabled={!!task.pendingRequestedAt || !!task.isLocked || isTaskGated(task)}
                   onChange={e => updateWorkStatus(task, e.target.value)}
                   onClick={e => e.stopPropagation()}
                   className="text-xs px-2 py-1 rounded outline-none disabled:opacity-50"
@@ -9014,6 +9056,39 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
                       {task.crossDeptRejectedReason && (
                         <p className="text-xs text-right" style={{ color: 'var(--text-muted)' }}>Lý do: {task.crossDeptRejectedReason}</p>
                       )}
+                    </div>
+
+                  ) : task.creationApproval === 'pending' && canApproveSelfTask(task, currentUser, users) ? (
+                    <div className="flex flex-col gap-1.5 items-end">
+                      <p className="text-[10px] text-right max-w-[220px] leading-relaxed" style={{ color: '#d97706' }}>
+                        🎯 {getUserById(task.createdBy)?.name} tự tạo task này, cần bạn duyệt trước khi làm
+                      </p>
+                      <div className="flex gap-1.5">
+                        <button onClick={() => rejectSelfTask(task, currentUser)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>
+                          Từ chối
+                        </button>
+                        <button onClick={() => approveSelfTask(task, currentUser)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#34d39922', color: '#059669' }}>
+                          ✓ Duyệt cho làm
+                        </button>
+                      </div>
+                    </div>
+
+                  ) : task.creationApproval === 'pending' ? (
+                    <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#fbbf2422', color: '#d97706' }}>
+                      ⏳ Chờ quản lý duyệt task này mới được làm
+                    </span>
+
+                  ) : task.creationApproval === 'rejected' ? (
+                    <div className="flex flex-col gap-1 items-end max-w-[240px]">
+                      <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#f8717122', color: '#dc2626' }}>
+                        ❌ Quản lý {getUserById(task.creationApprovedBy)?.name ?? ''} từ chối
+                      </span>
+                      {task.creationRejectedReason && (
+                        <p className="text-xs text-right" style={{ color: 'var(--text-muted)' }}>Lý do: {task.creationRejectedReason}</p>
+                      )}
+                      <p className="text-[10px] text-right" style={{ color: 'var(--text-muted)' }}>Bấm "Sửa" rồi lưu để gửi duyệt lại</p>
                     </div>
 
                   ) : task.status === 'completed' ? (
@@ -9848,9 +9923,9 @@ function UserProfileCard({ user, onClose, onMessage }: { user: User; onClose: ()
         onClick={e => e.stopPropagation()}
         style={{ background: `linear-gradient(135deg, ${user.avatar.outfitColor}18, var(--bg-panel))`, border: `1px solid ${user.avatar.outfitColor}35` }}>
         <button onClick={onClose} className="absolute top-3 right-3 text-xl leading-none hover:opacity-70" style={{ color: 'var(--text-muted)' }}>×</button>
-        <div className="w-24 h-32 mx-auto mb-3 rounded-2xl overflow-hidden flex items-end justify-center"
+        <div className="w-24 h-24 mx-auto mb-3 rounded-2xl overflow-hidden flex items-center justify-center"
           style={{ background: `${user.avatar.outfitColor}20`, border: `2px solid ${user.avatar.outfitColor}40`, boxShadow: `0 0 24px ${user.avatar.outfitColor}40` }}>
-          <FullAvatar avatar={user.avatar} size={86} />
+          <FullAvatar avatar={user.avatar} name={user.name} size={92} />
         </div>
         <h3 className="font-bold text-lg mb-0.5" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>{user.name}</h3>
         <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>{TEAMS.find(t => t.id === user.teamId)?.name ?? user.department}</p>
@@ -13721,9 +13796,9 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
         <div className="space-y-4">
           <div className="rounded-2xl p-6 text-center"
             style={{ background: `linear-gradient(135deg, ${currentUser.avatar.outfitColor}18, var(--bg-panel))`, border: `1px solid ${currentUser.avatar.outfitColor}30` }}>
-            <div className="w-28 h-36 mx-auto mb-3 rounded-2xl overflow-hidden flex items-end justify-center"
+            <div className="w-28 h-28 mx-auto mb-3 rounded-2xl overflow-hidden flex items-center justify-center"
               style={{ background: `${currentUser.avatar.outfitColor}20`, border: `2px solid ${currentUser.avatar.outfitColor}40`, boxShadow: `0 0 30px ${currentUser.avatar.outfitColor}30` }}>
-              <FullAvatar avatar={currentUser.avatar} size={100} />
+              <FullAvatar avatar={currentUser.avatar} name={currentUser.name} size={108} />
             </div>
             <h3 className="font-bold text-xl mb-0.5" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>{currentUser.name}</h3>
             <p className="text-sm mb-3" style={{ color: 'var(--text-muted)' }}>{currentUser.department}</p>
@@ -13736,7 +13811,7 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
             <button onClick={() => { setDraftAvatar(currentUser.avatar); setDraftName(currentUser.name); setEditing(!editing) }}
               className="mt-4 w-full py-2 rounded-lg text-sm font-medium transition-all"
               style={{ background: editing ? '#7c3aed' : 'var(--bg-card-alt)', color: editing ? '#fff' : 'var(--text-muted)', border: '1px solid var(--border)' }}>
-              {editing ? '↑ Đóng' : '🎭 Đổi tên & nhân vật'}
+              {editing ? '↑ Đóng' : '📷 Đổi tên & ảnh đại diện'}
             </button>
             <button
               onClick={async () => {
@@ -13841,7 +13916,7 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
 
           {editing && (
             <div className="rounded-xl p-4 animate-slide-up" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
-              <h4 className="font-bold mb-4" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>🎭 Tùy chỉnh nhân vật</h4>
+              <h4 className="font-bold mb-4" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>📷 Tên & ảnh đại diện</h4>
 
               <div className="mb-4">
                 <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Tên hiển thị</label>
@@ -13851,7 +13926,7 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
                   style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
               </div>
 
-              <AvatarCreator value={draftAvatar} onChange={setDraftAvatar} />
+              <AvatarCreator value={draftAvatar} onChange={setDraftAvatar} name={draftName} />
               <div className="flex gap-3 mt-4">
                 <button onClick={() => setEditing(false)}
                   className="flex-1 py-2.5 rounded-lg text-sm"
@@ -14245,6 +14320,7 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
         category: 'development', priority, self_created: creatingForSelf,
         important: false, urgent: false, is_team_project: false,
         cross_dept_pending: false, target_team_id: null,
+        creation_approval: creatingForSelf && currentUser.role === 'employee' ? 'pending' : 'approved',
         drive_folder_created: false, drive_folder_name: null,
       }).select('id').single()
       newTask = res.data; lastError = res.error
@@ -14274,7 +14350,7 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
     if (project.managerId && project.managerId !== currentUser.id && !notified.has(project.managerId)) {
       await supabase.from('notifications').insert({
         message: creatingForSelf
-          ? `🎯 ${currentUser.name} vừa tự tạo task [${code}] ${where}: ${title.trim()}`
+          ? `🎯 ${currentUser.name} vừa tự tạo task [${code}] ${where} và đang chờ bạn duyệt trước khi làm: ${title.trim()}`
           : `🗂️ ${currentUser.name} vừa tạo task [${code}] ${where}, giao cho ${assignees.map(nameOf).join(', ')}: ${title.trim()}`,
         target_user_id: project.managerId, link_task_id: newTask.id,
       })
@@ -14580,6 +14656,8 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
     : t.status === 'completed')
 
   const stateOf = (t: Task): [string, string] => {
+    if (t.creationApproval === 'pending') return ['⏳ Chờ duyệt tạo task', '#d97706']
+    if (t.creationApproval === 'rejected') return ['❌ Bị từ chối', '#dc2626']
     if (t.status === 'completed') return ['✅ Hoàn thành', '#059669']
     if (t.status === 'submitted') return ['📤 Chờ duyệt', '#7c3aed']
     const w = WORK_STATUS_CONFIG[t.workStatus ?? 'received']
@@ -14685,6 +14763,12 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
                       <div className="flex items-center gap-2 shrink-0">
                         {isOverdue(t) && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#dc262618', color: '#dc2626' }}>⚠️ Quá hạn</span>}
                         <span className="text-[11px] font-semibold" style={{ color: stColor }}>{stLabel}</span>
+                        {canApproveSelfTask(t, currentUser, users) && (
+                          <>
+                            <button type="button" onClick={() => approveSelfTask(t, currentUser)} className="text-[11px] font-bold" style={{ color: '#059669' }}>✓ Duyệt</button>
+                            <button type="button" onClick={() => rejectSelfTask(t, currentUser)} className="text-[11px] font-bold" style={{ color: '#dc2626' }}>Từ chối</button>
+                          </>
+                        )}
                         {onOpenTask && canOpen(t) && (
                           <button type="button" onClick={() => onOpenTask(t.id)} className="text-[11px] underline" style={{ color: '#2563eb' }}>Mở</button>
                         )}
@@ -14868,6 +14952,13 @@ const NAV = [
   { id: 'social', label: 'Social', icon: '💬' },
   { id: 'profile', label: 'Hồ sơ', icon: '👤' },
 ]
+
+const NAV_GROUPS: { title: string; ids: string[] }[] = [
+  { title: 'Tổng quan', ids: ['dashboard'] },
+  { title: 'Công việc', ids: ['tasks', 'projects', 'proposals'] },
+  { title: 'Cộng đồng', ids: ['leaderboard', 'rewards', 'social'] },
+  { title: 'Hệ thống', ids: ['bodlog', 'profile'] },
+]
 function NotificationBell({ notifications, onNotificationClick }: {
   notifications: { id: string; message: string; createdAt: string; linkChannel?: string; linkDmUserId?: string; linkTaskId?: string; linkProposalId?: string }[]
   onNotificationClick?: (n: { linkChannel?: string; linkDmUserId?: string; linkTaskId?: string; linkProposalId?: string }) => void
@@ -14950,7 +15041,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   proposalRevisions: ProposalRevision[]
 }) {
   const [view, setView] = useState<View>('dashboard')
-  const [theme, setTheme] = useState<ThemeMode>(() => (localStorage.getItem('themeMode') as ThemeMode) || 'dark')
+  const [theme, setTheme] = useState<ThemeMode>(() => (localStorage.getItem('themeMode') as ThemeMode) || 'light')
   const themeVars = useThemeVars(theme)
   const toggleTheme = () => {
     setTheme(prev => {
@@ -15046,44 +15137,62 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
 
   return (
     <div className="flex flex-col md:flex-row h-screen overflow-hidden overflow-x-hidden" style={{ ...themeVars, background: 'var(--bg-app)', fontFamily: 'Inter, sans-serif' }}>
-      {/* Sidebar */}
-      <div className="hidden md:flex w-[72px] flex-col items-center py-4 gap-0.5 flex-shrink-0"
-        style={{ background: 'var(--bg-sidebar)', borderRight: '1px solid var(--border)' }}>
-        <div className="mb-4">
-          <img src={companyLogo} alt="KNI" className="w-10 h-10 rounded-lg object-contain" />
+            {/* Sidebar */}
+      <div className="hidden md:flex w-60 flex-col flex-shrink-0 overflow-y-auto" style={{ background: 'var(--bg-sidebar)', borderRight: '1px solid var(--border)' }}>
+        <div className="flex items-center gap-3 px-5 py-4">
+          <img src={companyLogo} alt="KNI" className="w-9 h-9 rounded-lg object-contain" />
+          <div>
+            <div className="text-sm font-bold leading-tight" style={{ color: 'var(--text-primary)' }}>KNI Work</div>
+            <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Quản lý công việc</div>
+          </div>
         </div>
-        {navItems.map(item => (
-          <button key={item.id}
-            onClick={() => {
-              setView(item.id as View)
-              if (item.id === 'social' && mentionCount > 0) setShowMentions(true)
-            }}
-            title={item.label}
-            className="relative w-14 h-14 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all duration-150"
-            style={{
-              background: view === item.id ? '#1a1a40' : 'transparent',
-              boxShadow: view === item.id ? 'inset 0 0 15px #7c3aed18, 0 0 0 1px #2a2a6a' : 'none',
-            }}>
-            <span className="text-xl">{item.icon}</span>
-            <span className="text-[8px] tracking-wide" style={{ color: view === item.id ? '#a78bfa' : '#374151' }}>{item.label}</span>
-            {item.id === 'social' && mentionCount > 0 && (
-              <span className="absolute top-1 right-1.5 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center font-bold">
-                {mentionCount > 9 ? '9+' : mentionCount}
-              </span>
-            )}
-          </button>
-        ))}
-        <div className="flex-1" />
-        <button onClick={() => setView('profile')} className="mb-1">
-          <div style={{ width: 40, height: 40, borderRadius: '50%', overflow: 'hidden', border: view === 'profile' ? `2px solid ${currentUser.avatar.outfitColor}` : '2px solid rgba(255,255,255,0.08)', background: `${currentUser.avatar.outfitColor}20` }}>
-            <CharAvatar user={currentUser} size={40} />
+        <nav className="flex-1 px-3 pb-3">
+          {NAV_GROUPS.map(group => {
+            const items = group.ids.map(id => navItems.find(n => n.id === id)).filter(Boolean) as typeof navItems
+            if (items.length === 0) return null
+            return (
+              <div key={group.title} className="mb-3">
+                <p className="px-3 py-1.5 text-[11px] font-semibold" style={{ color: 'var(--text-muted)' }}>{group.title}</p>
+                {items.map(item => {
+                  const active = view === item.id
+                  return (
+                    <button key={item.id} type="button"
+                      onClick={() => {
+                        setView(item.id as View)
+                        if (item.id === 'social' && mentionCount > 0) setShowMentions(true)
+                      }}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors text-left mb-0.5"
+                      style={{
+                        background: active ? 'linear-gradient(135deg, #6d5ae6, #5b4bd5)' : 'transparent',
+                        color: active ? '#ffffff' : 'var(--text-secondary)',
+                        boxShadow: active ? '0 6px 16px #6d5ae640' : 'none',
+                      }}>
+                      <span className="text-base w-5 text-center">{item.icon}</span>
+                      <span className="flex-1">{item.label}</span>
+                      {item.id === 'social' && mentionCount > 0 && (
+                        <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center font-bold">
+                          {mentionCount > 9 ? '9+' : mentionCount}
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            )
+          })}
+        </nav>
+        <button type="button" onClick={() => setView('profile')} className="flex items-center gap-3 px-5 py-3 text-left" style={{ borderTop: '1px solid var(--border)' }}>
+          <CharAvatar user={currentUser} size={36} />
+          <div className="min-w-0">
+            <div className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{currentUser.name}</div>
+            <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{currentUser.isDirector ? 'Ban Giám đốc' : currentUser.role === 'manager' ? 'Quản lý' : 'Nhân viên'}</div>
           </div>
         </button>
       </div>
 
         {/* Bottom nav — chỉ hiện trên mobile */}
       <div className="flex md:hidden items-center justify-around py-2 flex-shrink-0"
-        style={{ background: '#06060f', borderTop: '1px solid #1a1a3a' }}>
+        style={{ background: 'var(--bg-sidebar)', borderTop: '1px solid var(--border)' }}>
         {navItems.map(item => (
           <button key={item.id}
             onClick={() => {
@@ -15091,7 +15200,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
               if (item.id === 'social' && mentionCount > 0) setShowMentions(true)
             }}
             className="relative flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-lg"
-            style={{ color: view === item.id ? '#a78bfa' : '#4b5563' }}>
+            style={{ color: view === item.id ? '#6d5ae6' : 'var(--text-muted)' }}>
             <span className="text-lg">{item.icon}</span>
             <span className="text-[9px]">{item.label}</span>
             {item.id === 'social' && mentionCount > 0 && (
@@ -15133,7 +15242,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
               <CharAvatar user={currentUser} size={32} />
               <div className="hidden sm:block">
                 <div className="text-sm font-medium leading-tight truncate max-w-[140px]" title={currentUser.name} style={{ color: 'var(--text-primary)' }}>{currentUser.name}</div>
-                <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{currentUser.role === 'manager' ? '👑 Quản lý' : '⚔️ Nhân viên'}</div>
+                <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{currentUser.isDirector ? 'Ban Giám đốc' : currentUser.role === 'manager' ? 'Quản lý' : 'Nhân viên'}</div>
               </div>
             </div>
 
@@ -15217,6 +15326,9 @@ export default function App() {
     crossDeptRejected: t.cross_dept_rejected ?? false,
     crossDeptRejectedReason: t.cross_dept_rejected_reason ?? undefined,
     crossDeptRejectedBy: t.cross_dept_rejected_by ?? undefined,
+    creationApproval: (t.creation_approval ?? 'approved') as 'pending' | 'approved' | 'rejected',
+    creationApprovedBy: t.creation_approved_by ?? undefined,
+    creationRejectedReason: t.creation_rejected_reason ?? undefined,
     targetTeamId: t.target_team_id ?? undefined,
     submissionOwnFolderUrl: t.submission_own_folder_url ?? undefined,
     driveFolderCreated: t.drive_folder_created ?? false,
