@@ -2467,6 +2467,9 @@ function TaskTracker({ tasks: rawTasks, users, currentUser }: { tasks: Task[]; u
   const [teamSel, setTeamSel] = useState('')
   const [who, setWho] = useState('')
   const [onlyOverdue, setOnlyOverdue] = useState(false)
+  const [yearSel, setYearSel] = useState('')
+  const [monthSel, setMonthSel] = useState('')
+  const [dayStr, setDayStr] = useState('')
   const [, setClock] = useState(0)
   useEffect(() => { const id = setInterval(() => setClock(c => c + 1), 15000); return () => clearInterval(id) }, [])
   const isOver = (t: Task) => isSlaOverdue(t) || !!t.isLocked
@@ -2480,9 +2483,22 @@ function TaskTracker({ tasks: rawTasks, users, currentUser }: { tasks: Task[]; u
     ? rawTasks
     : rawTasks.filter(t => involved(t).some(inMyTeam) || t.targetTeamId === currentUser.teamId)
 
+  // Bộ lọc thời gian: Tất cả → Năm → Tháng → Ngày (tính theo ngày bắt đầu, nếu không có thì ngày tạo)
+  const dateOf = (t: Task) => (t.startDate || t.createdAt || '').slice(0, 10)
+  const years = Array.from(new Set(allTasks.map(t => dateOf(t).slice(0, 4)).filter(Boolean))).sort().reverse()
+  const inYear = (t: Task) => !yearSel || dateOf(t).startsWith(yearSel)
+  const months = Array.from(new Set(allTasks.filter(inYear).map(t => dateOf(t).slice(5, 7)).filter(Boolean))).sort()
+  const timeMatch = (t: Task) => {
+    const d = dateOf(t)
+    if (dayStr) return d === dayStr
+    if (yearSel && d.slice(0, 4) !== yearSel) return false
+    if (monthSel && d.slice(5, 7) !== monthSel) return false
+    return true
+  }
+
   const overdueCount = allTasks.filter(isOver).length
   const tasks = allTasks.filter(t =>
-    (!onlyOverdue || isOver(t)) && (
+    timeMatch(t) && (!onlyOverdue || isOver(t)) && (
       who ? involved(t).includes(who)
       : teamSel ? involved(t).some(id => teamIdOf(id) === teamSel)
       : true))
@@ -2491,10 +2507,11 @@ function TaskTracker({ tasks: rawTasks, users, currentUser }: { tasks: Task[]; u
   const teamsInTasks = isDir
     ? TEAMS.filter(tm => allTasks.some(t => involved(t).some(id => teamIdOf(id) === tm.id)))
     : []
+
   const [notes, setNotes] = useState<{ id: string; taskId: string; userId: string; note: string; createdAt: string }[]>([])
   const [commentCounts, setCommentCounts] = useState<Record<string, number>>({})
   const [drafts, setDrafts] = useState<Record<string, string>>({})
-  const [openComments, setOpenComments] = useState<string | null>(null)
+  const [openId, setOpenId] = useState<string | null>(null)
   const idsKey = tasks.map(t => t.id).join(',')
 
   const load = async () => {
@@ -2522,6 +2539,7 @@ function TaskTracker({ tasks: rawTasks, users, currentUser }: { tasks: Task[]; u
   const userOf = (id: string) => users.find(u => u.id === id)
   const teamOf = (u?: User) => TEAMS.find(t => t.id === u?.teamId)?.name ?? u?.department ?? ''
   const fmtDate = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN') : '—')
+  const fmtShort = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '—')
   const dayKey = (iso: string) => new Date(iso).toLocaleDateString('vi-VN')
 
   const notesOf = (taskId: string) => {
@@ -2532,6 +2550,7 @@ function TaskTracker({ tasks: rawTasks, users, currentUser }: { tasks: Task[]; u
     })
     return Array.from(m.entries())
   }
+  const noteCount = (taskId: string) => notes.filter(n => n.taskId === taskId).length
 
   const addNote = async (taskId: string) => {
     const lines = (drafts[taskId] ?? '').split('\n').map(s => s.replace(/^\s*[-•*]\s*/, '').trim()).filter(Boolean)
@@ -2545,15 +2564,42 @@ function TaskTracker({ tasks: rawTasks, users, currentUser }: { tasks: Task[]; u
     load()
   }
 
-  const th = 'px-2 py-2 text-xs font-bold text-white text-center border border-white/30 whitespace-nowrap'
-  const td = 'px-2 py-2 text-xs align-top border'
-  const cellBorder = { borderColor: 'var(--border)', color: 'var(--text-primary)' }
-  const commentTask = tasks.find(t => t.id === openComments)
+  const chip = (active: boolean) => ({
+    background: active ? '#2563eb' : 'var(--bg-card-alt)',
+    color: active ? '#ffffff' : 'var(--text-primary)',
+    border: `1px solid ${active ? '#2563eb' : 'var(--border)'}`,
+  })
+  const pill = 'px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap'
+  const th = 'px-3 py-2.5 text-[11px] font-bold uppercase tracking-wide text-left'
+  const td = 'px-3 py-3 text-xs align-middle'
+  const openTask = tasks.find(t => t.id === openId)
+  const sel = { background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
+  const cols = ['4%', '23%', '6%', '14%', '9%', '7%', '9%', '7%', '6%', '6%', '9%']
 
   return (
     <div className="mb-6">
-      <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--border)' }}>
-              <div className="flex flex-wrap items-center gap-2 mb-3">
+      {/* Lọc theo thời gian */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <span className="text-base">🗓️</span>
+        <button type="button" onClick={() => { setYearSel(''); setMonthSel(''); setDayStr('') }} className={pill}
+          style={chip(!yearSel && !monthSel && !dayStr)}>All time <span className="opacity-70 ml-1">{allTasks.length}</span></button>
+        {years.map(y => (
+          <button key={y} type="button" onClick={() => { setYearSel(y); setMonthSel(''); setDayStr('') }} className={pill}
+            style={chip(yearSel === y && !dayStr)}>{y} <span className="opacity-70 ml-1">{allTasks.filter(t => dateOf(t).startsWith(y)).length}</span></button>
+        ))}
+        {yearSel && months.length > 0 && <span className="w-px h-5" style={{ background: 'var(--border)' }} />}
+        {yearSel && months.map(m => (
+          <button key={m} type="button" onClick={() => { setMonthSel(monthSel === m ? '' : m); setDayStr('') }} className={pill}
+            style={chip(monthSel === m && !dayStr)}>Th{Number(m)} <span className="opacity-70 ml-1">{allTasks.filter(t => dateOf(t).startsWith(`${yearSel}-${m}`)).length}</span></button>
+        ))}
+        <span className="w-px h-5" style={{ background: 'var(--border)' }} />
+        <label className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>Ngày</label>
+        <input type="date" value={dayStr} onChange={e => setDayStr(e.target.value)} className="px-2 py-1.5 rounded-lg text-xs outline-none" style={sel} />
+        {dayStr && <button type="button" onClick={() => setDayStr('')} className="text-xs" style={{ color: '#dc2626' }}>✕ Bỏ chọn ngày</button>}
+      </div>
+
+      {/* Lọc theo người / phòng ban */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
         <button type="button" onClick={() => { setTeamSel(''); setWho('') }}
           className="px-3 py-1.5 rounded-lg text-xs font-semibold"
           style={{ background: !teamSel && !who ? '#7c3aed' : 'var(--bg-panel)', color: !teamSel && !who ? '#fff' : 'var(--text-muted)', border: '1px solid var(--border)' }}>Tất cả</button>
@@ -2561,16 +2607,12 @@ function TaskTracker({ tasks: rawTasks, users, currentUser }: { tasks: Task[]; u
           className="px-3 py-1.5 rounded-lg text-xs font-semibold"
           style={{ background: who === currentUser.id ? '#7c3aed' : 'var(--bg-panel)', color: who === currentUser.id ? '#fff' : 'var(--text-muted)', border: '1px solid var(--border)' }}>Của tôi</button>
         {isDir && (
-          <select value={teamSel} onChange={e => { setTeamSel(e.target.value); setWho('') }}
-            className="px-2 py-1.5 rounded-lg text-xs outline-none"
-            style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+          <select value={teamSel} onChange={e => { setTeamSel(e.target.value); setWho('') }} className="px-2 py-1.5 rounded-lg text-xs outline-none" style={sel}>
             <option value="">-- Phòng ban --</option>
             {teamsInTasks.map(tm => <option key={tm.id} value={tm.id}>{tm.emoji} {tm.name}</option>)}
           </select>
         )}
-        <select value={who} onChange={e => setWho(e.target.value)}
-          className="px-2 py-1.5 rounded-lg text-xs outline-none"
-          style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+        <select value={who} onChange={e => setWho(e.target.value)} className="px-2 py-1.5 rounded-lg text-xs outline-none" style={sel}>
           <option value="">-- Người phụ trách --</option>
           {peopleIds.map(id => <option key={id} value={id}>{users.find(u => u.id === id)?.name}</option>)}
         </select>
@@ -2582,78 +2624,74 @@ function TaskTracker({ tasks: rawTasks, users, currentUser }: { tasks: Task[]; u
           className="px-3 py-1.5 rounded-lg text-xs font-semibold"
           style={{ background: onlyOverdue ? '#dc2626' : 'var(--bg-panel)', color: onlyOverdue ? '#fff' : 'var(--text-muted)', border: '1px solid var(--border)' }}>Chỉ quá hạn</button>
       </div>
-        <table className="w-full border-collapse" style={{ minWidth: 1700 }}>
+
+      {/* Bảng gọn, vừa một khung */}
+      <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
+        <table className="w-full border-collapse table-fixed">
+          <colgroup>{cols.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
           <thead>
-            <tr style={{ background: '#6d9eeb' }}>
-              <th className={th} style={{ width: 44 }}>No</th>
-              <th className={th} style={{ width: 120 }}>ID Number</th>
-              <th className={th} style={{ width: 90 }}>Company</th>
-              <th className={th} style={{ minWidth: 220 }}>Title</th>
-              <th className={th} style={{ width: 100 }}>Status</th>
-              <th className={th} style={{ width: 70 }}>Priority</th>
-              <th className={th} style={{ width: 130 }}>PIC</th>
-              <th className={th} style={{ width: 130 }}>Support</th>
-              <th className={th} style={{ width: 95 }}>Start Date</th>
-              <th className={th} style={{ width: 95 }}>Due Date</th>
-              <th className={th} style={{ width: 190, background: '#cc4125' }}>SLA / Thời gian</th>
-              <th className={th} style={{ minWidth: 320 }}>Work Note</th>
-              <th className={th} style={{ width: 100, background: '#3c78d8' }}>Comments</th>
+            <tr style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
+              <th className={th}>No.</th>
+              <th className={th}>Task</th>
+              <th className={th}>Co.</th>
+              <th className={th}>Details</th>
+              <th className={th}>Status</th>
+              <th className={th}>Priority</th>
+              <th className={th}>PIC</th>
+              <th className={th}>Sup</th>
+              <th className={th}>Start</th>
+              <th className={th}>Due</th>
+              <th className={th}>Update</th>
             </tr>
           </thead>
           <tbody>
             {tasks.length === 0 && (
-              <tr><td colSpan={13} className="px-3 py-6 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Chưa có task nào.</td></tr>
+              <tr><td colSpan={11} className="px-3 py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Không có task nào trong khoảng này.</td></tr>
             )}
             {tasks.map((t, i) => {
               const sk = t.status === 'completed' ? 'closed' : (t.workStatus ?? 'received')
               const st = TRACKER_STATUS[sk] ?? TRACKER_STATUS.received
-              const days = notesOf(t.id)
+              const pics = t.assignedTo.map(userOf).filter(Boolean) as User[]
+              const sups = t.supporters.map(userOf).filter(Boolean) as User[]
               return (
-                <tr key={t.id} style={isOver(t) ? { background: '#dc262612' } : undefined}>
-                  <td className={`${td} text-center`} style={cellBorder}>{i + 1}</td>
-                  <td className={`${td} font-mono`} style={cellBorder}>{t.taskCode ?? '—'}</td>
-                  <td className={`${td} text-center font-semibold`} style={cellBorder}>{t.company ? (COMPANY_CODES[t.company] ?? t.company) : '—'}</td>
-                  <td className={`${td} font-semibold`} style={cellBorder}>{t.title}</td>
-                  <td className={`${td} text-center`} style={cellBorder}>
-                    <span className="px-2 py-0.5 rounded-md font-semibold whitespace-nowrap" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
+                <tr key={t.id} style={{ borderTop: '1px solid var(--border)', background: isOver(t) ? '#dc262612' : undefined, color: 'var(--text-primary)' }}>
+                  <td className={td} style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                  <td className={td}>
+                    <div className="flex flex-wrap gap-1 mb-1">
+                      {t.category && <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded" style={{ background: '#ede9fe', color: '#6d28d9' }}>{t.category}</span>}
+                      {t.selfCreated && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#dcfce7', color: '#15803d' }}>Tự tạo</span>}
+                      {t.projectId && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#dbeafe', color: '#1d4ed8' }}>Dự án</span>}
+                    </div>
+                    <div className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{t.taskCode ?? '—'}</div>
+                    <div className="text-sm font-semibold leading-snug break-words">{t.title}</div>
                   </td>
-                  <td className={`${td} text-center font-bold`} style={{ ...cellBorder, color: t.slaLevel ? TRACKER_PRIORITY[t.slaLevel] : 'var(--text-muted)' }}>{t.slaLevel ?? '—'}</td>
-                  <td className={td} style={cellBorder}>
-                    {t.assignedTo.length === 0 && '—'}
-                    {t.assignedTo.map(id => (
-                      <div key={id}>{userOf(id)?.name}<div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{teamOf(userOf(id))}</div></div>
+                  <td className={`${td} font-bold`}>{t.company ? (COMPANY_CODES[t.company] ?? t.company) : '—'}</td>
+                  <td className={td} style={{ color: 'var(--text-muted)' }}>
+                    <p className="line-clamp-3 break-words" title={t.description}>{t.description || '—'}</p>
+                  </td>
+                  <td className={td}>
+                    <span className="px-2 py-1 rounded-lg font-semibold whitespace-nowrap" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
+                  </td>
+                  <td className={`${td} font-bold`} style={{ color: t.slaLevel ? TRACKER_PRIORITY[t.slaLevel] : 'var(--text-muted)' }}>{t.slaLevel ?? '—'}</td>
+                  <td className={td}>
+                    {pics.length === 0 && '—'}
+                    {pics.slice(0, 2).map(u => (
+                      <div key={u.id} className="flex items-center gap-1.5 mb-0.5"><CharAvatar user={u} size={20} /><span className="truncate">{u.name}</span></div>
                     ))}
+                    {pics.length > 2 && <span style={{ color: 'var(--text-muted)' }}>+{pics.length - 2}</span>}
                   </td>
-                  <td className={td} style={cellBorder}>
-                    {t.supporters.length === 0 && '—'}
-                    {t.supporters.map(id => (
-                      <div key={id}>{userOf(id)?.name}<div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{teamOf(userOf(id))}</div></div>
-                    ))}
+                  <td className={td}>
+                    {sups.length === 0 && '—'}
+                    <div className="flex flex-wrap gap-0.5">{sups.slice(0, 3).map(u => <CharAvatar key={u.id} user={u} size={22} />)}</div>
+                    {sups.length > 3 && <span style={{ color: 'var(--text-muted)' }}>+{sups.length - 3}</span>}
                   </td>
-                  <td className={`${td} text-center`} style={cellBorder}>{fmtDate(t.startDate)}</td>
-                  <td className={`${td} text-center`} style={cellBorder}>{fmtDate(t.dueDate)}</td>
-                  <td className={td} style={cellBorder}><SlaCell task={t} /></td>
-                  <td className={td} style={cellBorder}>
-                    {days.length === 0 && <p className="mb-1.5" style={{ color: 'var(--text-muted)' }}>Chưa có cập nhật.</p>}
-                    {days.map(([day, list]) => (
-                      <div key={day} className="mb-1.5">
-                        <p className="font-bold">{day}:</p>
-                        {list.map(n => (
-                          <p key={n.id} className="pl-2">- {n.note} <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>({userOf(n.userId)?.name})</span></p>
-                        ))}
-                      </div>
-                    ))}
-                    <textarea value={drafts[t.id] ?? ''} onChange={e => setDrafts(prev => ({ ...prev, [t.id]: e.target.value }))}
-                      rows={2} placeholder={`Hôm nay ${new Date().toLocaleDateString('vi-VN')}: ghi mỗi ý một dòng...`}
-                      className="w-full px-2 py-1 rounded text-xs outline-none resize-none"
-                      style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
-                    <button type="button" onClick={() => addNote(t.id)} disabled={!(drafts[t.id] ?? '').trim()}
-                      className="mt-1 px-2.5 py-1 rounded text-[11px] font-bold text-white disabled:opacity-40" style={{ background: '#0891b2' }}>Ghi lại</button>
-                  </td>
-                  <td className={`${td} text-center`} style={cellBorder}>
-                    <button type="button" onClick={() => setOpenComments(t.id)}
-                      className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#7c3aed' }}>
-                      💬 {commentCounts[t.id] ?? 0}
+                  <td className={td}>{fmtShort(t.startDate)}</td>
+                  <td className={td}>{fmtShort(t.dueDate)}</td>
+                  <td className={td}>
+                    <button type="button" onClick={() => setOpenId(t.id)}
+                      className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap"
+                      style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>
+                      📝 Update ({noteCount(t.id)}){(commentCounts[t.id] ?? 0) > 0 ? ` · 💬${commentCounts[t.id]}` : ''}
                     </button>
                   </td>
                 </tr>
@@ -2663,15 +2701,47 @@ function TaskTracker({ tasks: rawTasks, users, currentUser }: { tasks: Task[]; u
         </table>
       </div>
 
-      {commentTask && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)' }} onClick={() => setOpenComments(null)}>
-          <div className="w-full max-w-lg rounded-2xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }} onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>💬 Comments · {commentTask.taskCode ?? ''} {commentTask.title}</h3>
-              <button type="button" onClick={() => setOpenComments(null)} style={{ color: 'var(--text-muted)' }}>✕</button>
+      {/* Chi tiết: worknote + SLA + comments */}
+      {openTask && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={() => setOpenId(null)}>
+          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }} onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div>
+                <p className="text-[11px] font-mono" style={{ color: 'var(--text-muted)' }}>{openTask.taskCode ?? '—'} · {openTask.company ? (COMPANY_CODES[openTask.company] ?? openTask.company) : '—'}</p>
+                <h3 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>{openTask.title}</h3>
+              </div>
+              <button type="button" onClick={() => setOpenId(null)} style={{ color: 'var(--text-muted)' }}>✕</button>
             </div>
+
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs mb-3" style={{ color: 'var(--text-primary)' }}>
+              <p><span style={{ color: 'var(--text-muted)' }}>PIC: </span>{openTask.assignedTo.map(id => userOf(id)?.name).join(', ') || '—'}</p>
+              <p><span style={{ color: 'var(--text-muted)' }}>Support: </span>{openTask.supporters.map(id => userOf(id)?.name).join(', ') || '—'}</p>
+              <p><span style={{ color: 'var(--text-muted)' }}>Bắt đầu: </span>{fmtDate(openTask.startDate)}</p>
+              <p><span style={{ color: 'var(--text-muted)' }}>Hạn: </span>{fmtDate(openTask.dueDate)}</p>
+              <p className="col-span-2"><span style={{ color: 'var(--text-muted)' }}>Chi tiết: </span>{openTask.description || '—'}</p>
+              <p className="col-span-2"><span style={{ color: 'var(--text-muted)' }}>Phòng ban PIC: </span>{Array.from(new Set(openTask.assignedTo.map(id => teamOf(userOf(id))))).join(', ') || '—'}</p>
+            </div>
+            <div className="mb-4"><SlaCell task={openTask} /></div>
+
+            <h4 className="text-sm font-bold mb-2" style={{ color: 'var(--text-primary)' }}>Work Note</h4>
+            {notesOf(openTask.id).length === 0 && <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Chưa có cập nhật.</p>}
+            {notesOf(openTask.id).map(([day, list]) => (
+              <div key={day} className="mb-2 text-xs" style={{ color: 'var(--text-primary)' }}>
+                <p className="font-bold">{day}:</p>
+                {list.map(n => (
+                  <p key={n.id} className="pl-2">- {n.note} <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>({userOf(n.userId)?.name})</span></p>
+                ))}
+              </div>
+            ))}
+            <textarea value={drafts[openTask.id] ?? ''} onChange={e => setDrafts(prev => ({ ...prev, [openTask.id]: e.target.value }))}
+              rows={3} placeholder={`Hôm nay ${new Date().toLocaleDateString('vi-VN')}: ghi mỗi ý một dòng...`}
+              className="w-full px-2.5 py-2 rounded-lg text-xs outline-none resize-none" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+            <button type="button" onClick={() => addNote(openTask.id)} disabled={!(drafts[openTask.id] ?? '').trim()}
+              className="mt-1.5 mb-4 px-3 py-1.5 rounded-lg text-xs font-bold text-white disabled:opacity-40" style={{ background: '#0891b2' }}>Ghi lại</button>
+
+            <h4 className="text-sm font-bold mb-1" style={{ color: 'var(--text-primary)' }}>💬 Comments ({commentCounts[openTask.id] ?? 0})</h4>
             <p className="text-[11px] mb-2" style={{ color: 'var(--text-muted)' }}>Quản lý ghi nhận xét hoặc yêu cầu bổ sung cho người phụ trách tại đây.</p>
-            <TaskCommentsPanel taskId={commentTask.id} currentUser={currentUser} users={users} />
+            <TaskCommentsPanel taskId={openTask.id} currentUser={currentUser} users={users} />
           </div>
         </div>
       )}
