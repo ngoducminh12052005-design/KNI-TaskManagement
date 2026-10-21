@@ -2961,21 +2961,30 @@ function TaskDateFilter({ tasks, value, onChange }: { tasks: Task[]; value: Date
   const today = new Date()
   const [weekStart, setWeekStart] = useState(() => mondayOf(today))
   const days = tasks.map(taskDay).filter(Boolean)
-  const years = Array.from(new Set(days.map(d => +d.slice(0, 4)))).sort()
-  const activeYear = value.year ?? today.getFullYear()
-  const inYear = days.filter(d => +d.slice(0, 4) === activeYear)
-  const months = Array.from(new Set(inYear.map(d => +d.slice(5, 7) - 1))).sort((a, b) => a - b)
+  const thisYear = today.getFullYear()
+  const dataYears = days.map(d => +d.slice(0, 4))
+  // Cho chọn mọi năm, kể cả năm chưa có task (từ 5 năm trước đến năm sau)
+  const minY = Math.min(thisYear - 5, ...dataYears)
+  const maxY = Math.max(thisYear + 1, ...dataYears)
+  const yearOptions = Array.from({ length: maxY - minY + 1 }, (_, i) => minY + i)
+  const countYear = (y: number) => days.filter(d => +d.slice(0, 4) === y).length
+  const countMonth = (y: number, m: number) => days.filter(d => +d.slice(0, 4) === y && +d.slice(5, 7) - 1 === m).length
   const weekDays = Array.from({ length: 7 }, (_, i) => { const d = new Date(weekStart); d.setDate(d.getDate() + i); return d })
   const WD = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN']
+  const noFilter = value.year === null && value.month === null && value.day === null
 
   const chip = (active: boolean) => ({
     background: active ? '#2563eb' : 'var(--bg-card-alt)',
     color: active ? '#fff' : 'var(--text-primary)',
     border: `1px solid ${active ? '#2563eb' : 'var(--border)'}`,
   })
-  const count = (n: number, active: boolean) => (
-    <span className="ml-1.5 text-[10px] font-normal" style={{ opacity: active ? 0.9 : 0.6 }}>{n}</span>
-  )
+  const selStyle = (active: boolean) => ({
+    background: 'var(--bg-card-alt)',
+    color: 'var(--text-primary)',
+    border: `1px solid ${active ? '#2563eb' : 'var(--border)'}`,
+    fontWeight: active ? 700 : 400,
+  })
+  const lab = 'text-xs font-semibold'
 
   const pickDay = (d: Date) => {
     onChange({ year: d.getFullYear(), month: d.getMonth(), day: dayKey(d) })
@@ -2984,33 +2993,55 @@ function TaskDateFilter({ tasks, value, onChange }: { tasks: Task[]; value: Date
     setWeekStart(mondayOf(today))
     pickDay(today)
   }
+  const changeYear = (v: string) => {
+    if (!v) { onChange(EMPTY_DATE_FILTER); return }
+    const y = +v
+    onChange({ year: y, month: null, day: null })
+    setWeekStart(mondayOf(new Date(y, 0, 1)))
+  }
+  const changeMonth = (v: string) => {
+    const y = value.year ?? thisYear
+    if (v === '') { onChange({ year: y, month: null, day: null }); return }
+    const m = +v
+    onChange({ year: y, month: m, day: null })
+    setWeekStart(mondayOf(new Date(y, m, 1)))
+  }
+  const changeDay = (v: string) => {
+    if (!v) { onChange({ year: value.year, month: value.month, day: null }); return }
+    const d = new Date(`${v}T00:00:00`)
+    setWeekStart(mondayOf(d))
+    pickDay(d)
+  }
 
   return (
     <div className="rounded-xl p-3 mb-3" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-lg">🗓</span>
         <button type="button" onClick={() => onChange(EMPTY_DATE_FILTER)}
-          className="px-3 py-1.5 rounded-lg text-xs font-bold"
-          style={chip(value.year === null && value.month === null && value.day === null)}>All time</button>
-        {years.map(y => {
-          const active = value.year === y && value.month === null && value.day === null
-          return (
-            <button key={y} type="button" onClick={() => onChange({ year: y, month: null, day: null })}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold" style={chip(active)}>
-              {y}{count(days.filter(d => +d.slice(0, 4) === y).length, active)}
-            </button>
-          )
-        })}
+          className="px-3 py-1.5 rounded-lg text-xs font-bold" style={chip(noFilter)}>All time</button>
+
         <span className="w-px h-5 mx-1" style={{ background: 'var(--border)' }} />
-        {months.map(m => {
-          const active = value.month === m && value.day === null && value.year === activeYear
-          return (
-            <button key={m} type="button" onClick={() => onChange({ year: activeYear, month: m, day: null })}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold" style={chip(active)}>
-              Th{m + 1}{count(inYear.filter(d => +d.slice(5, 7) - 1 === m).length, active)}
-            </button>
-          )
-        })}
+
+        <label className={lab} style={{ color: 'var(--text-muted)' }}>Năm</label>
+        <select value={value.year ?? ''} onChange={e => changeYear(e.target.value)}
+          className="px-2 py-1.5 rounded-lg text-xs outline-none" style={selStyle(value.year !== null)}>
+          <option value="">-- Chọn năm --</option>
+          {yearOptions.map(y => <option key={y} value={y}>{y} ({countYear(y)})</option>)}
+        </select>
+
+        <label className={lab} style={{ color: 'var(--text-muted)' }}>Tháng</label>
+        <select value={value.month ?? ''} onChange={e => changeMonth(e.target.value)}
+          className="px-2 py-1.5 rounded-lg text-xs outline-none" style={selStyle(value.month !== null)}>
+          <option value="">Tất cả tháng</option>
+          {Array.from({ length: 12 }, (_, m) => (
+            <option key={m} value={m}>Tháng {m + 1} ({countMonth(value.year ?? thisYear, m)})</option>
+          ))}
+        </select>
+
+        <label className={lab} style={{ color: 'var(--text-muted)' }}>Ngày</label>
+        <input type="date" value={value.day ?? ''} onChange={e => changeDay(e.target.value)}
+          className="px-2 py-1.5 rounded-lg text-xs outline-none" style={selStyle(value.day !== null)} />
+
         <button type="button" onClick={goToday} className="ml-auto px-3 py-1.5 rounded-lg text-xs font-bold" style={chip(value.day === dayKey(today))}>Hôm nay</button>
       </div>
 
@@ -3166,7 +3197,7 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
   const fmtShort = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '—')
   const th = 'px-3 py-2.5 text-[11px] font-bold uppercase tracking-wide text-left'
   const td = 'px-3 py-3 text-xs align-middle'
-  const cols = ['4%', '23%', '6%', '14%', '9%', '7%', '9%', '7%', '6%', '6%', '9%']
+  const cols = ['4%', '14%', '6%', '23%', '9%', '7%', '9%', '7%', '6%', '6%', '9%']
   // Trạng thái dùng cùng nhóm với các thẻ lọc phía trên (Received, In-process, Pending, Completed, Close)
   const toTracker: Record<TaskBucket, string> = { received: 'received', processing: 'processing', pending: 'pending', completed: 'complete', closed: 'closed' }
 
@@ -3207,19 +3238,17 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
                 style={{ borderTop: '1px solid var(--border)', background: over ? '#dc262612' : undefined, color: 'var(--text-primary)' }}>
                 <td className={td} style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
                 <td className={td}>
-                  <div className="flex flex-wrap gap-1 mb-1">
-                    {t.category && <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded" style={{ background: '#ede9fe', color: '#6d28d9' }}>{t.category}</span>}
-                    {t.selfCreated && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#dcfce7', color: '#15803d' }}>Tự tạo</span>}
-                    {t.projectId && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#dbeafe', color: '#1d4ed8' }}>Dự án</span>}
-                    {t.urgent && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#f8717122', color: '#dc2626' }}>⏰ GẤP</span>}
-                    {t.important && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#fbbf2422', color: '#d97706' }}>🔥</span>}
+                  <div className="font-mono text-xs font-bold break-all" style={{ color: 'var(--text-primary)' }}>
+                    {t.taskCode ?? '—'}
+                    {t.urgent && <span className="ml-1" title="Gấp">⏰</span>}
+                    {t.important && <span className="ml-0.5" title="Quan trọng">🔥</span>}
                   </div>
-                  <div className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{t.taskCode ?? '—'}</div>
-                  <div className="text-sm font-semibold leading-snug break-words">{t.title}</div>
                 </td>
                 <td className={`${td} font-bold`}>{t.company ? (COMPANY_CODES[t.company] ?? t.company) : '—'}</td>
-                <td className={td} style={{ color: 'var(--text-muted)' }}>
-                  <p className="line-clamp-3 break-words" title={t.description}>{t.description || '—'}</p>
+                <td className={td}>
+                  <p className="text-sm font-semibold leading-snug break-words" title={t.description || undefined}>
+                    {withCompanyPrefix(t.title, t.company)}
+                  </p>
                 </td>
                 <td className={td}>
                   <span className="px-2 py-1 rounded-lg font-semibold whitespace-nowrap" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
