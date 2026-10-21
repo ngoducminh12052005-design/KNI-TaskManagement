@@ -3040,7 +3040,128 @@ function TaskDateFilter({ tasks, value, onChange }: { tasks: Task[]; value: Date
 // ===== Danh sách task dạng bảng, tất cả nằm trong một khung =====
 const TASK_LIST_COLS = '44px minmax(240px,1.6fr) 64px minmax(180px,2fr) 130px 100px 110px 70px 70px 90px 24px'
 
-function TaskListTable({ tasks, users, onOpen }: { tasks: Task[]; users: User[]; onOpen: (t: Task) => void }) {
+// ===== Khung Update bên phải: ghi chú tiến độ dạng gạch đầu dòng, ngày tự động =====
+function TaskUpdateDrawer({ task, users, currentUser, canWrite, onClose }: {
+  task: Task; users: User[]; currentUser: User; canWrite: boolean; onClose: () => void
+}) {
+  const [notes, setNotes] = useState<{ id: string; userId: string; note: string; createdAt: string }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [draft, setDraft] = useState('')
+  const [sending, setSending] = useState(false)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  const load = async () => {
+    const { data } = await supabase.from('task_work_notes').select('*').eq('task_id', task.id).order('created_at')
+    setNotes((data ?? []).map((x: any) => ({ id: x.id as string, userId: x.user_id as string, note: x.note as string, createdAt: x.created_at as string })))
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    setLoading(true)
+    load()
+    const ch = supabase.channel(`task-updates-${task.id}-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_work_notes', filter: `task_id=eq.${task.id}` }, () => { load() })
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [task.id])
+
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight
+  }, [notes.length])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // Gom theo ngày (ngày lấy từ thời điểm ghi, người dùng không chọn được)
+  const groups: { day: string; items: typeof notes }[] = []
+  notes.forEach(n => {
+    const day = new Date(n.createdAt).toLocaleDateString('vi-VN')
+    const last = groups[groups.length - 1]
+    if (last && last.day === day) last.items.push(n)
+    else groups.push({ day, items: [n] })
+  })
+
+  const send = async () => {
+    const lines = draft.split('\n').map(s => s.replace(/^\s*[-•*]\s*/, '').trim()).filter(Boolean)
+    if (lines.length === 0 || sending) return
+    setSending(true)
+    const base = Date.now()
+    const { error } = await supabase.from('task_work_notes').insert(
+      lines.map((note, i) => ({ task_id: task.id, user_id: currentUser.id, note, created_at: new Date(base + i).toISOString() }))
+    )
+    setSending(false)
+    if (error) { alert('Không ghi được update: ' + error.message); return }
+    setDraft('')
+    load()
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] flex justify-end" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
+      <div className="h-full w-full max-w-[440px] flex flex-col shadow-2xl"
+        style={{ background: 'var(--bg-app)', borderLeft: '1px solid var(--border)' }} onClick={e => e.stopPropagation()}>
+
+        <div className="flex items-start justify-between gap-3 px-5 py-4" style={{ background: 'var(--bg-panel)', borderBottom: '1px solid var(--border)' }}>
+          <div className="flex items-start gap-3 min-w-0">
+            <span className="text-2xl leading-none">📝</span>
+            <div className="min-w-0">
+              <h3 className="text-base font-bold truncate" style={{ color: 'var(--text-primary)' }}>Update — {task.taskCode ?? task.title}</h3>
+              <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{task.title}</p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} className="text-lg leading-none" style={{ color: 'var(--text-muted)' }}>✕</button>
+        </div>
+
+        <div ref={listRef} className="flex-1 overflow-y-auto px-5 py-4 text-sm">
+          {loading ? (
+            <p className="text-center mt-16" style={{ color: 'var(--text-muted)' }}>Loading...</p>
+          ) : groups.length === 0 ? (
+            <p className="text-center mt-16" style={{ color: 'var(--text-muted)' }}>No updates yet.</p>
+          ) : groups.map(g => (
+            <div key={g.day} className="mb-4">
+              <p className="font-bold" style={{ color: 'var(--text-primary)' }}>{g.day}:</p>
+              {g.items.map(n => (
+                <p key={n.id} className="pl-2 mt-0.5 break-words" style={{ color: 'var(--text-primary)' }}>
+                  - {n.note}{' '}
+                  <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>({users.find(u => u.id === n.userId)?.name ?? '—'})</span>
+                </p>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        {canWrite ? (
+          <div className="px-4 pt-3 pb-3" style={{ background: 'var(--bg-panel)', borderTop: '1px solid var(--border)' }}>
+            <div className="flex items-end gap-2">
+              <textarea value={draft} onChange={e => setDraft(e.target.value)} rows={2} placeholder="Write an update..."
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send() }
+                }}
+                className="flex-1 min-w-0 px-3 py-2.5 rounded-xl text-sm outline-none resize-none"
+                style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+              <button type="button" onClick={send} disabled={!draft.trim() || sending} title="Send"
+                className="w-11 h-11 rounded-xl flex items-center justify-center text-white disabled:opacity-40 flex-shrink-0" style={{ background: '#2563eb' }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 2L11 13" /><path d="M22 2l-7 20-4-9-9-4 20-7z" />
+                </svg>
+              </button>
+            </div>
+            <p className="text-[11px] mt-1.5" style={{ color: 'var(--text-muted)' }}>Enter to send · Shift+Enter for a new line</p>
+          </div>
+        ) : (
+          <div className="px-5 py-3 text-xs" style={{ background: 'var(--bg-panel)', borderTop: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+            Bạn chỉ có thể xem update của task này.
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; users: User[]; currentUser: User; onOpen: (t: Task) => void }) {
+  const [updateTask, setUpdateTask] = useState<Task | null>(null)
   const userOf = (id: string) => users.find(u => u.id === id)
   const fmtShort = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '—')
   const th = 'px-3 py-2.5 text-[11px] font-bold uppercase tracking-wide text-left'
@@ -3122,7 +3243,7 @@ function TaskListTable({ tasks, users, onOpen }: { tasks: Task[]; users: User[];
                 <td className={td}>{fmtShort(t.startDate)}</td>
                 <td className={td}>{fmtShort(t.dueDate)}</td>
                 <td className={td}>
-                  <button type="button" onClick={e => { e.stopPropagation(); onOpen(t) }}
+                  <button type="button" onClick={e => { e.stopPropagation(); setUpdateTask(t) }}
                     className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap"
                     style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>
                     📝 Update
@@ -3133,6 +3254,15 @@ function TaskListTable({ tasks, users, onOpen }: { tasks: Task[]; users: User[];
           })}
         </tbody>
       </table>
+      {updateTask && (
+        <TaskUpdateDrawer
+          task={updateTask} users={users} currentUser={currentUser} onClose={() => setUpdateTask(null)}
+          canWrite={
+            updateTask.assignedTo.includes(currentUser.id) || updateTask.supporters.includes(currentUser.id) ||
+            updateTask.projectManager.includes(currentUser.id) || updateTask.createdBy === currentUser.id ||
+            currentUser.role === 'manager'
+          } />
+      )}
     </div>
   )
 }
@@ -3796,7 +3926,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         <TaskDateFilter tasks={scoped} value={dateFilter} onChange={setDateFilter} />
       )}
       {viewMode === 'list' && !expandedRow && (
-        <TaskListTable tasks={visible} users={users} onOpen={t => setExpandedRow(t.id)} />
+        <TaskListTable tasks={visible} users={users} currentUser={currentUser} onOpen={t => setExpandedRow(t.id)} />
       )}
       {viewMode === 'list' && expandedRow && (
         <button type="button" onClick={() => setExpandedRow(null)}
