@@ -1479,10 +1479,10 @@ function DashboardPeople({ currentUser, users, tasks, proposals }: { currentUser
 
 // ==================== DASHBOARD ====================
 
-function DashboardView({ currentUser, tasks, users, proposals, setView, onOpenProposal, onOpenProject, readOnly = false }: {
+function DashboardView({ currentUser, tasks, users, proposals, setView, onOpenProposal, onOpenProject, onOpenTask, readOnly = false }: {
   currentUser: User; tasks: Task[]; users: User[]; proposals: Proposal[]
   setView: (v: View) => void
-  onOpenProposal?: (id: string) => void; onOpenProject?: (id: string) => void
+  onOpenProposal?: (id: string) => void; onOpenProject?: (id: string) => void; onOpenTask?: (id: string) => void
   readOnly?: boolean
 }) {
   const { progress, needed, level } = getExpProgress(currentUser.exp)
@@ -1508,6 +1508,13 @@ const myTasks = tasks.filter(t =>
   const shown = bucketFilter === 'all'
     ? pending
     : myTasks.filter(t => (!isTaskGated(t) || needMyApproval(t)) && statusBucket(t) === bucketFilter)
+
+  // Task quản lý đã duyệt (Duyệt cho làm hoặc Close)
+  const approvedByMe = showPeople
+    ? tasks
+        .filter(t => t.approvedBy === currentUser.id || (t.creationApproval === 'approved' && t.creationApprovedBy === currentUser.id))
+        .sort(byCreatedDesc)
+    : []
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-5">
@@ -1589,11 +1596,13 @@ const myTasks = tasks.filter(t =>
               {shown.slice(0, bucketFilter === 'all' ? 5 : 50).map(task => {
                 const bucket = BUCKET_META[statusBucket(task)]
                 return (
-                  <div key={task.id} className="p-3 rounded-lg flex items-center gap-3 group"
+                  <div key={task.id} className={`p-3 rounded-lg flex items-center gap-3 group ${onOpenTask ? 'cursor-pointer hover:opacity-80' : ''}`}
+                    onClick={() => onOpenTask?.(task.id)}
                     style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
                     <div className="w-1.5 h-8 rounded-full flex-shrink-0" style={{ background: PRIORITY_CONFIG[task.priority].color }} />
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                        {task.taskCode && <span className="font-mono text-[11px] mr-2" style={{ color: 'var(--text-muted)' }}>{task.taskCode}</span>}
                         {task.title}
                         {task.selfCreated && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#10b98122', color: '#10b981' }}>Tự tạo</span>}
                         {task.urgent && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#f8717122', color: '#f87171' }}>⏰ GẤP</span>}
@@ -1605,7 +1614,7 @@ const myTasks = tasks.filter(t =>
                         <span style={{ color: 'var(--text-muted)' }}>Hạn {fmtDate(task.dueDate)}</span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="flex items-center gap-2 flex-shrink-0" onClick={e => e.stopPropagation()}>
                         <span className="text-amber-500 font-bold text-sm" style={{ fontFamily: 'Rajdhani, sans-serif' }}>+{task.expReward}</span>
 
                         {/* Quản lý: duyệt / từ chối task nhân viên tự tạo */}
@@ -1647,7 +1656,35 @@ const myTasks = tasks.filter(t =>
               )}
             </div>
           </div>
-
+                    {/* Task bạn đã duyệt (chỉ quản lý) */}
+          {showPeople && (
+            <div className="rounded-xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-bold flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
+                  ✅ Task bạn đã duyệt
+                  <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: 'var(--border)', color: 'var(--text-muted)' }}>{approvedByMe.length}</span>
+                </h3>
+                <button type="button" onClick={() => setView('tasks')} className="text-xs font-semibold" style={{ color: '#8b5cf6' }}>Xem tất cả →</button>
+              </div>
+              <div className="space-y-2">
+                {approvedByMe.slice(0, 8).map(task => {
+                  const b = BUCKET_META[statusBucket(task)]
+                  return (
+                    <div key={task.id} onClick={() => onOpenTask?.(task.id)}
+                      className={`px-3 py-2.5 rounded-lg flex items-center gap-2 min-w-0 ${onOpenTask ? 'cursor-pointer hover:opacity-80' : ''}`}
+                      style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
+                      <span className="font-mono text-[11px] flex-shrink-0" style={{ color: 'var(--text-muted)' }}>{task.taskCode ?? '—'}</span>
+                      <span className="text-sm font-medium truncate flex-1 min-w-0" style={{ color: 'var(--text-primary)' }}>{task.title}</span>
+                      <span className="text-[11px] font-semibold flex-shrink-0" style={{ color: b.color }}>{b.label}</span>
+                    </div>
+                  )
+                })}
+                {approvedByMe.length === 0 && (
+                  <div className="text-center py-6 text-sm" style={{ color: 'var(--text-muted)' }}>Bạn chưa duyệt task nào</div>
+                )}
+              </div>
+            </div>
+          )}
           <DashboardProposals proposals={proposals} currentUser={currentUser} onOpen={onOpenProposal} onViewAll={() => setView('proposals')} />
           <DashboardProjects currentUser={currentUser} tasks={tasks} onOpen={onOpenProject} onViewAll={() => setView('projects')} />
         </div>
@@ -10246,7 +10283,8 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
     switch (view) {
       case 'dashboard': return <DashboardView {...sharedProps} proposals={proposals}
         onOpenProposal={id => { setView('proposals'); setHighlightProposalId(id) }}
-        onOpenProject={id => { setProjectFocusId(id); setView('projects') }} />
+        onOpenProject={id => { setProjectFocusId(id); setView('projects') }}
+        onOpenTask={id => { setView('tasks'); setHighlightTaskId(id) }} />
       case 'tasks': return (
         <TasksView {...sharedProps} collaborations={collaborations}
           highlightTaskId={highlightTaskId} clearHighlightTaskId={() => setHighlightTaskId(null)} />
