@@ -9960,18 +9960,12 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
                 {/* Topbar */}
         <div className="h-16 flex items-center justify-between px-3 sm:px-5 flex-shrink-0" style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
           <div className="flex items-center gap-2 min-w-0 flex-1">
-            <button type="button" onClick={() => setSidebarPinned(p => !p)} title="Mở / đóng menu"
-              className="hidden md:flex items-center gap-2 mr-2 px-2 py-1 rounded-lg hover:bg-[color:var(--bg-card-alt)] flex-shrink-0">
-              <img src={companyLogo} alt="KNI" className="w-8 h-8 rounded-md object-contain" />
-              <span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>KNI Work</span>
+            <button type="button" onClick={() => { setSidebarCollapsed(c => !c); setSidebarHover(false) }}
+              title={sidebarCollapsed ? 'Hiện menu' : 'Ẩn menu'}
+              className="hidden md:flex items-center justify-center w-9 h-9 mr-2 rounded-lg text-lg hover:bg-[color:var(--bg-card-alt)] flex-shrink-0"
+              style={{ color: 'var(--text-primary)' }}>
+              ☰
             </button>
-            {sidebarCollapsed && (
-  <button type="button" onClick={() => setSidebarCollapsed(false)} title="Hiện menu"
-    className="hidden md:flex items-center gap-2 mr-2 px-2 py-1 rounded-lg hover:bg-[color:var(--bg-card-alt)] flex-shrink-0">
-    <img src={companyLogo} alt="KNI" className="w-8 h-8 rounded-md object-contain" />
-    <span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>KNI Work</span>
-  </button>
-)}
             <h1 className="font-bold text-base sm:text-lg truncate" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
               {navItems.find(n => n.id === view)?.icon} {navItems.find(n => n.id === view)?.label}
             </h1>
