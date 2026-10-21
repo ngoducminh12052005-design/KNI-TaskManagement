@@ -2947,7 +2947,8 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   const [filter, setFilter] = useState<'all' | TaskBucket>('all')
   const [search, setSearch] = useState('')
   const [showCollabModal, setShowCollabModal] = useState(false)
-  const [viewMode, setViewMode] = useState<'cards' | 'tracker'>('cards')
+  const [viewMode, setViewMode] = useState<'cards' | 'list' | 'tracker'>('cards')
+  const [expandedRow, setExpandedRow] = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [openCommentsFor, setOpenCommentsFor] = useState<string | null>(null)
@@ -3551,7 +3552,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       </div>
 
       <div className="flex gap-2 mb-3">
-        {([['cards', '🗂 Thẻ'], ['tracker', '📊 Tracker']] as const).map(([k, label]) => (
+        {([['cards', '🗂 Thẻ'], ['list', '☰ Danh sách'], ['tracker', '📊 Tracker']] as const).map(([k, label]) => (
           <button key={k} type="button" onClick={() => setViewMode(k)}
             className="px-3.5 py-1.5 rounded-lg text-sm font-semibold"
             style={{
@@ -3585,7 +3586,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       </div>
 
       {viewMode === 'tracker' && <TaskTracker tasks={[...(currentUser.isDirector ? tasks : visible)].sort(byCreatedAsc)} users={users} currentUser={currentUser} />}
-      <div className={viewMode === 'tracker' ? 'hidden' : 'grid grid-cols-1 sm:grid-cols-2 gap-4'}>
+      <div className={viewMode === 'tracker' ? 'hidden' : viewMode === 'list' ? 'flex flex-col gap-2' : 'grid grid-cols-1 sm:grid-cols-2 gap-4'}>
         {visible.map(task => {
           const assignees = task.assignedTo.map(getUserById).filter((u): u is User => !!u)
           const pms = task.projectManager.map(getUserById).filter((u): u is User => !!u)
@@ -3599,13 +3600,35 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
           const isFlashed = flashTaskId === task.id
           return (
             <div key={task.id} ref={el => { taskRefs.current[task.id] = el }}
-              className="rounded-xl p-4 flex flex-col transition-all hover:-translate-y-0.5"
+              className={`rounded-xl ${viewMode === 'list' ? 'px-4 py-2.5' : 'p-4'} flex flex-col transition-all hover:-translate-y-0.5`}
               style={{
                 background: isFlashed ? '#7c3aed1a' : 'var(--bg-panel)',
                 border: `1px solid ${isFlashed ? '#7c3aed' : task.status === 'completed' ? '#10b98130' : 'var(--border)'}`,
                 boxShadow: isFlashed ? '0 0 16px #7c3aed40' : 'none',
                 transition: 'background 0.4s ease, border 0.4s ease, box-shadow 0.4s ease',
               }}>
+              {viewMode === 'list' && (
+                <div className="flex items-center gap-3 cursor-pointer" onClick={() => setExpandedRow(r => (r === task.id ? null : task.id))}>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wider flex-shrink-0 hidden md:inline"
+                    style={{ background: `${catColor}20`, color: catColor }}>{task.category}</span>
+                  {task.taskCode && <span className="font-mono text-[11px] flex-shrink-0 hidden sm:inline" style={{ color: 'var(--text-muted)' }}>{task.taskCode}</span>}
+                  <span className="font-semibold text-sm truncate flex-1 min-w-0" style={{ color: 'var(--text-primary)' }}>{task.title}</span>
+                  {task.urgent && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold flex-shrink-0" style={{ background: '#f8717122', color: '#dc2626' }}>⏰ GẤP</span>}
+                  {task.important && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold flex-shrink-0" style={{ background: '#fbbf2422', color: '#d97706' }}>🔥</span>}
+                  <span className="text-xs px-2 py-0.5 rounded flex-shrink-0 hidden sm:inline" style={{ background: pri.bg, color: pri.color }}>{pri.label}</span>
+                  <span className="text-xs flex-shrink-0 hidden md:inline" style={{ color: 'var(--text-muted)' }}>📅 {fmtDate(task.dueDate)}</span>
+                  <span className="text-xs px-2 py-0.5 rounded flex-shrink-0" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: WORK_STATUS_CONFIG[task.workStatus ?? 'received'].color }}>
+                    {WORK_STATUS_CONFIG[task.workStatus ?? 'received'].label}
+                  </span>
+                  <div className="hidden sm:flex -space-x-1.5 flex-shrink-0">
+                    {assignees.slice(0, 3).map(a => <CharAvatar key={a.id} user={a} size={22} />)}
+                  </div>
+                  <span className="text-amber-500 font-black text-sm flex-shrink-0" style={{ fontFamily: 'Rajdhani, sans-serif' }}>+{task.expReward}</span>
+                  <span className="text-xs flex-shrink-0" style={{ color: 'var(--text-muted)' }}>{expandedRow === task.id ? '▴' : '▾'}</span>
+                </div>
+              )}
+              {(viewMode === 'cards' || expandedRow === task.id) && (<>
+              {viewMode === 'list' && <div className="mt-2.5 pt-3" style={{ borderTop: '1px solid var(--border)' }} />}
               {/* Header */}
               <div className="flex items-start justify-between gap-2 mb-2">
                 <div className="flex-1 min-w-0">
@@ -3956,6 +3979,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                   )}
                 </>
               )}
+              </>)}
             </div>
           )
         })}
