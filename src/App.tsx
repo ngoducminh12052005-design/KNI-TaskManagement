@@ -2936,6 +2936,204 @@ function TaskTicketPanel({ task, currentUser, users, canSubmit }: {
   )
 }
 
+// ===== Lọc task theo thời gian (All time / năm / tháng / ngày) =====
+type DateFilterValue = { year: number | null; month: number | null; day: string | null }
+const EMPTY_DATE_FILTER: DateFilterValue = { year: null, month: null, day: null }
+
+const taskDay = (t: Task) => (t.startDate || (t.createdAt ?? '')).slice(0, 10)
+const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const mondayOf = (d: Date) => {
+  const x = new Date(d)
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7))
+  x.setHours(0, 0, 0, 0)
+  return x
+}
+const matchDateFilter = (t: Task, f: DateFilterValue) => {
+  const d = taskDay(t)
+  if (!d) return f.year === null && f.month === null && f.day === null
+  if (f.day) return d === f.day
+  if (f.year !== null && +d.slice(0, 4) !== f.year) return false
+  if (f.month !== null && +d.slice(5, 7) - 1 !== f.month) return false
+  return true
+}
+
+function TaskDateFilter({ tasks, value, onChange }: { tasks: Task[]; value: DateFilterValue; onChange: (v: DateFilterValue) => void }) {
+  const today = new Date()
+  const [weekStart, setWeekStart] = useState(() => mondayOf(today))
+  const days = tasks.map(taskDay).filter(Boolean)
+  const years = Array.from(new Set(days.map(d => +d.slice(0, 4)))).sort()
+  const activeYear = value.year ?? today.getFullYear()
+  const inYear = days.filter(d => +d.slice(0, 4) === activeYear)
+  const months = Array.from(new Set(inYear.map(d => +d.slice(5, 7) - 1))).sort((a, b) => a - b)
+  const weekDays = Array.from({ length: 7 }, (_, i) => { const d = new Date(weekStart); d.setDate(d.getDate() + i); return d })
+  const WD = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN']
+
+  const chip = (active: boolean) => ({
+    background: active ? '#2563eb' : 'var(--bg-card-alt)',
+    color: active ? '#fff' : 'var(--text-primary)',
+    border: `1px solid ${active ? '#2563eb' : 'var(--border)'}`,
+  })
+  const count = (n: number, active: boolean) => (
+    <span className="ml-1.5 text-[10px] font-normal" style={{ opacity: active ? 0.9 : 0.6 }}>{n}</span>
+  )
+
+  const pickDay = (d: Date) => {
+    onChange({ year: d.getFullYear(), month: d.getMonth(), day: dayKey(d) })
+  }
+  const goToday = () => {
+    setWeekStart(mondayOf(today))
+    pickDay(today)
+  }
+
+  return (
+    <div className="rounded-xl p-3 mb-3" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-lg">🗓</span>
+        <button type="button" onClick={() => onChange(EMPTY_DATE_FILTER)}
+          className="px-3 py-1.5 rounded-lg text-xs font-bold"
+          style={chip(value.year === null && value.month === null && value.day === null)}>All time</button>
+        {years.map(y => {
+          const active = value.year === y && value.month === null && value.day === null
+          return (
+            <button key={y} type="button" onClick={() => onChange({ year: y, month: null, day: null })}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold" style={chip(active)}>
+              {y}{count(days.filter(d => +d.slice(0, 4) === y).length, active)}
+            </button>
+          )
+        })}
+        <span className="w-px h-5 mx-1" style={{ background: 'var(--border)' }} />
+        {months.map(m => {
+          const active = value.month === m && value.day === null && value.year === activeYear
+          return (
+            <button key={m} type="button" onClick={() => onChange({ year: activeYear, month: m, day: null })}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold" style={chip(active)}>
+              Th{m + 1}{count(inYear.filter(d => +d.slice(5, 7) - 1 === m).length, active)}
+            </button>
+          )
+        })}
+        <button type="button" onClick={goToday} className="ml-auto px-3 py-1.5 rounded-lg text-xs font-bold" style={chip(value.day === dayKey(today))}>Hôm nay</button>
+      </div>
+
+      <div className="flex items-center justify-center gap-2 mt-3">
+        <button type="button" onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() - 7); setWeekStart(d) }}
+          className="w-8 h-12 rounded-lg" style={chip(false)}>‹</button>
+        {weekDays.map((d, i) => {
+          const key = dayKey(d)
+          const active = value.day === key
+          const n = days.filter(x => x === key).length
+          return (
+            <button key={key} type="button" onClick={() => pickDay(d)}
+              className="w-14 h-12 rounded-lg flex flex-col items-center justify-center"
+              style={{ ...chip(active), color: active ? '#fff' : i === 5 ? '#0ea5e9' : i === 6 ? '#ef4444' : 'var(--text-primary)' }}>
+              <span className="text-[10px] font-semibold">{WD[i]}</span>
+              <span className="text-sm font-bold leading-tight">{d.getDate()}{n > 0 && <span className="ml-0.5 text-[9px] align-top">•</span>}</span>
+            </button>
+          )
+        })}
+        <button type="button" onClick={() => { const d = new Date(weekStart); d.setDate(d.getDate() + 7); setWeekStart(d) }}
+          className="w-8 h-12 rounded-lg" style={chip(false)}>›</button>
+      </div>
+    </div>
+  )
+}
+
+// ===== Danh sách task dạng bảng, tất cả nằm trong một khung =====
+const TASK_LIST_COLS = '44px minmax(240px,1.6fr) 64px minmax(180px,2fr) 130px 100px 110px 70px 70px 90px 24px'
+
+function TaskListTable({ tasks, users, onOpen }: { tasks: Task[]; users: User[]; onOpen: (t: Task) => void }) {
+  const userOf = (id: string) => users.find(u => u.id === id)
+  const head = 'text-[11px] font-bold uppercase tracking-wide'
+
+  return (
+    <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+      <div className="overflow-x-auto">
+        <div style={{ minWidth: 1180 }}>
+          {/* Hàng tiêu đề */}
+          <div className="grid items-center gap-3 px-4 py-3"
+            style={{ gridTemplateColumns: TASK_LIST_COLS, background: 'var(--bg-card-alt)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+            <span className={head}>No.</span>
+            <span className={head}>Task</span>
+            <span className={head}>Co.</span>
+            <span className={head}>Details</span>
+            <span className={head}>Status</span>
+            <span className={head}>Priority</span>
+            <span className={head}>Sup</span>
+            <span className={head}>Start</span>
+            <span className={head}>Due</span>
+            <span className={head}>Update</span>
+            <span />
+          </div>
+
+          {tasks.length === 0 && (
+            <div className="py-10 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Không có task nào trong khoảng thời gian này.</div>
+          )}
+
+          {/* Từng task = 1 dòng */}
+          {tasks.map((t, i) => {
+            const pri = PRIORITY_CONFIG[t.priority]
+            const gated = isTaskGated(t)
+            const bucket = BUCKET_META[statusBucket(t)]
+            const stLabel = gated ? '⏳ Chờ duyệt' : bucket.label
+            const stColor = gated ? '#d97706' : bucket.color
+            const catColor = CATEGORY_COLORS[t.category] ?? '#6b7280'
+            const people = Array.from(new Set([...t.assignedTo, ...t.supporters])).map(userOf).filter((u): u is User => !!u)
+            const updated = t.approvedAt ?? t.submittedAt ?? t.processingStartedAt ?? t.startedAt ?? t.createdAt
+            return (
+              <div key={t.id} onClick={() => onOpen(t)}
+                className="grid items-center gap-3 px-4 py-3 cursor-pointer transition-colors hover:bg-[color:var(--bg-card-alt)]"
+                style={{ gridTemplateColumns: TASK_LIST_COLS, borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
+                <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>{i + 1}</span>
+
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase" style={{ background: `${catColor}20`, color: catColor }}>{t.category}</span>
+                    {t.selfCreated && <span className="text-[9px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#10b98122', color: '#10b981' }}>Tự tạo</span>}
+                  </div>
+                  <div className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
+                    {t.taskCode && <span className="font-mono text-[10px] mr-1.5" style={{ color: 'var(--text-muted)' }}>{t.taskCode}</span>}
+                    {t.title}
+                  </div>
+                </div>
+
+                <span className="text-xs font-bold" style={{ color: 'var(--text-primary)' }}>{t.company ? (COMPANY_CODES[t.company] ?? t.company) : '—'}</span>
+
+                <div className="min-w-0 flex items-center gap-1.5">
+                  {t.urgent && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold shrink-0" style={{ background: '#f8717122', color: '#dc2626' }}>⏰ GẤP</span>}
+                  {t.important && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold shrink-0" style={{ background: '#fbbf2422', color: '#d97706' }}>🔥</span>}
+                  <span className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{t.description || '—'}</span>
+                </div>
+
+                <span className="text-xs font-semibold px-2 py-1 rounded-lg w-fit" style={{ background: `${stColor}1a`, color: stColor }}>{stLabel}</span>
+
+                <span className="text-xs font-semibold px-2 py-1 rounded-lg w-fit" style={{ background: `${pri.color}1a`, color: pri.color }}>{pri.label}</span>
+
+                <div className="flex -space-x-1.5">
+                  {people.slice(0, 3).map(u => <CharAvatar key={u.id} user={u} size={24} />)}
+                  {people.length > 3 && (
+                    <span className="w-6 h-6 rounded-full flex items-center justify-center text-[9px]"
+                      style={{ background: 'var(--border)', color: 'var(--text-muted)' }}>+{people.length - 3}</span>
+                  )}
+                  {people.length === 0 && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>—</span>}
+                </div>
+
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{t.startDate ? fmtDate(t.startDate) : '—'}</span>
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{t.dueDate ? fmtDate(t.dueDate) : '—'}</span>
+
+                <div className="leading-tight">
+                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{updated ? fmtDate(updated) : '—'}</div>
+                  <div className="text-xs font-bold text-amber-500" style={{ fontFamily: 'Rajdhani, sans-serif' }}>+{t.expReward}</div>
+                </div>
+
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>▾</span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ==================== TASKS VIEW ====================
 
 function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collaborations, highlightTaskId, clearHighlightTaskId }: {
@@ -2949,6 +3147,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   const [showCollabModal, setShowCollabModal] = useState(false)
   const [viewMode, setViewMode] = useState<'cards' | 'list' | 'tracker'>('cards')
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
+  const [dateFilter, setDateFilter] = useState<DateFilterValue>(EMPTY_DATE_FILTER)
   const [showModal, setShowModal] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [openCommentsFor, setOpenCommentsFor] = useState<string | null>(null)
@@ -3005,6 +3204,9 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     if (!highlightTaskId) return
     setFilter('all')
     setSearch('')
+    setDateFilter(EMPTY_DATE_FILTER)
+    setExpandedRow(null)
+    setViewMode('cards')
     const tryScroll = () => {
       const el = taskRefs.current[highlightTaskId]
       if (el) {
@@ -3065,9 +3267,10 @@ const bucketCount = (b: TaskBucket, issue?: boolean) =>
     (issue === undefined || taskHadIssue(t) === issue)
   ).length
 
-const visible = scoped
+const visibleBase = scoped
   .filter(t => filter === 'all' || (isCountable(t) && statusBucket(t) === filter))
   .sort(byCreatedDesc)
+const visible = visibleBase.filter(t => matchDateFilter(t, dateFilter))
 
 const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
 
@@ -3586,8 +3789,21 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       </div>
 
       {viewMode === 'tracker' && <TaskTracker tasks={[...(currentUser.isDirector ? tasks : visible)].sort(byCreatedAsc)} users={users} currentUser={currentUser} />}
-      <div className={viewMode === 'tracker' ? 'hidden' : viewMode === 'list' ? 'flex flex-col gap-2' : 'grid grid-cols-1 sm:grid-cols-2 gap-4'}>
-        {visible.map(task => {
+                  {viewMode !== 'tracker' && !(viewMode === 'list' && expandedRow) && (
+        <TaskDateFilter tasks={scoped} value={dateFilter} onChange={setDateFilter} />
+      )}
+      {viewMode === 'list' && !expandedRow && (
+        <TaskListTable tasks={visible} users={users} onOpen={t => setExpandedRow(t.id)} />
+      )}
+      {viewMode === 'list' && expandedRow && (
+        <button type="button" onClick={() => setExpandedRow(null)}
+          className="mb-3 px-3 py-1.5 rounded-lg text-sm font-semibold"
+          style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+          ← Quay lại danh sách
+        </button>
+      )}
+      <div className={viewMode === 'tracker' ? 'hidden' : viewMode === 'list' ? (expandedRow ? 'grid grid-cols-1 gap-4' : 'hidden') : 'grid grid-cols-1 sm:grid-cols-2 gap-4'}>
+        {(viewMode === 'list' ? visibleBase.filter(t => t.id === expandedRow) : visible).map(task => {
           const assignees = task.assignedTo.map(getUserById).filter((u): u is User => !!u)
           const pms = task.projectManager.map(getUserById).filter((u): u is User => !!u)
           const pri = PRIORITY_CONFIG[task.priority]
@@ -3600,33 +3816,14 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
           const isFlashed = flashTaskId === task.id
           return (
             <div key={task.id} ref={el => { taskRefs.current[task.id] = el }}
-              className={`rounded-xl ${viewMode === 'list' ? 'px-4 py-2.5' : 'p-4'} flex flex-col transition-all hover:-translate-y-0.5`}
+              className="rounded-xl p-4 flex flex-col transition-all hover:-translate-y-0.5"
               style={{
                 background: isFlashed ? '#7c3aed1a' : 'var(--bg-panel)',
                 border: `1px solid ${isFlashed ? '#7c3aed' : task.status === 'completed' ? '#10b98130' : 'var(--border)'}`,
                 boxShadow: isFlashed ? '0 0 16px #7c3aed40' : 'none',
                 transition: 'background 0.4s ease, border 0.4s ease, box-shadow 0.4s ease',
               }}>
-              {viewMode === 'list' && (
-                <div className="flex items-center gap-3 cursor-pointer" onClick={() => setExpandedRow(r => (r === task.id ? null : task.id))}>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wider flex-shrink-0 hidden md:inline"
-                    style={{ background: `${catColor}20`, color: catColor }}>{task.category}</span>
-                  {task.taskCode && <span className="font-mono text-[11px] flex-shrink-0 hidden sm:inline" style={{ color: 'var(--text-muted)' }}>{task.taskCode}</span>}
-                  <span className="font-semibold text-sm truncate flex-1 min-w-0" style={{ color: 'var(--text-primary)' }}>{task.title}</span>
-                  {task.urgent && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold flex-shrink-0" style={{ background: '#f8717122', color: '#dc2626' }}>⏰ GẤP</span>}
-                  {task.important && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold flex-shrink-0" style={{ background: '#fbbf2422', color: '#d97706' }}>🔥</span>}
-                  <span className="text-xs px-2 py-0.5 rounded flex-shrink-0 hidden sm:inline" style={{ background: pri.bg, color: pri.color }}>{pri.label}</span>
-                  <span className="text-xs flex-shrink-0 hidden md:inline" style={{ color: 'var(--text-muted)' }}>📅 {fmtDate(task.dueDate)}</span>
-                  <span className="text-xs px-2 py-0.5 rounded flex-shrink-0" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: WORK_STATUS_CONFIG[task.workStatus ?? 'received'].color }}>
-                    {WORK_STATUS_CONFIG[task.workStatus ?? 'received'].label}
-                  </span>
-                  <div className="hidden sm:flex -space-x-1.5 flex-shrink-0">
-                    {assignees.slice(0, 3).map(a => <CharAvatar key={a.id} user={a} size={22} />)}
-                  </div>
-                  <span className="text-amber-500 font-black text-sm flex-shrink-0" style={{ fontFamily: 'Rajdhani, sans-serif' }}>+{task.expReward}</span>
-                  <span className="text-xs flex-shrink-0" style={{ color: 'var(--text-muted)' }}>{expandedRow === task.id ? '▴' : '▾'}</span>
-                </div>
-              )}
+                            {viewMode === 'list' && <div className="mt-2.5 pt-3" style={{ borderTop: '1px solid var(--border)' }} />}
               {(viewMode === 'cards' || expandedRow === task.id) && (<>
               {viewMode === 'list' && <div className="mt-2.5 pt-3" style={{ borderTop: '1px solid var(--border)' }} />}
               {/* Header */}
