@@ -1514,9 +1514,14 @@ const myTasks = tasks.filter(t =>
   t.supporters.includes(currentUser.id) ||
   needMyApproval(t)   // task nhân viên tự tạo đang chờ mình duyệt
 )
+    const [dateFilter, setDateFilter] = useState<DateFilterValue>(EMPTY_DATE_FILTER)
+  const dateActive = dateFilter.year !== null || dateFilter.month !== null || dateFilter.day !== null
+
   const pending = myTasks.filter(t => t.status !== 'completed')
+  // Thời gian dùng chung: số trên 5 ô trạng thái đếm theo khoảng thời gian đã chọn
+  const myTasksInRange = myTasks.filter(t => matchDateFilter(t, dateFilter))
   const bucketCount = (b: TaskBucket, issue?: boolean) =>
-    myTasks.filter(t =>
+    myTasksInRange.filter(t =>
       (!isTaskGated(t) || needMyApproval(t)) &&   // task chờ duyệt: chỉ người duyệt mới thấy trong Received
       statusBucket(t) === b &&
       (issue === undefined || taskHadIssue(t) === issue)
@@ -1528,8 +1533,6 @@ const myTasks = tasks.filter(t =>
     ? pending
     : myTasks.filter(t => (!isTaskGated(t) || needMyApproval(t)) && statusBucket(t) === bucketFilter)
 
-  const [dateFilter, setDateFilter] = useState<DateFilterValue>(EMPTY_DATE_FILTER)
-  const dateActive = dateFilter.year !== null || dateFilter.month !== null || dateFilter.day !== null
   const tableRows = shown
     .filter(t => matchDateFilter(t, dateFilter))
     .slice(0, bucketFilter === 'all' && !dateActive ? 5 : 50)
@@ -1577,31 +1580,12 @@ const myTasks = tasks.filter(t =>
         </div>
       </div>
 
-            {/* Trạng thái task của tôi */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 items-start">
-        <StatusStatCard icon="📥" label="Received" color={BUCKET_META.received.color} total={bucketCount('received')}
-          active={bucketFilter === 'received'} onClick={() => toggleBucket('received')} />
-        <StatusStatCard icon="⚙️" label="In-process" color={BUCKET_META.processing.color} total={bucketCount('processing')}
-          active={bucketFilter === 'processing'} onClick={() => toggleBucket('processing')} />
-        <StatusStatCard icon="⏸" label="Pending" color={BUCKET_META.pending.color} total={bucketCount('pending')}
-          active={bucketFilter === 'pending'} onClick={() => toggleBucket('pending')} />
-        <StatusStatCard icon="✅" label="Completed" color={BUCKET_META.completed.color} total={bucketCount('completed')}
-          active={bucketFilter === 'completed'} onClick={() => toggleBucket('completed')}
-          subs={[
-            { label: 'Complete with issue', value: bucketCount('completed', true), color: '#dc2626' },
-            { label: 'Complete successful', value: bucketCount('completed', false), color: '#059669' },
-          ]} />
-        <StatusStatCard icon="🔒" label="Close" color={BUCKET_META.closed.color} total={bucketCount('closed')}
-          active={bucketFilter === 'closed'} onClick={() => toggleBucket('closed')}
-          subs={[
-            { label: 'Close with issue', value: bucketCount('closed', true), color: '#dc2626' },
-            { label: 'Close successful', value: bucketCount('closed', false), color: '#059669' },
-          ]} />
-      </div>
+                 {/* Thời gian dùng chung cho Task, Tờ trình... */}
+      <TaskDateFilter tasks={myTasks} value={dateFilter} onChange={setDateFilter} />
 
       <div className={`grid grid-cols-1 gap-4 ${showPeople ? 'lg:grid-cols-3' : ''}`}>
         <div className={`space-y-4 ${showPeople ? 'lg:col-span-2' : ''}`}>
-          {/* Task của tôi */}
+                    {/* Task của tôi */}
           <div className="rounded-xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
@@ -1617,6 +1601,29 @@ const myTasks = tasks.filter(t =>
                 <button type="button" onClick={() => setView('tasks')} className="text-xs font-semibold" style={{ color: '#8b5cf6' }}>Xem tất cả →</button>
               </div>
             </div>
+
+            {/* Trạng thái task của tôi */}
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 items-start mb-4">
+              <StatusStatCard icon="📥" label="Received" color={BUCKET_META.received.color} total={bucketCount('received')}
+                active={bucketFilter === 'received'} onClick={() => toggleBucket('received')} />
+              <StatusStatCard icon="⚙️" label="In-process" color={BUCKET_META.processing.color} total={bucketCount('processing')}
+                active={bucketFilter === 'processing'} onClick={() => toggleBucket('processing')} />
+              <StatusStatCard icon="⏸" label="Pending" color={BUCKET_META.pending.color} total={bucketCount('pending')}
+                active={bucketFilter === 'pending'} onClick={() => toggleBucket('pending')} />
+              <StatusStatCard icon="✅" label="Completed" color={BUCKET_META.completed.color} total={bucketCount('completed')}
+                active={bucketFilter === 'completed'} onClick={() => toggleBucket('completed')}
+                subs={[
+                  { label: 'Complete with issue', value: bucketCount('completed', true), color: '#dc2626' },
+                  { label: 'Complete successful', value: bucketCount('completed', false), color: '#059669' },
+                ]} />
+              <StatusStatCard icon="🔒" label="Close" color={BUCKET_META.closed.color} total={bucketCount('closed')}
+                active={bucketFilter === 'closed'} onClick={() => toggleBucket('closed')}
+                subs={[
+                  { label: 'Close with issue', value: bucketCount('closed', true), color: '#dc2626' },
+                  { label: 'Close successful', value: bucketCount('closed', false), color: '#059669' },
+                ]} />
+            </div>
+
             {/* Chờ bạn duyệt: giữ nút Duyệt / Từ chối nhanh ngay trên Dashboard */}
             {shown.some(needMyApproval) && (
               <div className="space-y-2 mb-3">
@@ -1636,9 +1643,7 @@ const myTasks = tasks.filter(t =>
               </div>
             )}
 
-            <TaskDateFilter tasks={myTasks} value={dateFilter} onChange={setDateFilter} />
-
-            <div className="mt-3 overflow-x-auto">
+            <div className="overflow-x-auto">
               <div style={{ minWidth: 900 }}>
                 <TaskListTable tasks={tableRows} users={users} currentUser={currentUser} onOpen={t => onOpenTask?.(t.id)} />
               </div>
