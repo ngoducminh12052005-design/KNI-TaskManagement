@@ -9872,18 +9872,15 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   return (
     <div className="flex flex-col md:flex-row h-screen overflow-hidden overflow-x-hidden" style={{ ...themeVars, ...({ '--sidebar-w': sidebarCollapsed ? '0px' : '15rem' } as any), background: 'var(--bg-app)', fontFamily: 'Inter, sans-serif' }}>
             {/* Sidebar */}
-            {/* Vùng nhạy ở mép trái: rê chuột vào là mở menu */}
-      <div className="hidden md:block fixed left-0 top-0 bottom-0 w-2 z-[70]" onMouseEnter={() => setSidebarHover(true)} />
-      {/* Lớp mờ khi menu được mở bằng cách bấm: bấm ra ngoài để đóng */}
-      {sidebarPinned && <div className="hidden md:block fixed inset-0 z-[75]" style={{ background: 'rgba(0,0,0,0.25)' }} onClick={() => setSidebarPinned(false)} />}
-      <div className="hidden md:flex w-60 flex-col overflow-y-auto fixed left-0 top-0 bottom-0 z-[80] transition-transform duration-200"
-        onMouseLeave={() => setSidebarHover(false)}
-        style={{
-          background: 'var(--bg-sidebar)',
-          borderRight: '1px solid var(--border)',
-          transform: sidebarOpen ? 'translateX(0)' : 'translateX(-100%)',
-          boxShadow: sidebarOpen ? '8px 0 30px rgba(0,0,0,0.18)' : 'none',
-        }}>
+            {sidebarCollapsed && <div className="hidden md:block fixed left-0 top-0 bottom-0 w-2 z-[70]" onMouseEnter={() => setSidebarHover(true)} />}
+        <div className={`hidden md:flex w-60 flex-col overflow-y-auto transition-transform duration-200 ${sidebarCollapsed ? 'fixed left-0 top-0 bottom-0 z-[80]' : 'flex-shrink-0'}`}
+          onMouseLeave={() => setSidebarHover(false)}
+          style={{
+            background: 'var(--bg-sidebar)',
+            borderRight: '1px solid var(--border)',
+            transform: sidebarCollapsed && !sidebarHover ? 'translateX(-100%)' : 'translateX(0)',
+            boxShadow: sidebarCollapsed && sidebarHover ? '8px 0 30px rgba(0,0,0,0.18)' : 'none',
+          }}>
         <div className="flex items-center gap-3 px-5 py-4 cursor-pointer select-none" title="Bấm để thu gọn / ghim menu"
   onClick={() => { setSidebarCollapsed(c => !c); setSidebarHover(false) }}>
           <img src={companyLogo} alt="KNI" className="w-9 h-9 rounded-lg object-contain" />
@@ -9905,7 +9902,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
                     <button key={item.id} type="button"
                       onClick={() => {
                         setView(item.id as View)
-                        setSidebarPinned(false); setSidebarHover(false)
+                        setSidebarHover(false)
                         if (item.id === 'social' && mentionCount > 0) setShowMentions(true)
                       }}
                       className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors text-left mb-0.5"
