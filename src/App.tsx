@@ -7202,7 +7202,11 @@ const myTasks = tasks.filter(t =>
 )
   const pending = myTasks.filter(t => t.status !== 'completed')
   const bucketCount = (b: TaskBucket, issue?: boolean) =>
-    myTasks.filter(t => !isTaskGated(t) && statusBucket(t) === b && (issue === undefined || taskHadIssue(t) === issue)).length
+    myTasks.filter(t =>
+      (!isTaskGated(t) || needMyApproval(t)) &&   // task chờ duyệt: chỉ người duyệt mới thấy trong Received
+      statusBucket(t) === b &&
+      (issue === undefined || taskHadIssue(t) === issue)
+    ).length
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-5">
