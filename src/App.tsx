@@ -7106,7 +7106,7 @@ function EmployeeDashboardModal({ employee, tasks, users, proposals, onClose }: 
   employee: User; tasks: Task[]; users: User[]; proposals: Proposal[]; onClose: () => void
 }) {
   return (
-    <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 md:left-60 z-50 flex flex-col" style={{ background: 'var(--bg-app)' }}>
+    <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 z-50 flex flex-col" style={{ background: 'var(--bg-app)' }}>
       <div className="shrink-0 flex items-center justify-between px-4 py-3"
         style={{ background: 'var(--bg-panel)', borderBottom: '1px solid var(--border)' }}>
         <div className="flex items-center gap-2.5 min-w-0">
@@ -11781,7 +11781,7 @@ function ProposalDocView({ p, users, currentUserId, onClose, canAct, onApprove, 
   }
 
   return (
-    <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 md:left-60 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
+    <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
       <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
         <span className="text-sm font-bold text-gray-800">📄 Tờ trình {p.code ?? ''}</span>
         <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
@@ -13014,7 +13014,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
   const canEdit = currentUser.id === p.submittedBy || flow.some(s => s.approverId === currentUser.id) || !!currentUser.isDirector
 
   return (
-    <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 md:left-60 z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
+    <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
       <div className="max-w-5xl mx-auto">
         <button onClick={onClose} className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>← Danh sách đề xuất</button>
         <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
@@ -15156,7 +15156,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
   )
 
   return (
-    <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 md:left-60 z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
+    <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
       <div className="max-w-5xl mx-auto">
         <button type="button" onClick={onClose} className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>← Danh sách dự án</button>
         <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
@@ -15513,6 +15513,9 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   proposalRevisions: ProposalRevision[]
 }) {
   const [view, setView] = useState<View>('dashboard')
+  const [sidebarPinned, setSidebarPinned] = useState(false)  // bấm KNI Work để mở
+  const [sidebarHover, setSidebarHover] = useState(false)    // rê chuột vào mép trái
+  const sidebarOpen = sidebarPinned || sidebarHover
   const [theme, setTheme] = useState<ThemeMode>(() => (localStorage.getItem('themeMode') as ThemeMode) || 'light')
   const themeVars = useThemeVars(theme)
   const toggleTheme = () => {
@@ -15614,7 +15617,18 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   return (
     <div className="flex flex-col md:flex-row h-screen overflow-hidden overflow-x-hidden" style={{ ...themeVars, background: 'var(--bg-app)', fontFamily: 'Inter, sans-serif' }}>
             {/* Sidebar */}
-      <div className="hidden md:flex w-60 flex-col flex-shrink-0 overflow-y-auto" style={{ background: 'var(--bg-sidebar)', borderRight: '1px solid var(--border)' }}>
+            {/* Vùng nhạy ở mép trái: rê chuột vào là mở menu */}
+      <div className="hidden md:block fixed left-0 top-0 bottom-0 w-2 z-[70]" onMouseEnter={() => setSidebarHover(true)} />
+      {/* Lớp mờ khi menu được mở bằng cách bấm: bấm ra ngoài để đóng */}
+      {sidebarPinned && <div className="hidden md:block fixed inset-0 z-[75]" style={{ background: 'rgba(0,0,0,0.25)' }} onClick={() => setSidebarPinned(false)} />}
+      <div className="hidden md:flex w-60 flex-col overflow-y-auto fixed left-0 top-0 bottom-0 z-[80] transition-transform duration-200"
+        onMouseLeave={() => setSidebarHover(false)}
+        style={{
+          background: 'var(--bg-sidebar)',
+          borderRight: '1px solid var(--border)',
+          transform: sidebarOpen ? 'translateX(0)' : 'translateX(-100%)',
+          boxShadow: sidebarOpen ? '8px 0 30px rgba(0,0,0,0.18)' : 'none',
+        }}>
         <div className="flex items-center gap-3 px-5 py-4">
           <img src={companyLogo} alt="KNI" className="w-9 h-9 rounded-lg object-contain" />
           <div>
@@ -15635,6 +15649,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
                     <button key={item.id} type="button"
                       onClick={() => {
                         setView(item.id as View)
+                        setSidebarPinned(false); setSidebarHover(false)
                         if (item.id === 'social' && mentionCount > 0) setShowMentions(true)
                       }}
                       className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors text-left mb-0.5"
@@ -15692,6 +15707,11 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
                 {/* Topbar */}
         <div className="h-16 flex items-center justify-between px-3 sm:px-5 flex-shrink-0" style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
           <div className="flex items-center gap-2 min-w-0 flex-1">
+            <button type="button" onClick={() => setSidebarPinned(p => !p)} title="Mở / đóng menu"
+              className="hidden md:flex items-center gap-2 mr-2 px-2 py-1 rounded-lg hover:bg-[color:var(--bg-card-alt)] flex-shrink-0">
+              <img src={companyLogo} alt="KNI" className="w-8 h-8 rounded-md object-contain" />
+              <span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>KNI Work</span>
+            </button>
             <img src={companyLogo} alt="KNI" className="w-8 h-8 rounded-md object-contain md:hidden flex-shrink-0" />
             <h1 className="font-bold text-base sm:text-lg truncate" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
               {navItems.find(n => n.id === view)?.icon} {navItems.find(n => n.id === view)?.label}
