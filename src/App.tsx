@@ -1196,10 +1196,12 @@ function StatusStatCard({ icon, label, color, total, subs, active, onClick }: {
 }
 
 // ===== Tờ trình / đề xuất của tôi =====
-function DashboardProposals({ proposals, currentUser, onOpen, onViewAll }: {
+function DashboardProposals({ proposals, currentUser, onOpen, onViewAll, dateFilter }: {
   proposals: Proposal[]; currentUser: User; onOpen?: (id: string) => void; onViewAll: () => void
+  dateFilter?: DateFilterValue
 }) {
   const [myPendingIds, setMyPendingIds] = useState<string[]>([])
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all')
   useEffect(() => {
     const load = async () => {
       const { data } = await supabase.from('proposal_steps').select('proposal_id').eq('approver_id', currentUser.id).eq('status', 'pending')
@@ -1212,7 +1214,13 @@ function DashboardProposals({ proposals, currentUser, onOpen, onViewAll }: {
     return () => { supabase.removeChannel(ch) }
   }, [currentUser.id])
 
+  // Thời gian: dùng chung bộ lọc ngày ở khung "Task của tôi"
+  const df = dateFilter ?? EMPTY_DATE_FILTER
+  const dateActive = df.year !== null || df.month !== null || df.day !== null
+  const inRange = (p: Proposal) => matchDateFilter({ createdAt: p.createdAt } as unknown as Task, df)
+
   const mine = proposals.filter(p => p.submittedBy === currentUser.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const base = mine.filter(inRange)
   const needMe = proposals.filter(p => p.status === 'pending' && myPendingIds.includes(p.id)).length
   const isReview = (p: Proposal) => p.status === 'rejected' && !!p.rejectedReason?.startsWith('[REVIEW]')
   const chip = (p: Proposal): [string, string, string] =>
@@ -1220,26 +1228,35 @@ function DashboardProposals({ proposals, currentUser, onOpen, onViewAll }: {
     : isReview(p) ? ['🔁 Xem xét lại', '#fbbf2433', '#b45309']
     : p.status === 'rejected' ? ['❌ Từ chối', '#f8717122', '#dc2626']
     : ['✅ Đã duyệt', '#34d39922', '#059669']
-  const nPending = mine.filter(p => p.status === 'pending').length
-  const nApproved = mine.filter(p => p.status === 'approved').length
-  const nRejected = mine.filter(p => p.status === 'rejected').length
-  const pill = (label: string, n: number, color: string) => (
-    <span className="text-[11px] px-2 py-0.5 rounded-full font-semibold" style={{ background: 'var(--bg-card-alt)', color }}>{label} {n}</span>
-  )
+  const nPending = base.filter(p => p.status === 'pending').length
+  const nApproved = base.filter(p => p.status === 'approved').length
+  const nRejected = base.filter(p => p.status === 'rejected').length
+  const list = base.filter(p => statusFilter === 'all' || p.status === statusFilter)
+
+  const pill = (key: 'pending' | 'approved' | 'rejected', label: string, n: number, color: string) => {
+    const active = statusFilter === key
+    return (
+      <button type="button" onClick={() => setStatusFilter(f => (f === key ? 'all' : key))}
+        className="text-[11px] px-2 py-0.5 rounded-full font-semibold transition-all"
+        style={{ background: active ? `${color}22` : 'var(--bg-card-alt)', color, border: `1px solid ${active ? color : 'transparent'}` }}>
+        {label} {n}
+      </button>
+    )
+  }
 
   return (
     <div className="rounded-xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
       <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
         <h3 className="font-bold flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
           📜 Tờ trình / Đề xuất của tôi
-          <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: 'var(--border)', color: 'var(--text-muted)' }}>{mine.length}</span>
+          <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: 'var(--border)', color: 'var(--text-muted)' }}>{base.length}</span>
         </h3>
         <button type="button" onClick={onViewAll} className="text-xs font-semibold" style={{ color: '#8b5cf6' }}>Xem tất cả →</button>
       </div>
       <div className="flex gap-1.5 flex-wrap mb-3">
-        {pill('⏳ Chờ duyệt', nPending, '#d97706')}
-        {pill('✅ Đã duyệt', nApproved, '#059669')}
-        {pill('❌ Từ chối / xem xét lại', nRejected, '#dc2626')}
+        {pill('pending', '⏳ Chờ duyệt', nPending, '#d97706')}
+        {pill('approved', '✅ Đã duyệt', nApproved, '#059669')}
+        {pill('rejected', '❌ Từ chối / xem xét lại', nRejected, '#dc2626')}
         {needMe > 0 && (
           <button type="button" onClick={onViewAll} className="text-[11px] px-2 py-0.5 rounded-full font-bold" style={{ background: '#7c3aed22', color: '#7c3aed' }}>
             📥 {needMe} cái cần bạn duyệt
@@ -1248,9 +1265,11 @@ function DashboardProposals({ proposals, currentUser, onOpen, onViewAll }: {
       </div>
       {mine.length === 0 ? (
         <p className="text-xs py-3 text-center" style={{ color: 'var(--text-muted)' }}>Bạn chưa gửi tờ trình hay đề xuất nào.</p>
+      ) : list.length === 0 ? (
+        <p className="text-xs py-3 text-center" style={{ color: 'var(--text-muted)' }}>Không có tờ trình / đề xuất nào trong bộ lọc này.</p>
       ) : (
         <div>
-          {mine.slice(0, 5).map(p => {
+          {list.slice(0, statusFilter === 'all' && !dateActive ? 5 : 50).map(p => {
             const [label, bg, color] = chip(p)
             return (
               <button key={p.id} type="button" onClick={() => onOpen?.(p.id)}
@@ -1654,7 +1673,7 @@ const myTasks = tasks.filter(t =>
               </div>
             </div>
           )}
-          <DashboardProposals proposals={proposals} currentUser={currentUser} onOpen={onOpenProposal} onViewAll={() => setView('proposals')} />
+          <DashboardProposals proposals={proposals} currentUser={currentUser} onOpen={onOpenProposal} onViewAll={() => setView('proposals')} dateFilter={dateFilter} />
           <DashboardProjects currentUser={currentUser} tasks={tasks} onOpen={onOpenProject} onViewAll={() => setView('projects')} />
         </div>
 
