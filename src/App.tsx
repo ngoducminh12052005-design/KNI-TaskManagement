@@ -6902,13 +6902,20 @@ const taskHadIssue = (t: Task) =>
     ? (t.closeResult ? t.closeResult === 'with_issue' : !!t.completeIssue)
     : !!t.completeIssue
 
-function StatusStatCard({ icon, label, color, total, subs }: {
+function StatusStatCard({ icon, label, color, total, subs, active, onClick }: {
   icon: string; label: string; color: string; total: number
   subs?: { label: string; value: number; color: string }[]
+  active?: boolean; onClick?: () => void
 }) {
   const [open, setOpen] = useState(false)
   return (
-    <div className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+    <div className="rounded-xl p-4" onClick={onClick}
+  style={{
+    background: 'var(--bg-panel)',
+    border: `1px solid ${active ? color : 'var(--border)'}`,
+    boxShadow: active ? `0 0 0 2px ${color}33` : 'none',
+    cursor: onClick ? 'pointer' : 'default',
+  }}>
       <div className="flex items-center justify-between mb-2">
         <span className="text-xl">{icon}</span>
         <span className="text-2xl font-black" style={{ color, fontFamily: 'Rajdhani, sans-serif' }}>{total}</span>
@@ -6916,7 +6923,7 @@ function StatusStatCard({ icon, label, color, total, subs }: {
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>{label}</span>
         {subs && (
-          <button type="button" onClick={() => setOpen(o => !o)} title="Xem chi tiết" className="text-xs px-1.5 rounded" style={{ color }}>
+          <button type="button" onClick={e => { e.stopPropagation(); setOpen(o => !o) }} title="Xem chi tiết" className="text-xs px-1.5 rounded" style={{ color }}>
             {open ? '▴' : '▾'}
           </button>
         )}
@@ -8666,7 +8673,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   collaborations: Collaboration[]
   highlightTaskId?: string | null; clearHighlightTaskId?: () => void
 }) {
-  const [filter, setFilter] = useState<'all' | 'mine' | 'open' | 'done'>('all')
+  const [filter, setFilter] = useState<'all' | TaskBucket>('all')
   const [search, setSearch] = useState('')
   const [showCollabModal, setShowCollabModal] = useState(false)
   const [viewMode, setViewMode] = useState<'cards' | 'tracker'>('cards')
@@ -8760,7 +8767,9 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     ? users
     : users.filter(u => u.teamId === currentUser.teamId)
 
-  const visible = tasks.filter(t => {
+  const isCountable = (t: Task) => !isTaskGated(t) || canApproveSelfTask(t, currentUser, users)
+
+const scoped = tasks.filter(t => {
     const isMyTask = t.assignedTo.includes(currentUser.id) || (t.selfCreated && t.createdBy === currentUser.id) || t.supporters.includes(currentUser.id) || t.projectManager.includes(currentUser.id)
     const assignees = users.filter(u => t.assignedTo.includes(u.id))
     const deptPrefix = (id?: string) => id?.match(/^t\d+/)?.[0] ?? ''
@@ -8774,11 +8783,21 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
       : (isMyTask && !t.crossDeptRejected)
     if (!inScope) return false
     if (search.trim() && !t.title.toLowerCase().includes(search.trim().toLowerCase()) && !t.description.toLowerCase().includes(search.trim().toLowerCase())) return false
-    if (filter === 'mine') return isMyTask
-    if (filter === 'open') return t.status === 'open'
-    if (filter === 'done') return t.status === 'completed'
     return true
-  }).sort(byCreatedDesc)
+  })
+
+const bucketCount = (b: TaskBucket, issue?: boolean) =>
+  scoped.filter(t =>
+    isCountable(t) &&
+    statusBucket(t) === b &&
+    (issue === undefined || taskHadIssue(t) === issue)
+  ).length
+
+const visible = scoped
+  .filter(t => filter === 'all' || (isCountable(t) && statusBucket(t) === filter))
+  .sort(byCreatedDesc)
+
+const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
 
   const handleStart = async (id: string) => {
     const t0 = tasks.find(x => x.id === id)
@@ -9273,14 +9292,25 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
           </button>
         ))}
       </div>
-      <div className="flex gap-2 mb-5">
-        {[{ id: 'all', label: 'Tất cả' }, { id: 'mine', label: 'Của tôi' }, { id: 'open', label: 'Chưa làm' }, { id: 'done', label: 'Xong' }].map(f => (
-          <button key={f.id} onClick={() => setFilter(f.id as typeof filter)}
-            className="px-3.5 py-1.5 rounded-lg text-sm transition-all"
-            style={{ background: filter === f.id ? '#7c3aed' : 'var(--bg-panel)', color: filter === f.id ? '#fff' : 'var(--text-muted)', border: `1px solid ${filter === f.id ? '#7c3aed' : 'var(--border)'}` }}>
-            {f.label}
-          </button>
-        ))}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 items-start mb-5">
+        <StatusStatCard icon="📥" label="Received" color={BUCKET_META.received.color}
+          total={bucketCount('received')} active={filter === 'received'} onClick={() => toggleBucket('received')} />
+        <StatusStatCard icon="⚙️" label="In-process" color={BUCKET_META.processing.color}
+          total={bucketCount('processing')} active={filter === 'processing'} onClick={() => toggleBucket('processing')} />
+        <StatusStatCard icon="⏸" label="Pending" color={BUCKET_META.pending.color}
+          total={bucketCount('pending')} active={filter === 'pending'} onClick={() => toggleBucket('pending')} />
+        <StatusStatCard icon="✅" label="Completed" color={BUCKET_META.completed.color}
+          total={bucketCount('completed')} active={filter === 'completed'} onClick={() => toggleBucket('completed')}
+          subs={[
+            { label: 'Complete with issue', value: bucketCount('completed', true), color: '#dc2626' },
+            { label: 'Complete successful', value: bucketCount('completed', false), color: '#059669' },
+          ]} />
+        <StatusStatCard icon="🔒" label="Close" color={BUCKET_META.closed.color}
+          total={bucketCount('closed')} active={filter === 'closed'} onClick={() => toggleBucket('closed')}
+          subs={[
+            { label: 'Close with issue', value: bucketCount('closed', true), color: '#dc2626' },
+            { label: 'Close successful', value: bucketCount('closed', false), color: '#059669' },
+          ]} />
       </div>
 
       {viewMode === 'tracker' && <TaskTracker tasks={[...(currentUser.isDirector ? tasks : visible)].sort(byCreatedAsc)} users={users} currentUser={currentUser} />}
