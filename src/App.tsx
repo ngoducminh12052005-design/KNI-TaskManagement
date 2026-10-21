@@ -12266,7 +12266,7 @@ function EmployeeDashboardModal({ employee, tasks, users, proposals, onClose }: 
   )
 }
 
-// ===== Dropdown nhân viên trên Dashboard: quản lý xem phòng ban mình, BOD xem toàn công ty =====
+// ===== Dropdown Nhân viên phòng ban trong KNI Work: chọn tên là mở Dashboard chỉ xem =====
 function DashboardPeople({ currentUser, users, tasks, proposals }: { currentUser: User; users: User[]; tasks: Task[]; proposals: Proposal[] }) {
   const isDir = !!currentUser.isDirector
   const [viewing, setViewing] = useState<User | null>(null)
@@ -12279,7 +12279,6 @@ function DashboardPeople({ currentUser, users, tasks, proposals }: { currentUser
     return a.name.localeCompare(b.name, 'vi')
   })
   const [selectedId, setSelectedId] = useState('')
-  const selected = members.find(u => u.id === selectedId) ?? null
   const team = TEAMS.find(t => t.id === currentUser.teamId)
   const box = { background: 'var(--bg-panel)', border: '1px solid var(--border)' }
 
@@ -12294,11 +12293,17 @@ function DashboardPeople({ currentUser, users, tasks, proposals }: { currentUser
             {isDir ? `${members.length} nhân viên · Chọn người để xem Dashboard` : `${team ? `${team.emoji} ${team.name}` : 'Phòng ban của bạn'} · ${members.length} người`}
           </p>
         </div>
-        <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:min-w-[340px]">
+        <div className="flex min-w-0 sm:min-w-[340px]">
           <select
             value={selectedId}
-            onChange={e => setSelectedId(e.target.value)}
-            className="w-full min-w-0 sm:flex-1 rounded-lg px-3 py-2 text-sm outline-none"
+            onChange={e => {
+              const id = e.target.value
+              setSelectedId(id)
+              const employee = members.find(u => u.id === id)
+              if (employee) setViewing(employee)
+            }}
+            className="w-full min-w-0 rounded-lg px-3 py-2.5 text-sm outline-none cursor-pointer"
+            aria-label="Chọn nhân viên phòng ban để xem Dashboard"
             style={{ background: 'var(--bg-card-alt)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
           >
             <option value="">-- Chọn nhân viên để xem --</option>
@@ -12317,23 +12322,8 @@ function DashboardPeople({ currentUser, users, tasks, proposals }: { currentUser
               <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>
             ))}
           </select>
-          <button
-            type="button"
-            disabled={!selected}
-            onClick={() => selected && setViewing(selected)}
-            className="rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
-            style={{ background: '#7c3aed' }}
-          >
-            Xem Dashboard
-          </button>
         </div>
       </div>
-      {selected && (
-        <div className="mt-3 flex items-center gap-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-          <CharAvatar user={selected} size={26} />
-          <span>Đã chọn: <strong style={{ color: 'var(--text-primary)' }}>{selected.name}</strong>{selected.department ? ` · ${selected.department}` : ''}</span>
-        </div>
-      )}
       {viewing && <EmployeeDashboardModal employee={viewing} tasks={tasks} users={users} proposals={proposals} onClose={() => setViewing(null)} />}
     </div>
   )
