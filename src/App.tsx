@@ -5844,6 +5844,9 @@ interface Task {
   unlockRequestedReason?: string
   unlockRequestedAt?: string
   slaUnlockGranted?: boolean
+  completeIssue?: string
+  closeResult?: 'successful' | 'with_issue'
+  closeNote?: string
 }
 
 interface Message {
@@ -6493,7 +6496,7 @@ const WORK_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   received: { label: '📥 Đã nhận', color: '#6b7280' },
   processing: { label: '⚙️ Đang xử lý', color: '#2563eb' },
   pending: { label: '⏸ Tạm hoãn', color: '#d97706' },
-  complete: { label: '✅ Hoàn tất', color: '#059669' },
+  complete: { label: '✅ Complete', color: '#059669' },
 }
 
 // Sinh mã task dạng TASK{ddmmyy}-{số thứ tự trong ngày}
@@ -6872,23 +6875,334 @@ const handleSignIn = async () => {
     </div>
   )
 }
+// ===== Nhóm trạng thái task cho Dashboard =====
+type TaskBucket = 'received' | 'processing' | 'pending' | 'completed' | 'closed'
+
+const BUCKET_META: Record<TaskBucket, { label: string; color: string }> = {
+  received: { label: 'Received', color: '#6b7280' },
+  processing: { label: 'In-process', color: '#2563eb' },
+  pending: { label: 'Pending', color: '#d97706' },
+  completed: { label: 'Completed', color: '#059669' },
+  closed: { label: 'Close', color: '#7c3aed' },
+}
+
+// Mỗi task thuộc đúng 1 nhóm
+const statusBucket = (t: Task): TaskBucket => {
+  if (t.status === 'completed') return 'closed'                                     // quản lý đã duyệt
+  if (t.workStatus === 'complete' || t.status === 'submitted') return 'completed'   // đã làm xong / đã nộp, chờ quản lý đóng
+  if (t.workStatus === 'pending') return 'pending'
+  if (t.workStatus === 'processing' || t.status === 'in-progress') return 'processing'
+  return 'received'
+}
+
+// Ô Completed: tính theo nhân viên báo (complete_issue).
+// Ô Close: tính theo quản lý chọn (close_result).
+const taskHadIssue = (t: Task) =>
+  t.status === 'completed'
+    ? (t.closeResult ? t.closeResult === 'with_issue' : !!t.completeIssue)
+    : !!t.completeIssue
+
+function StatusStatCard({ icon, label, color, total, subs }: {
+  icon: string; label: string; color: string; total: number
+  subs?: { label: string; value: number; color: string }[]
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xl">{icon}</span>
+        <span className="text-2xl font-black" style={{ color, fontFamily: 'Rajdhani, sans-serif' }}>{total}</span>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>{label}</span>
+        {subs && (
+          <button type="button" onClick={() => setOpen(o => !o)} title="Xem chi tiết" className="text-xs px-1.5 rounded" style={{ color }}>
+            {open ? '▴' : '▾'}
+          </button>
+        )}
+      </div>
+      {subs && open && (
+        <div className="mt-2 pt-2 space-y-1" style={{ borderTop: '1px solid var(--border)' }}>
+          {subs.map(s => (
+            <div key={s.label} className="flex items-center justify-between text-[11px]">
+              <span style={{ color: 'var(--text-muted)' }}>{s.label}</span>
+              <span className="font-bold" style={{ color: s.color }}>{s.value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ===== Tờ trình / đề xuất của tôi =====
+function DashboardProposals({ proposals, currentUser, onOpen, onViewAll }: {
+  proposals: Proposal[]; currentUser: User; onOpen?: (id: string) => void; onViewAll: () => void
+}) {
+  const [myPendingIds, setMyPendingIds] = useState<string[]>([])
+  useEffect(() => {
+    const load = async () => {
+      const { data } = await supabase.from('proposal_steps').select('proposal_id').eq('approver_id', currentUser.id).eq('status', 'pending')
+      setMyPendingIds((data ?? []).map((x: any) => x.proposal_id))
+    }
+    load()
+    const ch = supabase.channel(`dash-steps-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'proposal_steps' }, () => { load() })
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [currentUser.id])
+
+  const mine = proposals.filter(p => p.submittedBy === currentUser.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const needMe = proposals.filter(p => p.status === 'pending' && myPendingIds.includes(p.id)).length
+  const isReview = (p: Proposal) => p.status === 'rejected' && !!p.rejectedReason?.startsWith('[REVIEW]')
+  const chip = (p: Proposal): [string, string, string] =>
+    p.status === 'pending' ? ['⏳ Chờ duyệt', '#fbbf2422', '#d97706']
+    : isReview(p) ? ['🔁 Xem xét lại', '#fbbf2433', '#b45309']
+    : p.status === 'rejected' ? ['❌ Từ chối', '#f8717122', '#dc2626']
+    : ['✅ Đã duyệt', '#34d39922', '#059669']
+  const nPending = mine.filter(p => p.status === 'pending').length
+  const nApproved = mine.filter(p => p.status === 'approved').length
+  const nRejected = mine.filter(p => p.status === 'rejected').length
+  const pill = (label: string, n: number, color: string) => (
+    <span className="text-[11px] px-2 py-0.5 rounded-full font-semibold" style={{ background: 'var(--bg-card-alt)', color }}>{label} {n}</span>
+  )
+
+  return (
+    <div className="rounded-xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+        <h3 className="font-bold flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
+          📜 Tờ trình / Đề xuất của tôi
+          <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: 'var(--border)', color: 'var(--text-muted)' }}>{mine.length}</span>
+        </h3>
+        <button type="button" onClick={onViewAll} className="text-xs font-semibold" style={{ color: '#8b5cf6' }}>Xem tất cả →</button>
+      </div>
+      <div className="flex gap-1.5 flex-wrap mb-3">
+        {pill('⏳ Chờ duyệt', nPending, '#d97706')}
+        {pill('✅ Đã duyệt', nApproved, '#059669')}
+        {pill('❌ Từ chối / xem xét lại', nRejected, '#dc2626')}
+        {needMe > 0 && (
+          <button type="button" onClick={onViewAll} className="text-[11px] px-2 py-0.5 rounded-full font-bold" style={{ background: '#7c3aed22', color: '#7c3aed' }}>
+            📥 {needMe} cái cần bạn duyệt
+          </button>
+        )}
+      </div>
+      {mine.length === 0 ? (
+        <p className="text-xs py-3 text-center" style={{ color: 'var(--text-muted)' }}>Bạn chưa gửi tờ trình hay đề xuất nào.</p>
+      ) : (
+        <div>
+          {mine.slice(0, 5).map(p => {
+            const [label, bg, color] = chip(p)
+            return (
+              <button key={p.id} type="button" onClick={() => onOpen?.(p.id)}
+                className="w-full text-left py-2 flex items-center justify-between gap-3" style={{ borderTop: '1px solid var(--border)' }}>
+                <div className="min-w-0">
+                  <p className="text-sm truncate" style={{ color: 'var(--text-primary)' }}>
+                    <span className="font-mono text-[11px] mr-2" style={{ color: 'var(--text-muted)' }}>{p.code ?? ''}</span>{p.title}
+                  </p>
+                  <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                    {p.groupName ?? (p.kind === 'totrinh' ? 'Tờ trình' : 'Đề xuất')} · {new Date(p.createdAt).toLocaleDateString('vi-VN')}
+                  </p>
+                </div>
+                <span className="px-2 py-0.5 rounded-lg text-[11px] font-semibold whitespace-nowrap flex-shrink-0" style={{ background: bg, color }}>{label}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ===== Dự án trên Dashboard =====
+function DashboardProjects({ currentUser, tasks, onOpen, onViewAll }: {
+  currentUser: User; tasks: Task[]; onOpen?: (id: string) => void; onViewAll: () => void
+}) {
+  const [projects, setProjects] = useState<Project[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const load = async () => {
+      const [p, m] = await Promise.all([
+        supabase.from('projects').select('*').order('created_at', { ascending: false }),
+        supabase.from('project_members').select('project_id, user_id'),
+      ])
+      const byProject: Record<string, string[]> = {}
+      ;(m.data ?? []).forEach((x: any) => { (byProject[x.project_id] ??= []).push(x.user_id) })
+      setProjects((p.data ?? []).map((x: any) => mapDbProject(x, byProject[x.id] ?? [])))
+      setLoading(false)
+    }
+    load()
+    const ch = supabase.channel(`dash-projects-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, () => { load() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_members' }, () => { load() })
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [])
+
+  const isDir = !!currentUser.isDirector
+  const isMgr = currentUser.role === 'manager'
+  const canSee = (p: Project) =>
+    isDir || p.createdBy === currentUser.id || p.managerId === currentUser.id || p.ownerId === currentUser.id ||
+    p.memberIds.includes(currentUser.id) || (isMgr && p.teamId === currentUser.teamId)
+  const visible = projects.filter(canSee)
+  const todayStr = new Date().toISOString().split('T')[0]
+
+  return (
+    <div className="rounded-xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-bold flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
+          🗂️ Dự án
+          <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: 'var(--border)', color: 'var(--text-muted)' }}>{visible.length}</span>
+        </h3>
+        <button type="button" onClick={onViewAll} className="text-xs font-semibold" style={{ color: '#8b5cf6' }}>Xem tất cả →</button>
+      </div>
+      {loading ? (
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Đang tải...</p>
+      ) : visible.length === 0 ? (
+        <p className="text-xs py-3 text-center" style={{ color: 'var(--text-muted)' }}>Bạn chưa tham gia dự án nào.</p>
+      ) : (
+        <div>
+          {visible.slice(0, 5).map(p => {
+            const list = tasks.filter(t => t.projectId === p.id)
+            const done = list.filter(t => t.status === 'completed').length
+            const pct = list.length ? Math.round((done / list.length) * 100) : 0
+            const waiting = list.filter(t => t.status === 'submitted').length
+            const overdue = list.filter(t => t.status !== 'completed' && t.dueDate && t.dueDate < todayStr).length
+            const st = PROJECT_STATUS[p.status] ?? PROJECT_STATUS.planning
+            return (
+              <button key={p.id} type="button" onClick={() => onOpen?.(p.id)} className="w-full text-left py-2.5" style={{ borderTop: '1px solid var(--border)' }}>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm truncate" style={{ color: 'var(--text-primary)' }}>
+                    <span className="font-mono text-[11px] mr-2" style={{ color: 'var(--text-muted)' }}>{p.code}</span>{p.name}
+                  </p>
+                  <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold whitespace-nowrap flex-shrink-0" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
+                </div>
+                <div className="h-1.5 rounded-full overflow-hidden mt-1.5" style={{ background: 'var(--bg-card-alt)' }}>
+                  <div className="h-full" style={{ width: `${pct}%`, background: '#059669' }} />
+                </div>
+                <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                  {pct}% · {done}/{list.length} task · {p.memberIds.length} thành viên
+                  {waiting > 0 && <span style={{ color: '#7c3aed' }}> · 📤 {waiting} chờ duyệt</span>}
+                  {overdue > 0 && <span style={{ color: '#dc2626' }}> · ⚠️ {overdue} quá hạn</span>}
+                </p>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ===== Bảng nhân viên: quản lý xem phòng ban mình, BOD xem toàn công ty =====
+function DashboardPeople({ currentUser, users, tasks }: { currentUser: User; users: User[]; tasks: Task[] }) {
+  const isDir = !!currentUser.isDirector
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const todayStr = new Date().toISOString().split('T')[0]
+
+  const statOf = (uid: string) => {
+    const mine = tasks
+      .filter(t => t.assignedTo.includes(uid) || (t.selfCreated && t.createdBy === uid) || t.supporters.includes(uid))
+      .filter(t => !isTaskGated(t))   // task tự tạo đang chờ duyệt thì chưa tính
+    const c: Record<TaskBucket, number> = { received: 0, processing: 0, pending: 0, completed: 0, closed: 0 }
+    mine.forEach(t => { c[statusBucket(t)]++ })
+    const overdue = mine.filter(t => {
+      const b = statusBucket(t)
+      return b !== 'closed' && b !== 'completed' && !!t.dueDate && t.dueDate < todayStr
+    }).length
+    return { ...c, overdue }
+  }
+
+  const renderRow = (u: User, rank: number) => {
+    const s = statOf(u.id)
+    return (
+      <div key={u.id} className="flex items-center gap-2.5 py-1.5">
+        <span className="text-xs w-5 font-mono text-right flex-shrink-0" style={{ color: 'var(--text-muted)' }}>#{rank}</span>
+        <CharAvatar user={u} size={28} />
+        <div className="flex-1 min-w-0">
+          <div className="text-xs font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+            {u.name}
+            {u.role === 'manager' && <span className="ml-1 text-[9px] px-1 rounded font-bold" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>QL</span>}
+          </div>
+          <div className="text-[10px] flex flex-wrap gap-x-2" style={{ color: 'var(--text-muted)' }}>
+            <span title="Received">📥 {s.received}</span>
+            <span title="In-process">⚙️ {s.processing}</span>
+            <span title="Pending">⏸ {s.pending}</span>
+            <span title="Completed">✅ {s.completed}</span>
+            <span title="Close">🔒 {s.closed}</span>
+            {s.overdue > 0 && <span className="font-bold" style={{ color: '#dc2626' }}>⚠️ {s.overdue} quá hạn</span>}
+          </div>
+        </div>
+        <div className="text-amber-500 text-xs font-bold flex-shrink-0" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{u.exp}</div>
+      </div>
+    )
+  }
+
+  const box = { background: 'var(--bg-panel)', border: '1px solid var(--border)' }
+  const h3 = { fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }
+
+  if (!isDir) {
+    const team = TEAMS.find(t => t.id === currentUser.teamId)
+    const members = users.filter(u => u.teamId === currentUser.teamId && u.id !== currentUser.id).sort((a, b) => b.exp - a.exp)
+    return (
+      <div className="rounded-xl p-5 self-start" style={box}>
+        <h3 className="font-bold mb-1" style={h3}>👥 Nhân viên phòng ban</h3>
+        <p className="text-[11px] mb-3" style={{ color: 'var(--text-muted)' }}>{team ? `${team.emoji} ${team.name}` : 'Phòng ban của bạn'} · {members.length} người</p>
+        <div className="max-h-[70vh] overflow-y-auto">
+          {members.length === 0 && <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Chưa có nhân viên nào trong phòng ban.</p>}
+          {members.map((u, i) => renderRow(u, i + 1))}
+        </div>
+      </div>
+    )
+  }
+
+  const known = new Set(TEAMS.map(t => t.id))
+  const groups: { id: string; title: string; members: User[] }[] = TEAMS
+    .map(t => ({ id: t.id, title: `${t.emoji} ${t.name}`, members: users.filter(u => u.teamId === t.id).sort((a, b) => b.exp - a.exp) }))
+    .filter(g => g.members.length > 0)
+  const others = users.filter(u => !known.has(u.teamId)).sort((a, b) => b.exp - a.exp)
+  if (others.length > 0) groups.push({ id: '__other', title: 'Khác', members: others })
+
+  return (
+    <div className="rounded-xl p-5 self-start" style={box}>
+      <h3 className="font-bold mb-1" style={h3}>🏢 Toàn công ty</h3>
+      <p className="text-[11px] mb-3" style={{ color: 'var(--text-muted)' }}>{groups.length} phòng ban · {users.length} người</p>
+      <div className="max-h-[75vh] overflow-y-auto space-y-3">
+        {groups.map(g => (
+          <div key={g.id}>
+            <button type="button" onClick={() => setCollapsed(c => ({ ...c, [g.id]: !c[g.id] }))}
+              className="w-full flex items-center justify-between text-xs font-bold py-1.5 px-2 rounded-lg" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-primary)' }}>
+              <span className="truncate text-left">{collapsed[g.id] ? '▸' : '▾'} {g.title} <span className="font-normal" style={{ color: 'var(--text-muted)' }}>({g.members.length})</span></span>
+              <span className="text-amber-500 flex-shrink-0 ml-2">{g.members.reduce((s, u) => s + u.exp, 0).toLocaleString()} EXP</span>
+            </button>
+            {!collapsed[g.id] && <div className="mt-1">{g.members.map((u, i) => renderRow(u, i + 1))}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ==================== DASHBOARD ====================
 
-function DashboardView({ currentUser, tasks, users, setTasks, setCurrentUser, setView }: {
-  currentUser: User; tasks: Task[]; users: User[]
-  setTasks: (t: Task[]) => void; setCurrentUser: (u: User) => void
+function DashboardView({ currentUser, tasks, users, proposals, setView, onOpenProposal, onOpenProject }: {
+  currentUser: User; tasks: Task[]; users: User[]; proposals: Proposal[]
   setView: (v: View) => void
+  onOpenProposal?: (id: string) => void; onOpenProject?: (id: string) => void
 }) {
   const { progress, needed, level } = getExpProgress(currentUser.exp)
   const isManager = currentUser.role === 'manager'
-  const myTasks = tasks.filter(t => t.assignedTo.includes(currentUser.id) || (t.selfCreated && t.createdBy === currentUser.id) || t.supporters.includes(currentUser.id))
+  const showPeople = isManager || !!currentUser.isDirector
+  const needMyApproval = (t: Task) => canApproveSelfTask(t, currentUser, users)
+const myTasks = tasks.filter(t =>
+  t.assignedTo.includes(currentUser.id) ||
+  (t.selfCreated && t.createdBy === currentUser.id) ||
+  t.supporters.includes(currentUser.id) ||
+  needMyApproval(t)   // task nhân viên tự tạo đang chờ mình duyệt
+)
   const pending = myTasks.filter(t => t.status !== 'completed')
-  const teamExp = users.filter(u => u.teamId === currentUser.teamId).reduce((s, u) => s + u.exp, 0)
-
-  const handleComplete = (taskId: string, expReward: number) => {
-    setTasks(tasks.map(t => t.id === taskId ? { ...t, status: 'completed' } : t))
-    setCurrentUser({ ...currentUser, exp: currentUser.exp + expReward })
-  }
+  const bucketCount = (b: TaskBucket, issue?: boolean) =>
+    myTasks.filter(t => !isTaskGated(t) && statusBucket(t) === b && (issue === undefined || taskHadIssue(t) === issue)).length
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-5">
@@ -6926,91 +7240,102 @@ function DashboardView({ currentUser, tasks, users, setTasks, setCurrentUser, se
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
-        {[
-          { label: 'Task đang làm', value: myTasks.filter(t => t.status === 'in-progress').length, color: '#06b6d4', icon: '⚡' },
-          { label: 'Chưa bắt đầu', value: myTasks.filter(t => t.status === 'open').length, color: '#f59e0b', icon: '📋' },
-          { label: 'Hoàn thành', value: myTasks.filter(t => t.status === 'completed').length, color: '#10b981', icon: '✅' },
-          isManager
-            ? { label: 'Tổng EXP team', value: teamExp.toLocaleString(), color: '#a78bfa', icon: '👥' }
-            : { label: 'Hạng cá nhân', value: '#' + ([...users].sort((a, b) => b.exp - a.exp).findIndex(u => u.id === currentUser.id) + 1), color: '#ec4899', icon: '🏆' },
-        ].map(stat => (
-          <div key={stat.label} className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xl">{stat.icon}</span>
-              <span className="text-2xl font-black" style={{ color: stat.color, fontFamily: 'Rajdhani, sans-serif' }}>{stat.value}</span>
-            </div>
-            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{stat.label}</div>
-          </div>
-        ))}
+            {/* Trạng thái task của tôi */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 items-start">
+        <StatusStatCard icon="📥" label="Received" color={BUCKET_META.received.color} total={bucketCount('received')} />
+        <StatusStatCard icon="⚙️" label="In-process" color={BUCKET_META.processing.color} total={bucketCount('processing')} />
+        <StatusStatCard icon="⏸" label="Pending" color={BUCKET_META.pending.color} total={bucketCount('pending')} />
+        <StatusStatCard icon="✅" label="Completed" color={BUCKET_META.completed.color} total={bucketCount('completed')}
+          subs={[
+            { label: 'Complete with issue', value: bucketCount('completed', true), color: '#dc2626' },
+            { label: 'Complete successful', value: bucketCount('completed', false), color: '#059669' },
+          ]} />
+        <StatusStatCard icon="🔒" label="Close" color={BUCKET_META.closed.color} total={bucketCount('closed')}
+          subs={[
+            { label: 'Close with issue', value: bucketCount('closed', true), color: '#dc2626' },
+            { label: 'Close successful', value: bucketCount('closed', false), color: '#059669' },
+          ]} />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {/* Tasks */}
-        <div className="col-span-2 rounded-xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
-          <h3 className="font-bold mb-4 flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
-            ⚡ Task của tôi
-            <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: 'var(--border)', color: 'var(--text-muted)' }}>{pending.length} chờ</span>
-          </h3>
-          <div className="space-y-2">
-            {pending.slice(0, 5).map(task => (
-              <div key={task.id} className="p-3 rounded-lg flex items-center gap-3 group"
-                style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
-                <div className="w-1.5 h-8 rounded-full flex-shrink-0" style={{ background: PRIORITY_CONFIG[task.priority].color }} />
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
-                    {task.title}
-                    {task.selfCreated && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#10b98122', color: '#10b981' }}>Tự tạo</span>}
-                    {task.urgent && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#f8717122', color: '#f87171' }}>⏰ GẤP</span>}
-                    {task.important && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#fbbf2422', color: '#d97706' }}>🔥 Quan trọng</span>}
+      <div className={`grid grid-cols-1 gap-4 ${showPeople ? 'lg:grid-cols-3' : ''}`}>
+        <div className={`space-y-4 ${showPeople ? 'lg:col-span-2' : ''}`}>
+          {/* Task của tôi */}
+          <div className="rounded-xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
+                ⚡ Task của tôi
+                <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: 'var(--border)', color: 'var(--text-muted)' }}>{pending.length} chờ</span>
+              </h3>
+              <button type="button" onClick={() => setView('tasks')} className="text-xs font-semibold" style={{ color: '#8b5cf6' }}>Xem tất cả →</button>
+            </div>
+            <div className="space-y-2">
+              {pending.slice(0, 5).map(task => {
+                const bucket = BUCKET_META[statusBucket(task)]
+                return (
+                  <div key={task.id} className="p-3 rounded-lg flex items-center gap-3 group"
+                    style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
+                    <div className="w-1.5 h-8 rounded-full flex-shrink-0" style={{ background: PRIORITY_CONFIG[task.priority].color }} />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                        {task.title}
+                        {task.selfCreated && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#10b98122', color: '#10b981' }}>Tự tạo</span>}
+                        {task.urgent && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#f8717122', color: '#f87171' }}>⏰ GẤP</span>}
+                        {task.important && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#fbbf2422', color: '#d97706' }}>🔥 Quan trọng</span>}
+                      </div>
+                      <div className="text-xs mt-0.5">
+                        <span style={{ color: bucket.color }}>{bucket.label}</span>
+                        <span className="mx-1" style={{ color: 'var(--text-muted)' }}>·</span>
+                        <span style={{ color: 'var(--text-muted)' }}>Hạn {fmtDate(task.dueDate)}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className="text-amber-500 font-bold text-sm" style={{ fontFamily: 'Rajdhani, sans-serif' }}>+{task.expReward}</span>
+
+                        {/* Quản lý: duyệt / từ chối task nhân viên tự tạo */}
+                        {needMyApproval(task) && (
+                          <>
+                            <button onClick={() => rejectSelfTask(task, currentUser)}
+                              className="text-xs px-2.5 py-1 rounded-lg font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>
+                              Từ chối
+                            </button>
+                            <button onClick={() => approveSelfTask(task, currentUser)}
+                              className="text-xs px-2.5 py-1 rounded-lg font-bold" style={{ background: '#34d39922', color: '#059669' }}>
+                              ✓ Duyệt cho làm
+                            </button>
+                          </>
+                        )}
+
+                        {/* Nhân viên: báo đang chờ quản lý duyệt */}
+                        {task.creationApproval === 'pending' && task.createdBy === currentUser.id && (
+                          <span className="text-[10px] px-2 py-1 rounded-lg font-semibold" style={{ background: '#fbbf2422', color: '#d97706' }}>
+                            ⏳ Chờ quản lý duyệt
+                          </span>
+                        )}
+
+                        {task.assignedTo.includes(currentUser.id) && task.status === 'in-progress' && (
+                        <button onClick={() => setView('tasks')}
+                          className="text-xs px-3 py-1 rounded-lg font-semibold" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>
+                          Vào nộp task →
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-xs mt-0.5">
-                    <span style={{ color: STATUS_CONFIG[task.status].color }}>{STATUS_CONFIG[task.status].label}</span>
-                    <span className="mx-1" style={{ color: 'var(--text-muted)' }}>·</span>
-                    <span style={{ color: 'var(--text-muted)' }}>Hạn {fmtDate(task.dueDate)}</span>
-                  </div>
+                )
+              })}
+              {pending.length === 0 && (
+                <div className="text-center py-8" style={{ color: 'var(--text-muted)' }}>
+                  <div className="text-3xl mb-2">🎉</div>
+                  <div className="text-sm">Tất cả task đã hoàn thành!</div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className="text-amber-500 font-bold text-sm" style={{ fontFamily: 'Rajdhani, sans-serif' }}>+{task.expReward}</span>
-                  {task.assignedTo.includes(currentUser.id) && task.status === 'in-progress' && (
-                    <button onClick={() => setView('tasks')}
-                      className="text-xs px-3 py-1 rounded-lg font-semibold" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>
-                      Vào nộp task →
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-            {pending.length === 0 && (
-              <div className="text-center py-8" style={{ color: 'var(--text-muted)' }}>
-                <div className="text-3xl mb-2">🎉</div>
-                <div className="text-sm">Tất cả task đã hoàn thành!</div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
+
+          <DashboardProposals proposals={proposals} currentUser={currentUser} onOpen={onOpenProposal} onViewAll={() => setView('proposals')} />
+          <DashboardProjects currentUser={currentUser} tasks={tasks} onOpen={onOpenProject} onViewAll={() => setView('projects')} />
         </div>
 
-        {/* Mini leaderboard */}
-        <div className="rounded-xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
-          <h3 className="font-bold mb-4 flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
-            🏆 {isManager ? 'Team' : 'Bảng xếp hạng'}
-          </h3>
-          <div className="space-y-3">
-            {(isManager ? users.filter(u => u.teamId === currentUser.teamId)
-              : users.filter(u => u.role === 'employee'))
-              .sort((a, b) => b.exp - a.exp).slice(0, 5).map((user, i) => (
-                <div key={user.id} className="flex items-center gap-2.5">
-                  <span className="text-xs w-4 font-mono" style={{ color: 'var(--text-muted)' }}>#{i + 1}</span>
-                  <CharAvatar user={user} size={28} />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium truncate" style={{ color: 'var(--text-primary)' }}>{user.name}</div>                    <ExpBarMini exp={user.exp} />
-                  </div>
-                  <div className="text-amber-500 text-xs font-bold" style={{ fontFamily: 'Rajdhani, sans-serif' }}>{user.exp}</div>
-                </div>
-              ))}
-          </div>
-        </div>
+        {showPeople && <DashboardPeople currentUser={currentUser} users={users} tasks={tasks} />}
       </div>
     </div>
   )
@@ -7021,6 +7346,8 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
   const [ownFolderUrl, setOwnFolderUrl] = useState('')
   const [folderName, setFolderName] = useState('')
   const [note, setNote] = useState('')
+  const [hasIssue, setHasIssue] = useState(false)
+  const [issueText, setIssueText] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -7047,11 +7374,20 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
     }
     if (!driveLink.trim()) { setError('Vui lòng dán link Google Drive chứa file/folder kết quả trước khi nộp.'); return }
     if (!/^https?:\/\//i.test(driveLink.trim())) { setError('Link không hợp lệ, vui lòng dán đúng đường dẫn Google Drive.'); return }
+    if (hasIssue && !issueText.trim()) { setError('Bạn chọn "Complete with issue", vui lòng ghi rõ issue là gì.'); return }
     setError('')
     setSaving(true)
 
+    // Dừng đồng hồ xử lý, cộng dồn thời gian đã chạy
+    const elapsed = task.processingStartedAt
+      ? Math.floor((Date.now() - new Date(task.processingStartedAt).getTime()) / 1000) : 0
+
     const { error: updateError } = await supabase.from('tasks').update({
       status: 'submitted',
+      work_status: 'complete',
+      processing_started_at: null,
+      total_processing_seconds: (task.totalProcessingSeconds ?? 0) + elapsed,
+      complete_issue: hasIssue ? issueText.trim() : null,
       submission_file_url: driveLink.trim(),
       submission_own_folder_url: task.selfCreated ? ownFolderUrl.trim() : null,
       submission_folder_name: needsOwnFolderName ? folderName.trim() : null,
@@ -7076,7 +7412,7 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
 
     for (const uid of recipientIds) {
       await supabase.from('notifications').insert({
-        message: `📥 ${currentUser.name} vừa nộp kết quả task: ${task.title}`,
+        message: `📥 ${currentUser.name} đã ${hasIssue ? `Complete with issue (${issueText.trim()})` : 'Complete successful'} task: ${task.title}`,
         target_user_id: uid,
         link_task_id: task.id,
       })
@@ -7088,7 +7424,7 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50 px-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
       <div className="w-full max-w-md rounded-2xl p-6 max-h-[90vh] overflow-y-auto" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
-        <h3 className="font-bold text-lg mb-1" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>Nộp kết quả task</h3>
+        <h3 className="font-bold text-lg mb-1" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>Complete task</h3>
         <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>{task.title}</p>
 
         {task.selfCreated ? (
@@ -7156,7 +7492,27 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
         <p className="text-[10px] mt-1.5 mb-4 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
           💡 Bấm chuột phải vào file/folder → "Chia sẻ" → bật quyền <b>"Bất kỳ ai có link đều xem và chỉnh sửa được"</b> → "Sao chép đường liên kết", rồi dán vào đây.
         </p>
-
+                <div className="mb-4 p-3 rounded-lg" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
+          <p className="text-xs uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Kết quả Complete *</p>
+          <div className="flex gap-2 mb-2">
+            <button type="button" onClick={() => setHasIssue(false)}
+              className="flex-1 py-2 rounded-lg text-xs font-bold"
+              style={{ background: !hasIssue ? '#34d39922' : 'transparent', color: !hasIssue ? '#059669' : 'var(--text-muted)', border: `1px solid ${!hasIssue ? '#059669' : 'var(--border)'}` }}>
+              ✅ Complete successful
+            </button>
+            <button type="button" onClick={() => setHasIssue(true)}
+              className="flex-1 py-2 rounded-lg text-xs font-bold"
+              style={{ background: hasIssue ? '#f8717122' : 'transparent', color: hasIssue ? '#dc2626' : 'var(--text-muted)', border: `1px solid ${hasIssue ? '#dc2626' : 'var(--border)'}` }}>
+              ⚠️ Complete with issue
+            </button>
+          </div>
+          {hasIssue && (
+            <textarea value={issueText} onChange={e => setIssueText(e.target.value)} rows={2}
+              placeholder="Ghi rõ issue là gì (VD: trễ do chờ nhà cung cấp, thiếu dữ liệu đầu vào...)"
+              className="w-full px-3 py-2 rounded-lg text-xs outline-none resize-none placeholder-[color:var(--text-muted)]"
+              style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+          )}
+        </div>
         <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Ghi chú (không bắt buộc)</label>
         <textarea value={note} onChange={e => setNote(e.target.value)} rows={3}
           placeholder="Mô tả ngắn gọn kết quả đã làm..."
@@ -7172,7 +7528,7 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
           <button onClick={handleSubmit} disabled={saving}
             className="flex-1 py-2.5 rounded-xl font-bold text-sm disabled:opacity-40"
             style={{ background: 'linear-gradient(135deg,#7c3aed,#5b21b6)', color: '#fff' }}>
-            {saving ? 'Đang lưu...' : 'Nộp task'}
+            {saving ? 'Đang lưu...' : 'Complete'}
           </button>
         </div>
       </div>
@@ -7629,18 +7985,25 @@ const getTaskApproverIds = (creatorId: string, projectManagerIds: string[], user
 
 const canApproveSelfTask = (task: Task, user: User, users: User[]) => {
   if (task.creationApproval !== 'pending' || user.id === task.createdBy) return false
-  if (user.isDirector) return true
   return getTaskApproverIds(task.createdBy, task.projectManager, users).includes(user.id)
 }
 
 async function approveSelfTask(task: Task, approver: User) {
+  const nowIso = new Date().toISOString()
   const { error } = await supabase.from('tasks').update({
-    creation_approval: 'approved', creation_approved_by: approver.id,
-    creation_approved_at: new Date().toISOString(), creation_rejected_reason: null,
+    creation_approval: 'approved',
+    creation_approved_by: approver.id,
+    creation_approved_at: nowIso,
+    creation_rejected_reason: null,
+    // Duyệt xong: tự chuyển sang "Đang xử lý", nhân viên không cần bấm Bắt đầu nữa
+    status: 'in-progress',
+    work_status: 'processing',
+    started_at: nowIso,
+    processing_started_at: nowIso,
   }).eq('id', task.id).eq('creation_approval', 'pending')
   if (error) { alert('Không duyệt được task: ' + error.message); return }
   await supabase.from('notifications').insert({
-    message: `✅ ${approver.name} đã duyệt task [${task.taskCode ?? task.title}] bạn tự tạo, bạn có thể bắt đầu làm`,
+    message: `✅ ${approver.name} đã duyệt task [${task.taskCode ?? task.title}] bạn tự tạo, task đã chuyển sang Đang xử lý, bạn có thể làm ngay`,
     target_user_id: task.createdBy, link_task_id: task.id,
   })
 }
@@ -8391,13 +8754,21 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     if (error) { alert('Không bắt đầu được task: ' + error.message); return }
   }
 
-  const handleApprove = async (task: Task) => {
+  const handleApprove = async (task: Task, result: 'successful' | 'with_issue') => {
+    let closeNote = ''
+    if (result === 'with_issue') {
+      closeNote = window.prompt('Ghi rõ issue của task này (bắt buộc):', task.completeIssue ?? '') ?? ''
+      if (!closeNote.trim()) return   // không ghi issue thì không đóng
+    }
+    const closeLabel = result === 'with_issue' ? 'Close with issue' : 'Close successful'
     const approvedAt = new Date().toISOString()
 
     const { error: approveError } = await supabase.from('tasks').update({
       status: 'completed',
       approved_by: currentUser.id,
       approved_at: approvedAt,
+      close_result: result,
+      close_note: closeNote.trim() || null,
     }).eq('id', task.id)
 
     if (approveError) {
@@ -8424,7 +8795,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
 
     for (const bod of bodUsers) {
       await supabase.from('notifications').insert({
-        message: `📢 ${currentUser.name} (${departmentName}) đã duyệt ${taskTypeLabel}: "${task.title}"${taskOwnerNames ? ` — Nhân sự: ${taskOwnerNames}` : ''}`,
+        message: `📢 ${currentUser.name} (${departmentName}) đã ${closeLabel} ${taskTypeLabel}: "${task.title}"${taskOwnerNames ? ` — Nhân sự: ${taskOwnerNames}` : ''}`,
         target_user_id: bod.id,
         link_task_id: task.id,
       })
@@ -8436,7 +8807,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
       const isSupporter = task.supporters.includes(uid) && !task.assignedTo.includes(uid)
       const earnedExp = isSupporter ? supportExp : task.expReward
       await supabase.from('notifications').insert({
-        message: `✅ ${currentUser.name} đã duyệt task: "${task.title}" — bạn nhận được +${earnedExp} EXP`,
+        message: `✅ ${currentUser.name} đã ${closeLabel} task: "${task.title}" — bạn nhận được +${earnedExp} EXP`,
         target_user_id: uid,
         link_task_id: task.id,
       })
@@ -8448,7 +8819,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
       const eligibleForExp = pm?.role === 'employee' || task.selfCreated || isTeamwork
       await supabase.from('notifications').insert({
         message: eligibleForExp
-          ? `✅ ${currentUser.name} đã duyệt task: "${task.title}" — bạn nhận được +${task.expReward} EXP`
+          ? `✅ ${currentUser.name} đã ${closeLabel} task: "${task.title}" — bạn nhận được +${task.expReward} EXP`
           : `✅ ${currentUser.name} đã duyệt task: "${task.title}" (task cá nhân, không cộng EXP cho PM)`,
         target_user_id: uid,
         link_task_id: task.id,
@@ -8482,7 +8853,11 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   const handleReject = async (task: Task) => {
     const reason = window.prompt('Lý do từ chối (nhân viên sẽ thấy để sửa lại):') ?? ''
     await supabase.from('tasks').update({
-      status: 'in-progress', submission_file_url: null, submission_note: null, rejected_reason: reason,
+      status: 'in-progress',
+      work_status: 'processing',
+      processing_started_at: new Date().toISOString(),
+      complete_issue: null,
+      submission_file_url: null, submission_note: null, rejected_reason: reason,
     }).eq('id', task.id)
 
     const notifyIds = Array.from(new Set([...task.assignedTo, ...task.supporters]))
@@ -8719,8 +9094,11 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
         title: finalTitle, company: form.company || null, description: form.description, exp_reward: form.expReward,
         task_code: taskCode,
         sla_level: form.slaLevel || null,
-        work_status: 'received',
-        status: 'open', assigned_to: creatingForSelf ? [currentUser.id] : form.assignedTo,
+        work_status: (creatingForSelf && !needsApproval) ? 'processing' : 'received',
+        status: (creatingForSelf && !needsApproval) ? 'in-progress' : 'open',
+        started_at: (creatingForSelf && !needsApproval) ? new Date().toISOString() : null,
+        processing_started_at: (creatingForSelf && !needsApproval) ? new Date().toISOString() : null,
+        assigned_to: creatingForSelf ? [currentUser.id] : form.assignedTo,
         project_manager: form.projectManager, supporters: form.supporters,
         created_by: currentUser.id,
         start_date: form.startDate,
@@ -8927,17 +9305,21 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
                   </span>
                 )}
               </div>
-
-              <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                <select value={task.workStatus ?? 'received'}
-                  disabled={!!task.pendingRequestedAt || !!task.isLocked || isTaskGated(task)}
-                  onChange={e => updateWorkStatus(task, e.target.value)}
+                <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                  <select value={task.workStatus ?? 'received'}
+                  disabled={!!task.pendingRequestedAt || !!task.isLocked || isTaskGated(task) || task.status === 'submitted' || task.status === 'completed'}
+                  onChange={e => {
+                    if (e.target.value === 'complete') setSubmittingTask(task)
+                    else updateWorkStatus(task, e.target.value)
+                  }}
                   onClick={e => e.stopPropagation()}
                   className="text-xs px-2 py-1 rounded outline-none disabled:opacity-50"
                   style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: WORK_STATUS_CONFIG[task.workStatus ?? 'received'].color }}>
-                  {Object.entries(WORK_STATUS_CONFIG).map(([key, cfg]) => (
-                    <option key={key} value={key}>{cfg.label}</option>
-                  ))}
+                  {Object.entries(WORK_STATUS_CONFIG)
+                    .filter(([key]) => !(key === 'received' && task.selfCreated))
+                    .map(([key, cfg]) => (
+                      <option key={key} value={key}>{cfg.label}</option>
+                    ))}
                 </select>
                 {(task.workStatus === 'processing' || task.workStatus === 'pending' || task.workStatus === 'complete') && (
                   <span className="text-xs px-2 py-0.5 rounded font-mono" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
@@ -9092,7 +9474,14 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
                     </div>
 
                   ) : task.status === 'completed' ? (
-                    <span className="text-xs" style={{ color: '#059669' }}>✓ Hoàn thành</span>
+                    <div className="flex flex-col items-end gap-0.5 max-w-[240px]">
+                      <span className="text-xs font-semibold" style={{ color: task.closeResult === 'with_issue' ? '#b45309' : '#059669' }}>
+                        {task.closeResult === 'with_issue' ? '🔒 Close with issue' : '🔒 Close successful'}
+                      </span>
+                      {(task.closeNote || task.completeIssue) && (
+                        <p className="text-[11px] text-right" style={{ color: 'var(--text-muted)' }}>Issue: {task.closeNote || task.completeIssue}</p>
+                      )}
+                    </div>
 
                   ) : task.status === 'submitted' && currentUser.role === 'manager' ? (
                     <div className="flex flex-col gap-1.5 items-end">
@@ -9112,21 +9501,29 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
                         </a>
                       )}
                       {task.submissionNote && <p className="text-xs max-w-[200px] text-right" style={{ color: 'var(--text-muted)' }}>{task.submissionNote}</p>}
-                      <div className="flex gap-1.5">
+                      <p className="text-xs max-w-[240px] text-right font-semibold"
+                        style={{ color: task.completeIssue ? '#dc2626' : '#059669' }}>
+                        {task.completeIssue ? `⚠️ Complete with issue: ${task.completeIssue}` : '✅ Complete successful'}
+                      </p>
+                      <div className="flex gap-1.5 flex-wrap justify-end">
                         <button onClick={() => handleReject(task)}
                           className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>
-                          Không chấp nhận
+                          Làm lại
                         </button>
-                        <button onClick={() => handleApprove(task)}
+                        <button onClick={() => handleApprove(task, 'with_issue')}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#fbbf2433', color: '#b45309' }}>
+                          🔒 Close with issue
+                        </button>
+                        <button onClick={() => handleApprove(task, 'successful')}
                           className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#34d39922', color: '#059669' }}>
-                          ✓ Duyệt
+                          🔒 Close successful
                         </button>
                       </div>
                     </div>
 
                   ) : task.status === 'submitted' && task.assignedTo.includes(currentUser.id) ? (
                     <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>
-                      ⏳ Đang chờ quản lý duyệt
+                      {task.completeIssue ? '⚠️ Complete with issue, chờ quản lý Close' : '✅ Complete successful, chờ quản lý Close'}
                     </span>
 
                   ) : (task.isLocked || (isSlaOverdue(task) && !task.slaUnlockGranted)) ? (
@@ -9170,7 +9567,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
                         {task.status === 'in-progress' && task.workStatus !== 'pending' && (
                           <button onClick={() => setSubmittingTask(task)}
                             className="px-4 py-2 rounded-xl text-sm font-bold" style={{ background: '#34d39922', color: '#059669' }}>
-                            Nộp task ✓
+                            Complete ✓
                           </button>
                         )}
                         {task.status === 'in-progress' && task.workStatus === 'pending' && (
@@ -12151,6 +12548,7 @@ function ProposalCostSection({ p, canEdit }: { p: Proposal; canEdit: boolean }) 
   const [price, setPrice] = useState('')
   const [note, setNote] = useState('')
 
+
   const total = rows.reduce((s, r) => s + costRowAmount(r), 0)
   const fmt = (n: number) => toVnd(n).toLocaleString('vi-VN')
 
@@ -14817,9 +15215,10 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
   )
 }
 
-function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpenProposal }: {
+function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpenProposal, focusProjectId, onFocusHandled }: {
   currentUser: User; users: User[]; tasks: Task[]; proposals: Proposal[]
   onOpenTask?: (taskId: string) => void; onOpenProposal?: (proposalId: string) => void
+  focusProjectId?: string | null; onFocusHandled?: () => void
 }) {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
@@ -14848,6 +15247,10 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
       .subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [])
+
+  useEffect(() => {
+    if (focusProjectId) { setOpenId(focusProjectId); onFocusHandled?.() }
+  }, [focusProjectId])
 
   const isDir = !!currentUser.isDirector
   const isMgr = currentUser.role === 'manager'
@@ -15056,6 +15459,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   const [socialTarget, setSocialTarget] = useState<{ channel: ChatChannel; dmUserId?: string; proposalId?: string } | null>(null)
   const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null)
   const [highlightProposalId, setHighlightProposalId] = useState<string | null>(null)
+  const [projectFocusId, setProjectFocusId] = useState<string | null>(null)
 
   const handleJoinProposal = async (proposal: Proposal) => {
     if (!proposal.participants.includes(currentUser.id)) {
@@ -15112,12 +15516,15 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
 
   const renderView = () => {
     switch (view) {
-      case 'dashboard': return <DashboardView {...sharedProps} />
+      case 'dashboard': return <DashboardView {...sharedProps} proposals={proposals}
+        onOpenProposal={id => { setView('proposals'); setHighlightProposalId(id) }}
+        onOpenProject={id => { setProjectFocusId(id); setView('projects') }} />
       case 'tasks': return (
         <TasksView {...sharedProps} collaborations={collaborations}
           highlightTaskId={highlightTaskId} clearHighlightTaskId={() => setHighlightTaskId(null)} />
       )
       case 'projects': return <ProjectsView currentUser={currentUser} users={users} tasks={tasks} proposals={proposals}
+        focusProjectId={projectFocusId} onFocusHandled={() => setProjectFocusId(null)}
         onOpenTask={id => { setView('tasks'); setHighlightTaskId(id) }}
         onOpenProposal={id => { setView('proposals'); setHighlightProposalId(id) }} />
       case 'leaderboard': return <LeaderboardView users={users} tasks={tasks} />
@@ -15131,7 +15538,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
       case 'profile': return <ProfileView currentUser={currentUser} setCurrentUser={setCurrentUser} tasks={tasks} />
       case 'proposals': return <ProposalsView currentUser={currentUser} users={users} proposals={proposals} proposalApprovals={proposalApprovals} proposalRevisions={proposalRevisions} onJoinDiscussion={handleJoinProposal}
           highlightProposalId={highlightProposalId} clearHighlightProposalId={() => setHighlightProposalId(null)} />
-          case 'bodlog': return currentUser.isDirector ? <BodLogView tasks={tasks} users={users} /> : <DashboardView {...sharedProps} />
+          case 'bodlog': return currentUser.isDirector ? <BodLogView tasks={tasks} users={users} /> : <DashboardView {...sharedProps} proposals={proposals} />
     }
   }
 
@@ -15360,6 +15767,9 @@ export default function App() {
     unlockRequestedReason: t.unlock_requested_reason ?? undefined,
     unlockRequestedAt: t.unlock_requested_at ?? undefined,
     slaUnlockGranted: t.sla_unlock_granted ?? false,
+    completeIssue: t.complete_issue ?? undefined,
+    closeResult: t.close_result ?? undefined,
+    closeNote: t.close_note ?? undefined,
   }
 }
 function mapDbProposal(p: any): Proposal {
