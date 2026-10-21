@@ -5497,7 +5497,7 @@ function SignDocumentModal({ currentUser, proposal, onClose }: { currentUser: Us
 }
 // Cầu nối: bấm số tờ trình ở bất kỳ đâu -> ProposalsView mở đúng tờ trình đó
 const ProposalLinkContext = createContext<(code: string) => void>(() => {})
-const PROPOSAL_CODE_SPLIT = /(R-TASK\d{6}-\d{2,})/gi
+const PROPOSAL_CODE_SPLIT = /(\bR-?TASK\d{6}-\d{2,})/gi
 
 function ProposalCodeLink({ code }: { code: string }) {
   const open = useContext(ProposalLinkContext)
@@ -5507,7 +5507,7 @@ function ProposalCodeLink({ code }: { code: string }) {
   )
 }
 
-// Tự biến mọi số R-TASKddmmyy-NN trong đoạn text thành link
+// Tự biến mọi số RTASKddmmyy-NN trong đoạn text thành link
 function LinkifyCodes({ text }: { text: string }) {
   const parts = text.split(PROPOSAL_CODE_SPLIT)
   return <>{parts.map((s, i) => (i % 2 === 1 ? <ProposalCodeLink key={i} code={s.toUpperCase()} /> : <span key={i}>{s}</span>))}</>
@@ -5831,7 +5831,7 @@ function ProposalDocForm({ currentUser, users, onClose }: { currentUser: User; u
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto" style={{ background: '#d1d5db' }}>
       <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
-        <span className="text-sm font-bold text-gray-800">📜 Tạo tờ trình mới (R-TASK)</span>
+        <span className="text-sm font-bold text-gray-800">📜 Tạo tờ trình mới (RTASK)</span>
         <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
       </div>
 
@@ -5847,7 +5847,7 @@ function ProposalDocForm({ currentUser, users, onClose }: { currentUser: User; u
         </div>
 
         <div className="grid grid-cols-3 border border-black my-5">
-          <div className="p-3 text-xs border-r border-black flex items-center">Số/No: <span className="ml-1 font-mono text-gray-500">R-TASK… (tự sinh khi gửi)</span></div>
+          <div className="p-3 text-xs border-r border-black flex items-center">Số/No: <span className="ml-1 font-mono text-gray-500">RTASK… (tự sinh khi gửi)</span></div>
           <div className="col-span-2 p-3 text-center text-3xl font-bold">TỜ TRÌNH<span className="text-blue-400">/ PROPOSAL</span></div>
         </div>
 
@@ -6288,8 +6288,8 @@ function ProposalDnttForm({ currentUser, users, onClose }: { currentUser: User; 
     if (payMethod === 'bank' && (!owner.trim() || !account.trim())) { setError('Vui lòng nhập tên chủ tài khoản và số tài khoản.'); return }
     if (!recipientId) { setError('Vui lòng chọn người duyệt đầu tiên.'); return }
 
-    const relatedCodes = Array.from(new Set((relatedInput.match(/R-TASK\d{6}-\d{2,}/gi) ?? []).map(c => c.toUpperCase())))
-    if (relatedInput.trim() && relatedCodes.length === 0) { setError('Số tờ trình liên quan phải có dạng R-TASKddmmyy-NN.'); return }
+    const relatedCodes = Array.from(new Set((relatedInput.match(/\bR-?TASK\d{6}-\d{2,}/gi) ?? []).map(c => c.toUpperCase())))
+    if (relatedInput.trim() && relatedCodes.length === 0) { setError('Số tờ trình liên quan phải có dạng RTASKddmmyy-NN.'); return }
     if (relatedCodes.length > 0) {
       const { data: found } = await supabase.from('proposals').select('code').in('code', relatedCodes)
       const missing = relatedCodes.filter(c => !(found ?? []).some((x: any) => x.code === c))
@@ -6353,7 +6353,7 @@ function ProposalDnttForm({ currentUser, users, onClose }: { currentUser: User; 
   return (
     <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
       <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
-        <span className="text-sm font-bold text-gray-800">💳 Tạo đề nghị thanh toán (R-TASK)</span>
+        <span className="text-sm font-bold text-gray-800">💳 Tạo đề nghị thanh toán (RTASK)</span>
         <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
       </div>
 
@@ -6365,7 +6365,7 @@ function ProposalDnttForm({ currentUser, users, onClose }: { currentUser: User; 
           <div className="text-center my-5">
             <p className="text-lg font-bold">ĐỀ NGHỊ THANH TOÁN</p>
             <p className="text-lg font-bold text-blue-600">(PAYMENT REQUEST)</p>
-            <p className="text-[11px] text-gray-500 mt-1">Số/No: <span className="font-mono">R-TASK… (tự sinh khi gửi)</span></p>
+            <p className="text-[11px] text-gray-500 mt-1">Số/No: <span className="font-mono">RTASK… (tự sinh khi gửi)</span></p>
           </div>
 
           <div className="space-y-1.5 mb-3">
@@ -6383,7 +6383,7 @@ function ProposalDnttForm({ currentUser, users, onClose }: { currentUser: User; 
             <div className="flex items-center gap-2">
               <span className="shrink-0">Tờ trình liên quan <i className="text-blue-600">(Related proposal)</i>:</span>
               <input value={relatedInput} onChange={e => setRelatedInput(e.target.value)}
-                placeholder="VD: R-TASK181026-01 (nhiều số thì cách nhau bằng dấu phẩy)"
+                placeholder="VD: RTASK181026-01 (nhiều số thì cách nhau bằng dấu phẩy)"
                 className={line} style={ink} />
             </div>
             <div>
@@ -7412,7 +7412,7 @@ const COMPANIES = ['KNI Office', 'Genki House', 'Genki Farm', 'First Steps', 'Le
 async function generateProposalCode(userId: string): Promise<string> {
   const d = new Date()
   const ds = String(d.getDate()).padStart(2, '0') + String(d.getMonth() + 1).padStart(2, '0') + String(d.getFullYear()).slice(-2)
-  const prefix = `R-TASK${ds}-`
+  const prefix = `RTASK${ds}-`
   const { count } = await supabase.from('proposals')
     .select('id', { count: 'exact', head: true }).eq('submitted_by', userId).like('code', `${prefix}%`)
   return `${prefix}${String((count ?? 0) + 1).padStart(2, '0')}`
@@ -7550,7 +7550,7 @@ function ProposalModal({ currentUser, users, editingProposal, onClose, kind = 'd
       <div className="w-full max-w-md rounded-2xl p-6 max-h-[90vh] overflow-y-auto" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
         <div className="flex justify-between items-center mb-5">
           <h3 className="font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
-            {editingProposal ? '✏️ Chỉnh sửa & Gửi lại tờ trình' : (kind === 'totrinh' ? '📜 Tạo tờ trình mới (R-TASK)' : '📜 Tạo đề xuất mới (R-TASK)')}
+            {editingProposal ? '✏️ Chỉnh sửa & Gửi lại tờ trình' : (kind === 'totrinh' ? '📜 Tạo tờ trình mới (RTASK)' : '📜 Tạo đề xuất mới (RTASK)')}
           </h3>
           <button onClick={onClose} className="text-2xl leading-none hover:opacity-70" style={{ color: 'var(--text-muted)' }}>×</button>
         </div>
@@ -8847,7 +8847,7 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
     setSaving(true); setError('')
     const now = new Date()
     const ds = String(now.getDate()).padStart(2, '0') + String(now.getMonth() + 1).padStart(2, '0') + String(now.getFullYear()).slice(-2)
-    const prefix = `PRJ-${ds}-`
+    const prefix = `PTASK${ds}-`
     let created: any = null
     let insertError: any = null
     for (let i = 0; i < 3; i++) {
@@ -8977,7 +8977,7 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
               <input value={supplierRef} onChange={e => setSupplierRef(e.target.value)} className={box} style={ink} />
             </div>
           </div>
-          <p className="text-xs text-gray-500">Mã dự án <b>PRJ-ngàytháng năm-số thứ tự</b> (ví dụ PRJ-201026-01) sẽ tự sinh khi lưu.</p>
+          <p className="text-xs text-gray-500">Mã dự án <b>PTASKngàytháng năm-số thứ tự</b> (ví dụ PTASK201026-01) sẽ tự sinh khi lưu.</p>
         </div>
       </div>
       <div className="shrink-0 px-4 py-3 flex items-center justify-end gap-3" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
@@ -8992,7 +8992,7 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
   )
 }
 
-// Mã task con: TASK-<mã dự án>.<số thứ tự>, ví dụ TASK-PRJ-201026-01.1
+// Mã task con: TASK-<mã dự án>.<số thứ tự>, ví dụ TASK-PTASK201026-01.1
 async function generateProjectTaskCode(projectId: string, projectCode: string, skip = 0): Promise<string> {
   const prefix = `TASK-${projectCode}.`
   const { data } = await supabase.from('tasks').select('task_code').eq('project_id', projectId)
@@ -9347,7 +9347,7 @@ function ProjectProposals({ project, proposals, users, currentUser, canManage, o
       <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
         <div className="flex gap-1.5">
           <input list="project-proposal-codes" value={code} onChange={e => setCode(e.target.value)} onKeyDown={e => e.key === 'Enter' && link()}
-            placeholder="Chọn hoặc dán mã tờ trình (VD: R-TASK201026-01)"
+            placeholder="Chọn hoặc dán mã tờ trình (VD: RTASK201026-01)"
             className="flex-1 min-w-0 px-3 py-2 rounded-lg text-xs outline-none"
             style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
           <datalist id="project-proposal-codes">
