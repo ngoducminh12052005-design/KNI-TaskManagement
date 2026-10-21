@@ -3042,94 +3042,97 @@ const TASK_LIST_COLS = '44px minmax(240px,1.6fr) 64px minmax(180px,2fr) 130px 10
 
 function TaskListTable({ tasks, users, onOpen }: { tasks: Task[]; users: User[]; onOpen: (t: Task) => void }) {
   const userOf = (id: string) => users.find(u => u.id === id)
-  const head = 'text-[11px] font-bold uppercase tracking-wide'
+  const fmtShort = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '—')
+  const th = 'px-3 py-2.5 text-[11px] font-bold uppercase tracking-wide text-left'
+  const td = 'px-3 py-3 text-xs align-middle'
+  const cols = ['4%', '23%', '6%', '14%', '9%', '7%', '9%', '7%', '6%', '6%', '9%']
+  // Trạng thái dùng cùng nhóm với các thẻ lọc phía trên (Received, In-process, Pending, Completed, Close)
+  const toTracker: Record<TaskBucket, string> = { received: 'received', processing: 'processing', pending: 'pending', completed: 'complete', closed: 'closed' }
 
   return (
-    <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
-      <div className="overflow-x-auto">
-        <div style={{ minWidth: 1180 }}>
-          {/* Hàng tiêu đề */}
-          <div className="grid items-center gap-3 px-4 py-3"
-            style={{ gridTemplateColumns: TASK_LIST_COLS, background: 'var(--bg-card-alt)', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-            <span className={head}>No.</span>
-            <span className={head}>Task</span>
-            <span className={head}>Co.</span>
-            <span className={head}>Details</span>
-            <span className={head}>Status</span>
-            <span className={head}>Priority</span>
-            <span className={head}>Sup</span>
-            <span className={head}>Start</span>
-            <span className={head}>Due</span>
-            <span className={head}>Update</span>
-            <span />
-          </div>
-
+    <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
+      <table className="w-full border-collapse table-fixed">
+        <colgroup>{cols.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
+        <thead>
+          <tr style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
+            <th className={th}>No.</th>
+            <th className={th}>Task</th>
+            <th className={th}>Co.</th>
+            <th className={th}>Details</th>
+            <th className={th}>Status</th>
+            <th className={th}>Priority</th>
+            <th className={th}>PIC</th>
+            <th className={th}>Sup</th>
+            <th className={th}>Start</th>
+            <th className={th}>Due</th>
+            <th className={th}>Update</th>
+          </tr>
+        </thead>
+        <tbody>
           {tasks.length === 0 && (
-            <div className="py-10 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Không có task nào trong khoảng thời gian này.</div>
+            <tr><td colSpan={11} className="px-3 py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Không có task nào trong khoảng này.</td></tr>
           )}
-
-          {/* Từng task = 1 dòng */}
           {tasks.map((t, i) => {
+            const over = isSlaOverdue(t) || !!t.isLocked
+            const st: [string, string, string] = isTaskGated(t)
+              ? ['⏳ Chờ duyệt', '#fbbf2422', '#d97706']
+              : (TRACKER_STATUS[toTracker[statusBucket(t)]] ?? TRACKER_STATUS.received)
+            const pics = t.assignedTo.map(userOf).filter(Boolean) as User[]
+            const sups = t.supporters.map(userOf).filter(Boolean) as User[]
             const pri = PRIORITY_CONFIG[t.priority]
-            const gated = isTaskGated(t)
-            const bucket = BUCKET_META[statusBucket(t)]
-            const stLabel = gated ? '⏳ Chờ duyệt' : bucket.label
-            const stColor = gated ? '#d97706' : bucket.color
-            const catColor = CATEGORY_COLORS[t.category] ?? '#6b7280'
-            const people = Array.from(new Set([...t.assignedTo, ...t.supporters])).map(userOf).filter((u): u is User => !!u)
-            const updated = t.approvedAt ?? t.submittedAt ?? t.processingStartedAt ?? t.startedAt ?? t.createdAt
             return (
-              <div key={t.id} onClick={() => onOpen(t)}
-                className="grid items-center gap-3 px-4 py-3 cursor-pointer transition-colors hover:bg-[color:var(--bg-card-alt)]"
-                style={{ gridTemplateColumns: TASK_LIST_COLS, borderTop: i === 0 ? 'none' : '1px solid var(--border)' }}>
-                <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>{i + 1}</span>
-
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 mb-0.5">
-                    <span className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase" style={{ background: `${catColor}20`, color: catColor }}>{t.category}</span>
-                    {t.selfCreated && <span className="text-[9px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#10b98122', color: '#10b981' }}>Tự tạo</span>}
+              <tr key={t.id} onClick={() => onOpen(t)}
+                className="cursor-pointer transition-colors hover:bg-[color:var(--bg-card-alt)]"
+                style={{ borderTop: '1px solid var(--border)', background: over ? '#dc262612' : undefined, color: 'var(--text-primary)' }}>
+                <td className={td} style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                <td className={td}>
+                  <div className="flex flex-wrap gap-1 mb-1">
+                    {t.category && <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded" style={{ background: '#ede9fe', color: '#6d28d9' }}>{t.category}</span>}
+                    {t.selfCreated && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#dcfce7', color: '#15803d' }}>Tự tạo</span>}
+                    {t.projectId && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#dbeafe', color: '#1d4ed8' }}>Dự án</span>}
+                    {t.urgent && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#f8717122', color: '#dc2626' }}>⏰ GẤP</span>}
+                    {t.important && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#fbbf2422', color: '#d97706' }}>🔥</span>}
                   </div>
-                  <div className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
-                    {t.taskCode && <span className="font-mono text-[10px] mr-1.5" style={{ color: 'var(--text-muted)' }}>{t.taskCode}</span>}
-                    {t.title}
-                  </div>
-                </div>
-
-                <span className="text-xs font-bold" style={{ color: 'var(--text-primary)' }}>{t.company ? (COMPANY_CODES[t.company] ?? t.company) : '—'}</span>
-
-                <div className="min-w-0 flex items-center gap-1.5">
-                  {t.urgent && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold shrink-0" style={{ background: '#f8717122', color: '#dc2626' }}>⏰ GẤP</span>}
-                  {t.important && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold shrink-0" style={{ background: '#fbbf2422', color: '#d97706' }}>🔥</span>}
-                  <span className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{t.description || '—'}</span>
-                </div>
-
-                <span className="text-xs font-semibold px-2 py-1 rounded-lg w-fit" style={{ background: `${stColor}1a`, color: stColor }}>{stLabel}</span>
-
-                <span className="text-xs font-semibold px-2 py-1 rounded-lg w-fit" style={{ background: `${pri.color}1a`, color: pri.color }}>{pri.label}</span>
-
-                <div className="flex -space-x-1.5">
-                  {people.slice(0, 3).map(u => <CharAvatar key={u.id} user={u} size={24} />)}
-                  {people.length > 3 && (
-                    <span className="w-6 h-6 rounded-full flex items-center justify-center text-[9px]"
-                      style={{ background: 'var(--border)', color: 'var(--text-muted)' }}>+{people.length - 3}</span>
-                  )}
-                  {people.length === 0 && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>—</span>}
-                </div>
-
-                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{t.startDate ? fmtDate(t.startDate) : '—'}</span>
-                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{t.dueDate ? fmtDate(t.dueDate) : '—'}</span>
-
-                <div className="leading-tight">
-                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{updated ? fmtDate(updated) : '—'}</div>
-                  <div className="text-xs font-bold text-amber-500" style={{ fontFamily: 'Rajdhani, sans-serif' }}>+{t.expReward}</div>
-                </div>
-
-                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>▾</span>
-              </div>
+                  <div className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>{t.taskCode ?? '—'}</div>
+                  <div className="text-sm font-semibold leading-snug break-words">{t.title}</div>
+                </td>
+                <td className={`${td} font-bold`}>{t.company ? (COMPANY_CODES[t.company] ?? t.company) : '—'}</td>
+                <td className={td} style={{ color: 'var(--text-muted)' }}>
+                  <p className="line-clamp-3 break-words" title={t.description}>{t.description || '—'}</p>
+                </td>
+                <td className={td}>
+                  <span className="px-2 py-1 rounded-lg font-semibold whitespace-nowrap" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
+                </td>
+                <td className={td}>
+                  <div className="font-bold" style={{ color: t.slaLevel ? TRACKER_PRIORITY[t.slaLevel] : 'var(--text-muted)' }}>{t.slaLevel ?? '—'}</div>
+                  <div className="text-[10px] font-semibold" style={{ color: pri.color }}>{pri.label}</div>
+                </td>
+                <td className={td}>
+                  {pics.length === 0 && '—'}
+                  {pics.slice(0, 2).map(u => (
+                    <div key={u.id} className="flex items-center gap-1.5 mb-0.5"><CharAvatar user={u} size={20} /><span className="truncate">{u.name}</span></div>
+                  ))}
+                  {pics.length > 2 && <span style={{ color: 'var(--text-muted)' }}>+{pics.length - 2}</span>}
+                </td>
+                <td className={td}>
+                  {sups.length === 0 && '—'}
+                  <div className="flex flex-wrap gap-0.5">{sups.slice(0, 3).map(u => <CharAvatar key={u.id} user={u} size={22} />)}</div>
+                  {sups.length > 3 && <span style={{ color: 'var(--text-muted)' }}>+{sups.length - 3}</span>}
+                </td>
+                <td className={td}>{fmtShort(t.startDate)}</td>
+                <td className={td}>{fmtShort(t.dueDate)}</td>
+                <td className={td}>
+                  <button type="button" onClick={e => { e.stopPropagation(); onOpen(t) }}
+                    className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap"
+                    style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>
+                    📝 Update
+                  </button>
+                </td>
+              </tr>
             )
           })}
-        </div>
-      </div>
+        </tbody>
+      </table>
     </div>
   )
 }
