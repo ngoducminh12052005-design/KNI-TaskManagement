@@ -7094,9 +7094,40 @@ function DashboardProjects({ currentUser, tasks, onOpen, onViewAll }: {
   )
 }
 
+// ===== Quản lý xem Dashboard của 1 nhân viên (chỉ xem) =====
+function EmployeeDashboardModal({ employee, tasks, users, proposals, onClose }: {
+  employee: User; tasks: Task[]; users: User[]; proposals: Proposal[]; onClose: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: 'var(--bg-app)' }}>
+      <div className="shrink-0 flex items-center justify-between px-4 py-3"
+        style={{ background: 'var(--bg-panel)', borderBottom: '1px solid var(--border)' }}>
+        <div className="flex items-center gap-2.5 min-w-0">
+          <CharAvatar user={employee} size={32} />
+          <div className="min-w-0">
+            <div className="text-sm font-bold truncate" style={{ color: 'var(--text-primary)' }}>Dashboard của {employee.name}</div>
+            <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>👁 Chế độ chỉ xem</div>
+          </div>
+        </div>
+        <button type="button" onClick={onClose}
+          className="px-3 py-1.5 rounded-lg text-sm font-semibold"
+          style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+          ✕ Đóng
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        <DashboardView
+          currentUser={employee} tasks={tasks} users={users} proposals={proposals}
+          setView={() => {}} readOnly />
+      </div>
+    </div>
+  )
+}
+
 // ===== Bảng nhân viên: quản lý xem phòng ban mình, BOD xem toàn công ty =====
-function DashboardPeople({ currentUser, users, tasks }: { currentUser: User; users: User[]; tasks: Task[] }) {
+function DashboardPeople({ currentUser, users, tasks, proposals }: { currentUser: User; users: User[]; tasks: Task[]; proposals: Proposal[] }) {
   const isDir = !!currentUser.isDirector
+  const [viewing, setViewing] = useState<User | null>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const todayStr = new Date().toISOString().split('T')[0]
 
@@ -7116,7 +7147,8 @@ function DashboardPeople({ currentUser, users, tasks }: { currentUser: User; use
   const renderRow = (u: User, rank: number) => {
     const s = statOf(u.id)
     return (
-      <div key={u.id} className="flex items-center gap-2.5 py-1.5">
+      <div key={u.id} onClick={() => setViewing(u)} title="Bấm để xem Dashboard"
+        className="flex items-center gap-2.5 py-1.5 px-1.5 rounded-lg cursor-pointer transition-colors hover:bg-[color:var(--bg-card-alt)]">
         <span className="text-xs w-5 font-mono text-right flex-shrink-0" style={{ color: 'var(--text-muted)' }}>#{rank}</span>
         <CharAvatar user={u} size={28} />
         <div className="flex-1 min-w-0">
@@ -7152,6 +7184,7 @@ function DashboardPeople({ currentUser, users, tasks }: { currentUser: User; use
           {members.length === 0 && <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Chưa có nhân viên nào trong phòng ban.</p>}
           {members.map((u, i) => renderRow(u, i + 1))}
         </div>
+            {viewing && <EmployeeDashboardModal employee={viewing} tasks={tasks} users={users} proposals={proposals} onClose={() => setViewing(null)} />}
       </div>
     )
   }
@@ -7179,21 +7212,23 @@ function DashboardPeople({ currentUser, users, tasks }: { currentUser: User; use
           </div>
         ))}
       </div>
+        {viewing && <EmployeeDashboardModal employee={viewing} tasks={tasks} users={users} proposals={proposals} onClose={() => setViewing(null)} />}
     </div>
   )
 }
 
 // ==================== DASHBOARD ====================
 
-function DashboardView({ currentUser, tasks, users, proposals, setView, onOpenProposal, onOpenProject }: {
+function DashboardView({ currentUser, tasks, users, proposals, setView, onOpenProposal, onOpenProject, readOnly = false }: {
   currentUser: User; tasks: Task[]; users: User[]; proposals: Proposal[]
   setView: (v: View) => void
   onOpenProposal?: (id: string) => void; onOpenProject?: (id: string) => void
+  readOnly?: boolean
 }) {
   const { progress, needed, level } = getExpProgress(currentUser.exp)
   const isManager = currentUser.role === 'manager'
-  const showPeople = isManager || !!currentUser.isDirector
-  const needMyApproval = (t: Task) => canApproveSelfTask(t, currentUser, users)
+  const showPeople = !readOnly && (isManager || !!currentUser.isDirector)
+  const needMyApproval = (t: Task) => !readOnly && canApproveSelfTask(t, currentUser, users)
 const myTasks = tasks.filter(t =>
   t.assignedTo.includes(currentUser.id) ||
   (t.selfCreated && t.createdBy === currentUser.id) ||
@@ -7339,7 +7374,7 @@ const myTasks = tasks.filter(t =>
           <DashboardProjects currentUser={currentUser} tasks={tasks} onOpen={onOpenProject} onViewAll={() => setView('projects')} />
         </div>
 
-        {showPeople && <DashboardPeople currentUser={currentUser} users={users} tasks={tasks} />}
+        {showPeople && <DashboardPeople currentUser={currentUser} users={users} tasks={tasks} proposals={proposals} />}
       </div>
     </div>
   )
