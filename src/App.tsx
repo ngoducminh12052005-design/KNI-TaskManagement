@@ -7106,7 +7106,7 @@ function EmployeeDashboardModal({ employee, tasks, users, proposals, onClose }: 
   employee: User; tasks: Task[]; users: User[]; proposals: Proposal[]; onClose: () => void
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: 'var(--bg-app)' }}>
+    <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 md:left-60 z-50 flex flex-col" style={{ background: 'var(--bg-app)' }}>
       <div className="shrink-0 flex items-center justify-between px-4 py-3"
         style={{ background: 'var(--bg-panel)', borderBottom: '1px solid var(--border)' }}>
         <div className="flex items-center gap-2.5 min-w-0">
@@ -11781,7 +11781,7 @@ function ProposalDocView({ p, users, currentUserId, onClose, canAct, onApprove, 
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
+    <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 md:left-60 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
       <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
         <span className="text-sm font-bold text-gray-800">📄 Tờ trình {p.code ?? ''}</span>
         <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
@@ -13014,7 +13014,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
   const canEdit = currentUser.id === p.submittedBy || flow.some(s => s.approverId === currentUser.id) || !!currentUser.isDirector
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
+    <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 md:left-60 z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
       <div className="max-w-5xl mx-auto">
         <button onClick={onClose} className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>← Danh sách đề xuất</button>
         <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
@@ -15156,7 +15156,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
   )
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
+    <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 md:left-60 z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
       <div className="max-w-5xl mx-auto">
         <button type="button" onClick={onClose} className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>← Danh sách dự án</button>
         <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
