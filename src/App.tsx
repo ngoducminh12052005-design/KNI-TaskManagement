@@ -3168,7 +3168,7 @@ function TaskUpdateDrawer({ task, users, currentUser, canWrite, onClose }: {
           <div className="flex items-start gap-3 min-w-0">
             <span className="text-2xl leading-none">📝</span>
             <div className="min-w-0">
-              <h3 className="text-base font-bold truncate" style={{ color: 'var(--text-primary)' }}>Update — {task.taskCode ?? task.title}</h3>
+              <h3 className="text-base font-bold truncate" style={{ color: 'var(--text-primary)' }}>Work Note — {task.taskCode ?? task.title}</h3>
               <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{task.title}</p>
             </div>
           </div>
@@ -3179,7 +3179,7 @@ function TaskUpdateDrawer({ task, users, currentUser, canWrite, onClose }: {
           {loading ? (
             <p className="text-center mt-16" style={{ color: 'var(--text-muted)' }}>Loading...</p>
           ) : groups.length === 0 ? (
-            <p className="text-center mt-16" style={{ color: 'var(--text-muted)' }}>No updates yet.</p>
+            <p className="text-center mt-16" style={{ color: 'var(--text-muted)' }}>Chưa có work note nào.</p>
           ) : groups.map(g => (
             <div key={g.day} className="mb-4">
               <p className="font-bold" style={{ color: 'var(--text-primary)' }}>{g.day}:</p>
@@ -3196,7 +3196,7 @@ function TaskUpdateDrawer({ task, users, currentUser, canWrite, onClose }: {
         {canWrite ? (
           <div className="px-4 pt-3 pb-3" style={{ background: 'var(--bg-panel)', borderTop: '1px solid var(--border)' }}>
             <div className="flex items-end gap-2">
-              <textarea value={draft} onChange={e => setDraft(e.target.value)} rows={2} placeholder="Write an update..."
+              <textarea value={draft} onChange={e => setDraft(e.target.value)} rows={2} placeholder="Ghi work note..."
                 onKeyDown={e => {
                   if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send() }
                 }}
@@ -3213,7 +3213,7 @@ function TaskUpdateDrawer({ task, users, currentUser, canWrite, onClose }: {
           </div>
         ) : (
           <div className="px-5 py-3 text-xs" style={{ background: 'var(--bg-panel)', borderTop: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-            Bạn chỉ có thể xem update của task này.
+            Bạn chỉ có thể xem work note của task này.
           </div>
         )}
       </div>
@@ -3227,7 +3227,7 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
   const fmtShort = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '—')
   const th = 'px-3 py-2.5 text-[11px] font-bold uppercase tracking-wide text-left'
   const td = 'px-3 py-3 text-xs align-middle'
-  const cols = ['4%', '14%', '6%', '23%', '9%', '7%', '9%', '7%', '6%', '6%', '9%']
+  const cols = ['4%', '14%', '6%', '21%', '9%', '7%', '9%', '7%', '6%', '6%', '11%']
   // Trạng thái dùng cùng nhóm với các thẻ lọc phía trên (Received, In-process, Pending, Completed, Close)
   const toTracker: Record<TaskBucket, string> = { received: 'received', processing: 'processing', pending: 'pending', completed: 'complete', closed: 'closed' }
 
@@ -3247,7 +3247,7 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
             <th className={th}>Sup</th>
             <th className={th}>Start</th>
             <th className={th}>Due</th>
-            <th className={th}>Update</th>
+            <th className={th}>Work Note</th>
           </tr>
         </thead>
         <tbody>
@@ -3305,7 +3305,7 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
                   <button type="button" onClick={e => { e.stopPropagation(); setUpdateTask(t) }}
                     className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap"
                     style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>
-                    📝 Update
+                    📝 Work Note
                   </button>
                 </td>
               </tr>
