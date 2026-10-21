@@ -1503,6 +1503,12 @@ const myTasks = tasks.filter(t =>
       (issue === undefined || taskHadIssue(t) === issue)
     ).length
 
+  const [bucketFilter, setBucketFilter] = useState<'all' | TaskBucket>('all')
+  const toggleBucket = (b: TaskBucket) => setBucketFilter(f => (f === b ? 'all' : b))
+  const shown = bucketFilter === 'all'
+    ? pending
+    : myTasks.filter(t => (!isTaskGated(t) || needMyApproval(t)) && statusBucket(t) === bucketFilter)
+
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-5">
       {/* Hero */}
@@ -1541,15 +1547,20 @@ const myTasks = tasks.filter(t =>
 
             {/* Trạng thái task của tôi */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 items-start">
-        <StatusStatCard icon="📥" label="Received" color={BUCKET_META.received.color} total={bucketCount('received')} />
-        <StatusStatCard icon="⚙️" label="In-process" color={BUCKET_META.processing.color} total={bucketCount('processing')} />
-        <StatusStatCard icon="⏸" label="Pending" color={BUCKET_META.pending.color} total={bucketCount('pending')} />
+        <StatusStatCard icon="📥" label="Received" color={BUCKET_META.received.color} total={bucketCount('received')}
+          active={bucketFilter === 'received'} onClick={() => toggleBucket('received')} />
+        <StatusStatCard icon="⚙️" label="In-process" color={BUCKET_META.processing.color} total={bucketCount('processing')}
+          active={bucketFilter === 'processing'} onClick={() => toggleBucket('processing')} />
+        <StatusStatCard icon="⏸" label="Pending" color={BUCKET_META.pending.color} total={bucketCount('pending')}
+          active={bucketFilter === 'pending'} onClick={() => toggleBucket('pending')} />
         <StatusStatCard icon="✅" label="Completed" color={BUCKET_META.completed.color} total={bucketCount('completed')}
+          active={bucketFilter === 'completed'} onClick={() => toggleBucket('completed')}
           subs={[
             { label: 'Complete with issue', value: bucketCount('completed', true), color: '#dc2626' },
             { label: 'Complete successful', value: bucketCount('completed', false), color: '#059669' },
           ]} />
         <StatusStatCard icon="🔒" label="Close" color={BUCKET_META.closed.color} total={bucketCount('closed')}
+          active={bucketFilter === 'closed'} onClick={() => toggleBucket('closed')}
           subs={[
             { label: 'Close with issue', value: bucketCount('closed', true), color: '#dc2626' },
             { label: 'Close successful', value: bucketCount('closed', false), color: '#059669' },
@@ -1563,12 +1574,19 @@ const myTasks = tasks.filter(t =>
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
                 ⚡ Task của tôi
-                <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: 'var(--border)', color: 'var(--text-muted)' }}>{pending.length} chờ</span>
+                {bucketFilter === 'all'
+                  ? <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: 'var(--border)', color: 'var(--text-muted)' }}>{pending.length} chờ</span>
+                  : <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: `${BUCKET_META[bucketFilter].color}22`, color: BUCKET_META[bucketFilter].color }}>{BUCKET_META[bucketFilter].label} · {shown.length}</span>}
               </h3>
-              <button type="button" onClick={() => setView('tasks')} className="text-xs font-semibold" style={{ color: '#8b5cf6' }}>Xem tất cả →</button>
+              <div className="flex items-center gap-3">
+                {bucketFilter !== 'all' && (
+                  <button type="button" onClick={() => setBucketFilter('all')} className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>✕ Bỏ lọc</button>
+                )}
+                <button type="button" onClick={() => setView('tasks')} className="text-xs font-semibold" style={{ color: '#8b5cf6' }}>Xem tất cả →</button>
+              </div>
             </div>
             <div className="space-y-2">
-              {pending.slice(0, 5).map(task => {
+              {shown.slice(0, bucketFilter === 'all' ? 5 : 50).map(task => {
                 const bucket = BUCKET_META[statusBucket(task)]
                 return (
                   <div key={task.id} className="p-3 rounded-lg flex items-center gap-3 group"
@@ -1621,10 +1639,10 @@ const myTasks = tasks.filter(t =>
                   </div>
                 )
               })}
-              {pending.length === 0 && (
+              {shown.length === 0 && (
                 <div className="text-center py-8" style={{ color: 'var(--text-muted)' }}>
-                  <div className="text-3xl mb-2">🎉</div>
-                  <div className="text-sm">Tất cả task đã hoàn thành!</div>
+                  <div className="text-3xl mb-2">{bucketFilter === 'all' ? '🎉' : '📭'}</div>
+                  <div className="text-sm">{bucketFilter === 'all' ? 'Tất cả task đã hoàn thành!' : 'Không có task nào ở trạng thái này'}</div>
                 </div>
               )}
             </div>
