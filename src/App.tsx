@@ -3537,7 +3537,7 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
   const fmtShort = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '—')
   const th = 'px-2 py-2.5 text-[10px] font-bold uppercase tracking-wide text-left'
   const td = 'px-2 py-3 text-xs align-middle'
-  const cols = [3, 11, 5, 24, 10, 7, 6, 11, 6, 6, 11]  // % của khung: vừa khung, không cuộn ngang
+  const cols = [3, 10, 4, 22, 9, 6, 17, 9, 5, 5, 10]  // % của khung: vừa khung, không cuộn ngang
   // Trạng thái dùng cùng nhóm với các thẻ lọc (Received, In-process, Pending, Completed, Close)
   const toTracker: Record<TaskBucket, string> = { received: 'received', processing: 'processing', pending: 'pending', completed: 'complete', closed: 'closed' }
 
@@ -3596,7 +3596,7 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
                   <span className="text-[11px] font-bold" style={{ color: pri.color }}>{pri.label}</span>
                 </td>
                 <td className={td}>
-                  <span className="font-bold" style={{ color: t.slaLevel ? TRACKER_PRIORITY[t.slaLevel] : 'var(--text-muted)' }}>{t.slaLevel ?? '—'}</span>
+                  <SlaCell task={t} />
                 </td>
                 <td className={td}>
                   {pics.length === 0 && '—'}
