@@ -22089,6 +22089,100 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
   )
 }
 
+// ===== Bảng dự án: một khung, giống bảng Task =====
+const PROJECT_STATUS_ICON: Record<string, string> = { planning: '📝', active: '🚀', on_hold: '⏸', done: '✅', closed: '🔒' }
+
+function ProjectListTable({ projects, tasks, users, currentUser, canSee, onOpen }: {
+  projects: Project[]; tasks: Task[]; users: User[]; currentUser: User
+  canSee: (p: Project) => boolean; onOpen: (p: Project) => void
+}) {
+  const [noteFor, setNoteFor] = useState<Project | null>(null)
+  const userOf = (id?: string) => users.find(u => u.id === id)
+  const fmtShort = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '—')
+  const th = 'px-2 py-2.5 text-[10px] font-bold uppercase tracking-wide text-left'
+  const td = 'px-2 py-3 text-xs align-middle'
+  const cols = [3, 10, 5, 22, 10, 8, 12, 6, 6, 8, 10]
+  const today = new Date().toISOString().split('T')[0]
+
+  return (
+    <div className="w-full min-w-0 rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
+      <table className="border-collapse" style={{ width: '100%', tableLayout: 'fixed' }}>
+        <colgroup>{cols.map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup>
+        <thead>
+          <tr style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
+            {['No.', 'ID', 'Co.', 'Details', 'Status', 'Prio', 'PM', 'Start', 'End', 'Tiến độ', 'Work Note'].map(h => (
+              <th key={h} className={th}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {projects.length === 0 && (
+            <tr><td colSpan={11} className="px-3 py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Không có dự án nào trong bộ lọc này.</td></tr>
+          )}
+          {projects.map((p, i) => {
+            const st = PROJECT_STATUS[p.status] ?? PROJECT_STATUS.planning
+            const rk = PROJECT_RISK[p.riskLevel] ?? PROJECT_RISK.medium
+            const list = tasks.filter(t => t.projectId === p.id)
+            const done = list.filter(t => t.status === 'completed').length
+            const pct = list.length ? Math.round((done / list.length) * 100) : 0
+            const late = list.filter(t => t.status !== 'completed' && t.dueDate && t.dueDate < today).length
+            const waiting = list.filter(t => t.status === 'submitted').length
+            const pm = userOf(p.managerId)
+            return (
+              <tr key={p.id} onClick={() => onOpen(p)}
+                className="cursor-pointer transition-colors hover:bg-[color:var(--bg-card-alt)]"
+                style={{ borderTop: '1px solid var(--border)', background: late > 0 ? '#dc262612' : undefined, color: 'var(--text-primary)' }}>
+                <td className={td} style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                <td className={td}><div className="font-mono text-xs font-bold break-all">{p.code || '—'}</div></td>
+                <td className={`${td} font-bold`}>{p.company ? (COMPANY_CODES[p.company] ?? p.company) : '—'}</td>
+                <td className={td}>
+                  <p className="text-sm font-semibold leading-snug break-words">{p.name}</p>
+                  <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                    {p.memberIds.length} thành viên · {list.length} task
+                    {waiting > 0 && <span style={{ color: '#7c3aed' }}> · 📤 {waiting} chờ duyệt</span>}
+                    {late > 0 && <span style={{ color: '#dc2626' }}> · ⚠️ {late} quá hạn</span>}
+                  </p>
+                </td>
+                <td className={td}>
+                  <span className="px-2 py-1 rounded-lg font-semibold" style={{ background: st[1], color: st[2] }}>{PROJECT_STATUS_ICON[p.status] ?? ''} {st[0]}</span>
+                </td>
+                <td className={td}>
+                  <div className="font-bold">{p.priority}</div>
+                  <div className="text-[10px] font-semibold" style={{ color: rk[1] }}>● {rk[0]}</div>
+                </td>
+                <td className={td}>
+                  {pm ? <div className="flex items-center gap-1.5"><CharAvatar user={pm} size={20} /><span className="truncate">{pm.name}</span></div> : '—'}
+                </td>
+                <td className={td}>{fmtShort(p.plannedStart)}</td>
+                <td className={td}>{fmtShort(p.plannedEnd)}</td>
+                <td className={td}>
+                  <div className="h-1.5 rounded-full overflow-hidden mb-1" style={{ background: 'var(--bg-card-alt)' }}>
+                    <div className="h-full" style={{ width: `${pct}%`, background: '#059669' }} />
+                  </div>
+                  <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{pct}% · {done}/{list.length}</span>
+                </td>
+                <td className={td}>
+                  <button type="button" onClick={e => { e.stopPropagation(); setNoteFor(p) }}
+                    className="px-2 py-1.5 rounded-lg text-[11px] font-bold leading-tight"
+                    style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>
+                    📝 Work Note
+                  </button>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+      {noteFor && (
+        <NoteDrawer
+          title={`Work Note — ${noteFor.code || noteFor.name}`} subtitle={noteFor.name}
+          table="project_comments" fkCol="project_id" fkId={noteFor.id} textCol="content"
+          users={users} currentUser={currentUser} canWrite={canSee(noteFor)} onClose={() => setNoteFor(null)} />
+      )}
+    </div>
+  )
+}
+
 function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpenProposal, focusProjectId, onFocusHandled }: {
   currentUser: User; users: User[]; tasks: Task[]; proposals: Proposal[]
   onOpenTask?: (taskId: string) => void; onOpenProposal?: (proposalId: string) => void
@@ -22101,6 +22195,7 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
   const [fCompany, setFCompany] = useState('')
   const [fStatus, setFStatus] = useState('')
   const [q, setQ] = useState('')
+  const [dateFilter, setDateFilter] = useState<DateFilterValue>(EMPTY_DATE_FILTER)
 
   const load = async () => {
     const [p, m] = await Promise.all([
@@ -22134,15 +22229,19 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
   const canEditProject = (p: Project) => isDir || p.managerId === currentUser.id || p.createdBy === currentUser.id
   const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
 
-  const visible = projects.filter(canSee)
+  // Ngày của dự án = ngày bắt đầu dự kiến (nếu không có thì ngày tạo)
+  const projDay = (p: Project) => ({ startDate: p.plannedStart, createdAt: p.createdAt }) as unknown as Task
+  const base = projects.filter(canSee)
     .filter(p => !fCompany || p.company === fCompany)
-    .filter(p => !fStatus || p.status === fStatus)
     .filter(p => !q.trim() || `${p.code} ${p.name}`.toLowerCase().includes(q.trim().toLowerCase()))
+  const dated = base.filter(p => matchDateFilter(projDay(p), dateFilter))
+  const countOf = (k: string) => dated.filter(p => p.status === k).length
+  const visible = dated.filter(p => !fStatus || p.status === fStatus)
   const open = projects.find(p => p.id === openId)
   const sel = { background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+      <div className="p-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-5">
         <div>
           <h2 className="text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>🗂️ Dự án</h2>
@@ -22154,63 +22253,34 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
         )}
       </div>
 
-      <div className="flex flex-wrap gap-2 mb-4">
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 Tìm theo mã hoặc tên dự án..." className="flex-1 min-w-[200px] px-3 py-2 rounded-lg text-sm outline-none" style={sel} />
-        <select value={fCompany} onChange={e => setFCompany(e.target.value)} className="px-2 py-2 rounded-lg text-sm outline-none" style={sel}>
+      <div className="flex flex-wrap gap-2 mb-3">
+        <div className="relative flex-1 min-w-[220px]">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--text-muted)' }}>🔍</span>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Tìm dự án theo mã hoặc tên..."
+            className="w-full pl-9 pr-9 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]" style={sel} />
+          {q && (
+            <button onClick={() => setQ('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-sm hover:opacity-70" style={{ color: 'var(--text-muted)' }}>✕</button>
+          )}
+        </div>
+        <select value={fCompany} onChange={e => setFCompany(e.target.value)} className="px-3 py-2.5 rounded-lg text-sm outline-none" style={sel}>
           <option value="">Tất cả công ty</option>
           {PROJECT_COMPANIES.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
-        <select value={fStatus} onChange={e => setFStatus(e.target.value)} className="px-2 py-2 rounded-lg text-sm outline-none" style={sel}>
-          <option value="">Mọi trạng thái</option>
-          {Object.entries(PROJECT_STATUS).map(([k, v]) => <option key={k} value={k}>{v[0]}</option>)}
-        </select>
       </div>
 
-      {loading && <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Đang tải...</p>}
-      {!loading && visible.length === 0 && (
-        <div className="text-center py-16" style={{ color: 'var(--text-muted)' }}>
-          <div className="text-4xl mb-3">🗂️</div>
-          <div className="text-sm">Chưa có dự án nào</div>
-        </div>
-      )}
-
-      <div className="space-y-3">
-        {visible.map(p => {
-          const st = PROJECT_STATUS[p.status] ?? PROJECT_STATUS.planning
-          const rk = PROJECT_RISK[p.riskLevel] ?? PROJECT_RISK.medium
-          const list = tasks.filter(t => t.projectId === p.id)
-          const done = list.filter(t => t.status === 'completed').length
-          const pct = list.length ? Math.round((done / list.length) * 100) : 0
-          return (
-            <button key={p.id} type="button" onClick={() => setOpenId(p.id)} className="w-full text-left rounded-xl p-4 hover:opacity-90"
-              style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
-                    <span className="font-mono text-xs mr-2" style={{ color: 'var(--text-muted)' }}>[{p.code}]</span>{p.name}
-                  </p>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                    {p.company ?? '—'} · PM: {nameOf(p.managerId)} · {p.plannedStart ? new Date(p.plannedStart).toLocaleDateString('vi-VN') : '—'} → {p.plannedEnd ? new Date(p.plannedEnd).toLocaleDateString('vi-VN') : '—'}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-xs font-bold" style={{ color: 'var(--text-muted)' }}>{p.priority}</span>
-                  <span className="text-[11px] font-semibold" style={{ color: rk[1] }}>● {rk[0]}</span>
-                  <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
-                </div>
-              </div>
-              <div className="mt-3 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--bg-card-alt)' }}>
-                <div className="h-full" style={{ width: `${pct}%`, background: '#059669' }} />
-              </div>
-              <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>
-                {pct}% · {done}/{list.length} task · {p.memberIds.length} thành viên
-                {list.some(t => t.status === 'submitted') && <span style={{ color: '#7c3aed' }}> · 📤 {list.filter(t => t.status === 'submitted').length} chờ duyệt</span>}
-                {list.some(t => t.status !== 'completed' && t.dueDate && t.dueDate < new Date().toISOString().split('T')[0]) && <span style={{ color: '#dc2626' }}> · ⚠️ {list.filter(t => t.status !== 'completed' && t.dueDate && t.dueDate < new Date().toISOString().split('T')[0]).length} quá hạn</span>}
-              </p>
-            </button>
-          )
-        })}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 items-start mb-5">
+        {Object.entries(PROJECT_STATUS).map(([k, v]) => (
+          <StatusStatCard key={k} icon={PROJECT_STATUS_ICON[k] ?? '📁'} label={v[0]} color={v[2]} total={countOf(k)}
+            active={fStatus === k} onClick={() => setFStatus(f => (f === k ? '' : k))} />
+        ))}
       </div>
+
+      <TaskDateFilter tasks={base.map(projDay)} value={dateFilter} onChange={setDateFilter} />
+
+      {loading
+        ? <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Đang tải...</p>
+        : <ProjectListTable projects={visible} tasks={tasks} users={users} currentUser={currentUser}
+            canSee={canSee} onOpen={p => setOpenId(p.id)} />}
 
       {showForm && <ProjectForm currentUser={currentUser} users={users} onClose={() => setShowForm(false)} onCreated={load} />}
       {open && <ProjectDetail project={open} users={users} tasks={tasks} proposals={proposals} currentUser={currentUser} canEdit={canEditProject(open)} onClose={() => setOpenId(null)} onChanged={load} onOpenTask={onOpenTask} onOpenProposal={onOpenProposal} />}
