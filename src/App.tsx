@@ -20475,6 +20475,104 @@ function ProposalTracker({ proposals, users, approvals, kindTab, isMyTurn, onOpe
   )
 }
 
+// ===== Trạng thái tờ trình / đề xuất (giống 5 ô của Task) =====
+type ProposalBucket = 'need' | 'pending' | 'approved' | 'review' | 'rejected'
+const PROPOSAL_BUCKET_META: Record<ProposalBucket, { icon: string; label: string; color: string; bg: string }> = {
+  need:     { icon: '📥', label: 'Cần bạn duyệt', color: '#7c3aed', bg: '#7c3aed22' },
+  pending:  { icon: '⏳', label: 'Chờ duyệt',     color: '#d97706', bg: '#fbbf2422' },
+  approved: { icon: '✅', label: 'Đã duyệt',      color: '#059669', bg: '#34d39922' },
+  review:   { icon: '🔁', label: 'Xem xét lại',   color: '#b45309', bg: '#fbbf2433' },
+  rejected: { icon: '❌', label: 'Từ chối',       color: '#dc2626', bg: '#f8717122' },
+}
+const proposalBucket = (p: Proposal): Exclude<ProposalBucket, 'need'> =>
+  p.status === 'approved' ? 'approved'
+  : p.status === 'pending' ? 'pending'
+  : p.rejectedReason?.startsWith('[REVIEW]') ? 'review'
+  : 'rejected'
+
+// ===== Bảng tờ trình / đề xuất: một khung, giống bảng Task =====
+function ProposalListTable({ proposals, users, currentUser, isMyTurn, onOpen }: {
+  proposals: Proposal[]; users: User[]; currentUser: User
+  isMyTurn: (p: Proposal) => boolean; onOpen: (p: Proposal) => void
+}) {
+  const [noteFor, setNoteFor] = useState<Proposal | null>(null)
+  const userOf = (id?: string) => users.find(u => u.id === id)
+  const fmtShort = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '—')
+  const th = 'px-2 py-2.5 text-[10px] font-bold uppercase tracking-wide text-left'
+  const td = 'px-2 py-3 text-xs align-middle'
+  const cols = [4, 11, 5, 24, 11, 13, 13, 6, 6, 10]
+  const person = (u?: User) => u
+    ? <div className="flex items-center gap-1.5"><CharAvatar user={u} size={20} /><span className="truncate">{u.name}</span></div>
+    : <span>—</span>
+
+  return (
+    <div className="w-full min-w-0 rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
+      <table className="border-collapse" style={{ width: '100%', tableLayout: 'fixed' }}>
+        <colgroup>{cols.map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup>
+        <thead>
+          <tr style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
+            {['No.', 'ID', 'Co.', 'Details', 'Status', 'Người gửi', 'Người duyệt', 'Start', 'End', 'Work Note'].map(h => (
+              <th key={h} className={th}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {proposals.length === 0 && (
+            <tr><td colSpan={10} className="px-3 py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Không có tờ trình / đề xuất nào trong bộ lọc này.</td></tr>
+          )}
+          {proposals.map((p, i) => {
+            const meta = PROPOSAL_BUCKET_META[proposalBucket(p)]
+            const need = isMyTurn(p) && p.status === 'pending'
+            return (
+              <tr key={p.id} onClick={() => onOpen(p)}
+                className="cursor-pointer transition-colors hover:bg-[color:var(--bg-card-alt)]"
+                style={{ borderTop: '1px solid var(--border)', background: need ? '#7c3aed12' : undefined, color: 'var(--text-primary)' }}>
+                <td className={td} style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                <td className={td}>
+                  <div className="font-mono text-xs font-bold break-all">{p.code ?? '—'}</div>
+                  {need && <div className="text-[10px] font-bold mt-0.5" style={{ color: '#7c3aed' }}>📥 Cần bạn duyệt</div>}
+                </td>
+                <td className={`${td} font-bold`}>{p.company ? (COMPANY_CODES[p.company] ?? p.company) : '—'}</td>
+                <td className={td}>
+                  <p className="text-sm font-semibold leading-snug break-words">{withCompanyPrefix(p.title, p.company)}</p>
+                  <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                    {p.groupName ?? (p.kind === 'totrinh' ? 'Tờ trình' : p.kind === 'dntt' ? 'Đề nghị thanh toán' : 'Đề xuất')}
+                  </p>
+                </td>
+                <td className={td}>
+                  <span className="px-2 py-1 rounded-lg font-semibold" style={{ background: meta.bg, color: meta.color }}>{meta.icon} {meta.label}</span>
+                </td>
+                <td className={td}>{person(userOf(p.submittedBy))}</td>
+                <td className={td}>{person(userOf(p.recipientId))}</td>
+                <td className={td}>{fmtShort(p.createdAt)}</td>
+                <td className={td}>{fmtShort(p.dueDate)}</td>
+                <td className={td}>
+                  <button type="button" onClick={e => { e.stopPropagation(); setNoteFor(p) }}
+                    className="px-2 py-1.5 rounded-lg text-[11px] font-bold leading-tight"
+                    style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>
+                    📝 Work Note
+                  </button>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+      {noteFor && (
+        <NoteDrawer
+          title={`Work Note — ${noteFor.code ?? noteFor.title}`} subtitle={noteFor.title}
+          table="proposal_work_notes" fkCol="proposal_id" fkId={noteFor.id} textCol="note"
+          users={users} currentUser={currentUser}
+          canWrite={
+            noteFor.submittedBy === currentUser.id || noteFor.recipientId === currentUser.id ||
+            noteFor.participants.includes(currentUser.id) || currentUser.role === 'manager' || !!currentUser.isDirector
+          }
+          onClose={() => setNoteFor(null)} />
+      )}
+    </div>
+  )
+}
+
 function ProposalsView({ currentUser, users, proposals, proposalApprovals, proposalRevisions, onJoinDiscussion, highlightProposalId, clearHighlightProposalId, openProposalId, clearOpenProposalId }: {
   currentUser: User; users: User[]; proposals: Proposal[]; proposalApprovals: ProposalApproval[]
   proposalRevisions: ProposalRevision[]
@@ -20492,6 +20590,9 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   const [createGroup, setCreateGroup] = useState<string | null>(null)
   const [listTab, setListTab] = useState<'totrinh' | 'dexuat'>('totrinh')
   const [viewMode, setViewMode] = useState<'list' | 'tracker'>('list')
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<ProposalBucket | null>(null)
+  const [dateFilter, setDateFilter] = useState<DateFilterValue>(EMPTY_DATE_FILTER)
   const [signingProposal, setSigningProposal] = useState<Proposal | null>(null)
   const [pendingMine, setPendingMine] = useState<string[]>([])
   const loadPendingMine = async () => {
@@ -20659,6 +20760,18 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   const received = tabList(receivedAll)
   const sent = tabList(sentAll)
   const processedByMe = tabList(processedAll)
+    // Gộp 3 nhóm thành 1 danh sách: cần bạn duyệt lên đầu, rồi đã gửi, rồi đã xử lý
+  const listAll = [
+    ...received,
+    ...sent.filter(p => !received.some(r => r.id === p.id)),
+    ...processedByMe.filter(p => !received.some(r => r.id === p.id) && !sent.some(s => s.id === p.id)),
+  ]
+  const isNeed = (p: Proposal) => isMyTurn(p) && p.status === 'pending'
+  const qText = search.trim().toLowerCase()
+  const searched = listAll.filter(p => !qText || `${p.code ?? ''} ${p.title} ${p.description ?? ''} ${p.brief ?? ''}`.toLowerCase().includes(qText))
+  const dated = searched.filter(p => matchDateFilter({ createdAt: p.createdAt } as unknown as Task, dateFilter))
+  const bucketCount = (b: ProposalBucket) => dated.filter(p => (b === 'need' ? isNeed(p) : proposalBucket(p) === b)).length
+  const shown = dated.filter(p => !statusFilter || (statusFilter === 'need' ? isNeed(p) : proposalBucket(p) === statusFilter))
   const relevant = Array.from(new Map([...receivedAll, ...sentAll, ...processedAll].map(p => [p.id, p] as [string, Proposal])).values())
   const countTotrinh = relevant.filter(p => p.kind === 'totrinh').length
   const countDexuat = relevant.length - countTotrinh
@@ -20810,7 +20923,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
 
   return (
     <ProposalLinkContext.Provider value={openByCode}>
-    <div className={`p-6 ${viewMode === 'tracker' ? 'max-w-7xl' : 'max-w-4xl'} mx-auto`}>
+      <div className="p-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>📜 Tờ trình & Đề xuất</h2>
@@ -20851,33 +20964,29 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
           users={users} approvals={proposalApprovals} kindTab={listTab}
           isMyTurn={isMyTurn} onOpenDetail={setDetailProposal} onOpenDoc={setDocProposal} />
       ) : (<>
-      {received.length > 0 && (
-        <div className="mb-6">
-          <h3 className="font-bold mb-3 text-sm" style={{ color: 'var(--text-muted)' }}>📥 Cần bạn duyệt</h3>
-          <div className="space-y-3">{received.map(p => <ProposalCard key={p.id} p={p} showActions />)}</div>
-        </div>
-      )}
+      <div className="relative mb-3">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--text-muted)' }}>🔍</span>
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          placeholder={`Tìm ${listTab === 'totrinh' ? 'tờ trình' : 'đề xuất'} theo mã, tên hoặc mô tả...`}
+          className="w-full pl-9 pr-9 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
+          style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+        {search && (
+          <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-sm hover:opacity-70" style={{ color: 'var(--text-muted)' }}>✕</button>
+        )}
+      </div>
 
-      {sent.length > 0 && (
-        <div className="mb-6">
-          <h3 className="font-bold mb-3 text-sm" style={{ color: 'var(--text-muted)' }}>📨 Đã gửi</h3>
-          <div className="space-y-3">{sent.map(p => <ProposalCard key={p.id} p={p} />)}</div>
-        </div>
-      )}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 items-start mb-5">
+        {(Object.keys(PROPOSAL_BUCKET_META) as ProposalBucket[]).map(b => (
+          <StatusStatCard key={b} icon={PROPOSAL_BUCKET_META[b].icon} label={PROPOSAL_BUCKET_META[b].label}
+            color={PROPOSAL_BUCKET_META[b].color} total={bucketCount(b)}
+            active={statusFilter === b} onClick={() => setStatusFilter(f => (f === b ? null : b))} />
+        ))}
+      </div>
 
-      {processedByMe.length > 0 && (
-        <div>
-          <h3 className="font-bold mb-3 text-sm" style={{ color: 'var(--text-muted)' }}>✅ Đã xử lý (đã chuyển tiếp)</h3>
-          <div className="space-y-3">{processedByMe.map(p => <ProposalCard key={p.id} p={p} />)}</div>
-        </div>
-      )}
+      <TaskDateFilter tasks={searched as unknown as Task[]} value={dateFilter} onChange={setDateFilter} />
 
-      {received.length === 0 && sent.length === 0 && processedByMe.length === 0 && (
-        <div className="text-center py-16" style={{ color: 'var(--text-muted)' }}>
-          <div className="text-4xl mb-3">📜</div>
-          <div className="text-sm">Chưa có {listTab === 'totrinh' ? 'tờ trình' : 'đề xuất'} nào</div>
-        </div>
-      )}
+      <ProposalListTable proposals={shown} users={users} currentUser={currentUser}
+        isMyTurn={isMyTurn} onOpen={p => setDetailProposal(p)} />
       </>)}
 
       {showModal && !createKind && (
