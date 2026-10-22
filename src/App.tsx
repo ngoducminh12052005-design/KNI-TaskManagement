@@ -13787,12 +13787,6 @@ const myTasks = tasks.filter(t =>
     .filter(t => matchDateFilter(t, dateFilter))
     .slice(0, bucketFilter === 'all' && !dateActive ? 5 : 50)
 
-  // Task quản lý đã duyệt (Duyệt cho làm hoặc Close)
-  const approvedByMe = showPeople
-    ? tasks
-        .filter(t => t.approvedBy === currentUser.id || (t.creationApproval === 'approved' && t.creationApprovedBy === currentUser.id))
-        .sort(byCreatedDesc)
-    : []
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-5">
@@ -13878,57 +13872,9 @@ const myTasks = tasks.filter(t =>
                 ]} />
             </div>
 
-            {/* Chờ bạn duyệt: giữ nút Duyệt / Từ chối nhanh ngay trên Dashboard */}
-            {shown.some(needMyApproval) && (
-              <div className="space-y-2 mb-3">
-                {shown.filter(needMyApproval).map(task => (
-                  <div key={task.id} className="p-3 rounded-lg flex items-center gap-3"
-                    style={{ background: '#fbbf2414', border: '1px solid #fbbf2455' }}>
-                    <div className="flex-1 min-w-0 text-sm font-medium truncate cursor-pointer" onClick={() => setDetailTask(task)}
-                      style={{ color: 'var(--text-primary)' }}>
-                      <span className="font-mono text-[11px] mr-2" style={{ color: 'var(--text-muted)' }}>{task.taskCode}</span>
-                      {withCompanyPrefix(task.title, task.company)}
-                    </div>
-                    <button onClick={() => rejectSelfTask(task, currentUser)}
-                      className="text-xs px-2.5 py-1 rounded-lg font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>Từ chối</button>
-                    <button onClick={() => approveSelfTask(task, currentUser)}
-                      className="text-xs px-2.5 py-1 rounded-lg font-bold" style={{ background: '#34d39922', color: '#059669' }}>✓ Duyệt cho làm</button>
-                  </div>
-                ))}
-              </div>
-            )}
 
             <TaskListTable tasks={tableRows} users={users} currentUser={currentUser} onOpen={t => setDetailTask(t)} />
           </div>
-                    {/* Task bạn đã duyệt (chỉ quản lý) */}
-          {showPeople && (
-            <div className="rounded-xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-bold flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
-                  ✅ Task bạn đã duyệt
-                  <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: 'var(--border)', color: 'var(--text-muted)' }}>{approvedByMe.length}</span>
-                </h3>
-                <button type="button" onClick={() => setView('tasks')} className="text-xs font-semibold" style={{ color: '#8b5cf6' }}>Xem tất cả →</button>
-              </div>
-              <div className="space-y-2">
-                {approvedByMe.slice(0, 8).map(task => {
-                  const b = BUCKET_META[statusBucket(task)]
-                  return (
-                    <div key={task.id} onClick={() => setDetailTask(task)}
-                      className="px-3 py-2.5 rounded-lg flex items-center gap-2 min-w-0 cursor-pointer hover:opacity-80"
-                      style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
-                      <span className="font-mono text-[11px] flex-shrink-0" style={{ color: 'var(--text-muted)' }}>{task.taskCode ?? '—'}</span>
-                      <span className="text-sm font-medium truncate flex-1 min-w-0" style={{ color: 'var(--text-primary)' }}>{task.title}</span>
-                      <span className="text-[11px] font-semibold flex-shrink-0" style={{ color: b.color }}>{b.label}</span>
-                    </div>
-                  )
-                })}
-                {approvedByMe.length === 0 && (
-                  <div className="text-center py-6 text-sm" style={{ color: 'var(--text-muted)' }}>Bạn chưa duyệt task nào</div>
-                )}
-              </div>
-            </div>
-          )}
           <DashboardProposals proposals={proposals} currentUser={currentUser} users={users} onOpen={onOpenProposal} onViewAll={() => setView('proposals')} dateFilter={dateFilter} />
           <DashboardProjects currentUser={currentUser} users={users} tasks={tasks} onOpen={onOpenProject} onViewAll={() => setView('projects')} />
 
