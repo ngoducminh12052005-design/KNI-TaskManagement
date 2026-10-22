@@ -22101,7 +22101,7 @@ function ProjectListTable({ projects, tasks, users, currentUser, canSee, onOpen 
   const fmtShort = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '—')
   const th = 'px-2 py-2.5 text-[10px] font-bold uppercase tracking-wide text-left'
   const td = 'px-2 py-3 text-xs align-middle'
-  const cols = [3, 10, 5, 22, 10, 8, 12, 6, 6, 8, 10]
+  const cols = [3, 9, 5, 21, 12, 8, 12, 6, 6, 8, 10]
   const today = new Date().toISOString().split('T')[0]
 
   return (
@@ -22144,7 +22144,7 @@ function ProjectListTable({ projects, tasks, users, currentUser, canSee, onOpen 
                   </p>
                 </td>
                 <td className={td}>
-                  <span className="px-2 py-1 rounded-lg font-semibold" style={{ background: st[1], color: st[2] }}>{PROJECT_STATUS_ICON[p.status] ?? ''} {st[0]}</span>
+                  <span className="inline-block px-2 py-1 rounded-lg font-semibold whitespace-nowrap" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
                 </td>
                 <td className={td}>
                   <div className="font-bold">{p.priority}</div>
