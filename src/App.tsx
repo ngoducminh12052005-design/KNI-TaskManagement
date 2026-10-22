@@ -12241,7 +12241,7 @@ function EmployeeDashboardModal({ employee, tasks, users, proposals, onClose }: 
   employee: User; tasks: Task[]; users: User[]; proposals: Proposal[]; onClose: () => void
 }) {
   return (
-    <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 z-50 flex flex-col" style={{ background: 'var(--bg-app)' }}>
+    <div className="fixed right-0 left-0 md:left-[var(--sidebar-w)] top-16 bottom-14 md:bottom-0 z-50 flex flex-col" style={{ background: 'var(--bg-app)' }}>
       <div className="shrink-0 flex items-center justify-between px-4 py-3"
         style={{ background: 'var(--bg-panel)', borderBottom: '1px solid var(--border)' }}>
         <div className="flex items-center gap-2.5 min-w-0">
@@ -12417,7 +12417,7 @@ const myTasks = tasks.filter(t =>
       <TaskDateFilter tasks={myTasks} value={dateFilter} onChange={setDateFilter} />
 
       {/* Dropdown xem nhân viên đặt ngay trong Tổng quan; không chiếm cột bên phải */}
-      {showPeople && <DashboardPeople currentUser={currentUser} users={users} tasks={tasks} proposals={proposals} />}
+      {showPeople && <div className="md:hidden"><DashboardPeople currentUser={currentUser} users={users} tasks={tasks} proposals={proposals} /></div>}
 
       {/* Các khung Task, Tờ trình, Dự án dùng toàn bộ chiều rộng như khung All time */}
       <div className="grid grid-cols-1 gap-4 w-full min-w-0">
@@ -12480,11 +12480,7 @@ const myTasks = tasks.filter(t =>
               </div>
             )}
 
-            <div className="w-full min-w-0 overflow-x-auto">
-              <div style={{ minWidth: 1180 }}>
-                <TaskListTable tasks={tableRows} users={users} currentUser={currentUser} onOpen={t => onOpenTask?.(t.id)} />
-              </div>
-            </div>
+            <TaskListTable tasks={tableRows} users={users} currentUser={currentUser} onOpen={t => onOpenTask?.(t.id)} />
           </div>
                     {/* Task bạn đã duyệt (chỉ quản lý) */}
           {showPeople && (
@@ -14062,14 +14058,14 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
   const fmtShort = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '—')
   const th = 'px-3 py-2.5 text-[11px] font-bold uppercase tracking-wide text-left whitespace-nowrap'
   const td = 'px-3 py-3 text-xs align-middle'
-  const cols = [52, 170, 68, 250, 135, 95, 145, 105, 85, 85, 170]
+  const cols = [4, 13, 6, 20, 10, 8, 12, 7, 7, 13]  // % của khung: vừa khung, không cuộn ngang
   // Trạng thái dùng cùng nhóm với các thẻ lọc phía trên (Received, In-process, Pending, Completed, Close)
   const toTracker: Record<TaskBucket, string> = { received: 'received', processing: 'processing', pending: 'pending', completed: 'complete', closed: 'closed' }
 
   return (
     <div className="w-full min-w-0 rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
-      <table className="border-collapse table-fixed" style={{ width: '100%', minWidth: 1360, tableLayout: 'fixed' }}>
-        <colgroup>{cols.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
+      <table className="border-collapse table-fixed" style={{ width: '100%', tableLayout: 'fixed' }}>
+        <colgroup>{cols.map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup>
         <thead>
           <tr style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
             <th className={th}>No.</th>
@@ -14079,7 +14075,6 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
             <th className={th}>Status</th>
             <th className={th}>Priority</th>
             <th className={th}>PIC</th>
-            <th className={th}>Sup</th>
             <th className={th}>Start</th>
             <th className={th}>Due</th>
             <th className={th}>Work Note</th>
@@ -14087,7 +14082,7 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
         </thead>
         <tbody>
           {tasks.length === 0 && (
-            <tr><td colSpan={11} className="px-3 py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Không có task nào trong khoảng này.</td></tr>
+            <tr><td colSpan={10} className="px-3 py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Không có task nào trong khoảng này.</td></tr>
           )}
           {tasks.map((t, i) => {
             const over = isSlaOverdue(t) || !!t.isLocked
@@ -14095,7 +14090,6 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
               ? ['⏳ Chờ duyệt', '#fbbf2422', '#d97706']
               : (TRACKER_STATUS[toTracker[statusBucket(t)]] ?? TRACKER_STATUS.received)
             const pics = t.assignedTo.map(userOf).filter(Boolean) as User[]
-            const sups = t.supporters.map(userOf).filter(Boolean) as User[]
             const pri = PRIORITY_CONFIG[t.priority]
             return (
               <tr key={t.id} onClick={() => onOpen(t)}
@@ -14128,11 +14122,6 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
                     <div key={u.id} className="flex items-center gap-1.5 mb-0.5"><CharAvatar user={u} size={20} /><span className="truncate">{u.name}</span></div>
                   ))}
                   {pics.length > 2 && <span style={{ color: 'var(--text-muted)' }}>+{pics.length - 2}</span>}
-                </td>
-                <td className={td}>
-                  {sups.length === 0 && '—'}
-                  <div className="flex flex-wrap gap-0.5">{sups.slice(0, 3).map(u => <CharAvatar key={u.id} user={u} size={22} />)}</div>
-                  {sups.length > 3 && <span style={{ color: 'var(--text-muted)' }}>+{sups.length - 3}</span>}
                 </td>
                 <td className={td}>{fmtShort(t.startDate)}</td>
                 <td className={td}>{fmtShort(t.dueDate)}</td>
@@ -20950,6 +20939,59 @@ const NAV_GROUPS: { title: string; ids: string[] }[] = [
   { title: 'Cộng đồng', ids: ['leaderboard', 'rewards', 'social'] },
   { title: 'Hệ thống', ids: ['bodlog', 'profile'] },
 ]
+// ===== Menu "Nhân viên phòng ban" ngay dưới Dashboard (chỉ quản lý / BOD thấy) =====
+function SidebarStaffMenu({ currentUser, users, onPick }: { currentUser: User; users: User[]; onPick: (u: User) => void }) {
+  const [open, setOpen] = useState(false)
+  const isDir = !!currentUser.isDirector
+  const members = (isDir
+    ? users.filter(u => u.id !== currentUser.id)
+    : users.filter(u => u.teamId === currentUser.teamId && u.id !== currentUser.id)
+  ).sort((a, b) => {
+    if (a.teamId !== b.teamId) return TEAMS.findIndex(t => t.id === a.teamId) - TEAMS.findIndex(t => t.id === b.teamId)
+    if (a.role !== b.role) return a.role === 'manager' ? -1 : 1
+    return a.name.localeCompare(b.name, 'vi')
+  })
+
+  const row = (u: User) => (
+    <button key={u.id} type="button" onClick={() => onPick(u)}
+      className="w-full flex items-center gap-2 pl-9 pr-3 py-1.5 rounded-lg text-xs text-left hover:bg-[color:var(--bg-card-alt)]"
+      style={{ color: 'var(--text-secondary)' }}>
+      <CharAvatar user={u} size={20} />
+      <span className="truncate flex-1">{u.name}</span>
+      {u.role === 'manager' && <span className="text-[9px] px-1 rounded font-bold" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>QL</span>}
+    </button>
+  )
+
+  return (
+    <div className="mb-0.5">
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-left"
+        style={{ color: 'var(--text-secondary)' }}>
+        <span className="text-base w-5 text-center">👥</span>
+        <span className="flex-1">{isDir ? 'Nhân viên công ty' : 'Nhân viên phòng ban'}</span>
+        <span className="text-xs">{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <div className="max-h-72 overflow-y-auto pb-1">
+          {members.length === 0 && <p className="pl-9 pr-3 text-[11px]" style={{ color: 'var(--text-muted)' }}>Chưa có nhân viên nào</p>}
+          {isDir
+            ? TEAMS.map(t => {
+                const group = members.filter(u => u.teamId === t.id)
+                return group.length === 0 ? null : (
+                  <div key={t.id}>
+                    <p className="pl-9 pr-3 pt-1.5 pb-0.5 text-[10px] font-semibold truncate" style={{ color: 'var(--text-muted)' }}>{t.emoji} {t.name}</p>
+                    {group.map(row)}
+                  </div>
+                )
+              })
+            : members.map(row)}
+          {isDir && members.filter(u => !TEAMS.some(t => t.id === u.teamId)).map(row)}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function NotificationBell({ notifications, onNotificationClick }: {
   notifications: { id: string; message: string; createdAt: string; linkChannel?: string; linkDmUserId?: string; linkTaskId?: string; linkProposalId?: string }[]
   onNotificationClick?: (n: { linkChannel?: string; linkDmUserId?: string; linkTaskId?: string; linkProposalId?: string }) => void
@@ -21036,6 +21078,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   const [sidebarHover, setSidebarHover] = useState(false)
   useEffect(() => { try { localStorage.setItem('sidebarCollapsed', sidebarCollapsed ? '1' : '0') } catch {} }, [sidebarCollapsed])
   const [sidebarPinned, setSidebarPinned] = useState(false)  // bấm KNI Work để mở
+  const [viewingEmployee, setViewingEmployee] = useState<User | null>(null)  // quản lý xem Dashboard nhân viên (chỉ xem)
   const sidebarOpen = sidebarPinned || sidebarHover
   const [theme, setTheme] = useState<ThemeMode>(() => (localStorage.getItem('themeMode') as ThemeMode) || 'light')
   const themeVars = useThemeVars(theme)
@@ -21188,6 +21231,10 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
                     </button>
                   )
                 })}
+                {group.ids.includes('dashboard') && (currentUser.role === 'manager' || !!currentUser.isDirector) && (
+                  <SidebarStaffMenu currentUser={currentUser} users={users}
+                    onPick={u => { setView('dashboard'); setViewingEmployee(u) }} />
+                )}
               </div>
             )
           })}
@@ -21201,6 +21248,10 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
         </button>
       </div>
 
+        {viewingEmployee && (
+          <EmployeeDashboardModal employee={viewingEmployee} tasks={tasks} users={users} proposals={proposals}
+            onClose={() => setViewingEmployee(null)} />
+        )}
         {/* Bottom nav — chỉ hiện trên mobile */}
       <div className="flex md:hidden items-center justify-around py-2 flex-shrink-0"
         style={{ background: 'var(--bg-sidebar)', borderTop: '1px solid var(--border)' }}>
