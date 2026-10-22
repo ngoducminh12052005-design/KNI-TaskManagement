@@ -11330,6 +11330,7 @@ interface Task {
   crossDeptRejectedBy?: string
   creationApproval?: 'pending' | 'approved' | 'rejected'
   creationApprovedBy?: string
+  creationApprovedAt?: string
   creationRejectedReason?: string
   targetTeamId?: string
   submissionOwnFolderUrl?: string
@@ -12970,13 +12971,17 @@ function DashboardPeople({ currentUser, users, tasks, proposals }: { currentUser
 // ===== Chi tiết công việc (xem từ Dashboard): bố cục giống form chỉnh sửa nhưng chỉ xem =====
 // ==================== PHIẾU GIAO TASK (bố cục giống tờ trình) ====================
 type TaskDocRow = { item: string; result: string; due: string; note: string }
-type TaskDocData = { place: string; canCu: string[]; rows: TaskDocRow[]; thongTinKhac: string; yeuCau: string }
-const emptyTaskDoc = (): TaskDocData => ({ place: 'HCMC', canCu: [''], rows: [{ item: '', result: '', due: '', note: '' }], thongTinKhac: '', yeuCau: '' })
+type TaskCostRow = { item: string; unit: string; qty: string; price: string; note: string }
+type TaskDocData = { place: string; canCu: string[]; rows: TaskDocRow[]; costRows: TaskCostRow[]; thongTinKhac: string; yeuCau: string }
+const emptyTaskDoc = (): TaskDocData => ({ place: 'HCMC', canCu: [''], rows: [{ item: '', result: '', due: '', note: '' }], costRows: [], thongTinKhac: '', yeuCau: '' })
+const taskCostAmount = (r: { qty?: string; price?: string }) => (Number(r.qty) || 0) * (Number(r.price) || 0)
+const fmtTaskMoney = (n: number) => Math.round(n).toLocaleString('vi-VN')
 // Bỏ dòng trống trước khi lưu vào cột tasks.form_data
 const cleanTaskDoc = (d: TaskDocData) => ({
   place: d.place.trim() || 'HCMC',
   canCu: d.canCu.map(s => s.trim()).filter(Boolean),
   rows: d.rows.filter(r => r.item.trim()).map(r => ({ item: r.item.trim(), result: r.result.trim(), due: r.due, note: r.note.trim() })),
+  costRows: (d.costRows ?? []).filter(r => r.item.trim()).map(r => ({ item: r.item.trim(), unit: r.unit.trim(), qty: r.qty, price: r.price, note: r.note.trim() })),
   thongTinKhac: d.thongTinKhac.trim(),
   yeuCau: d.yeuCau.trim(),
 })
@@ -13073,6 +13078,8 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, editingT
     </div>
   )
   const updateRow = (i: number, patch: Partial<TaskDocRow>) => setDoc({ rows: doc.rows.map((r, j) => (j === i ? { ...r, ...patch } : r)) })
+  const updateCost = (i: number, patch: Partial<TaskCostRow>) => setDoc({ costRows: (doc.costRows ?? []).map((r, j) => (j === i ? { ...r, ...patch } : r)) })
+  const costTotal = (doc.costRows ?? []).reduce((s, r) => s + taskCostAmount(r), 0)
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto" style={{ background: '#d1d5db' }}>
@@ -13172,6 +13179,42 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, editingT
           </table>
         </div>
         <button type="button" onClick={() => setDoc({ rows: [...doc.rows, { item: '', result: '', due: '', note: '' }] })} className="text-xs text-blue-600 mt-1 mb-4">+ Thêm hạng mục</button>
+
+        <p className="font-bold mb-1">CHI PHÍ <span className="font-normal text-gray-500">(nếu có)</span></p>
+        {(doc.costRows ?? []).length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse" style={{ minWidth: 620 }}>
+              <thead>
+                <tr>
+                  <th className={th} style={{ width: 36 }}>STT</th><th className={th}>Hạng mục</th><th className={th} style={{ width: 70 }}>ĐVT</th>
+                  <th className={th} style={{ width: 60 }}>SL</th><th className={th} style={{ width: 110 }}>Đơn giá (VNĐ)</th>
+                  <th className={th} style={{ width: 110 }}>Thành tiền</th><th className={th}>Ghi chú</th><th style={{ width: 24 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {(doc.costRows ?? []).map((r, i) => (
+                  <tr key={i}>
+                    <td className={`${td} text-center`}>{i + 1}</td>
+                    <td className={td}><input value={r.item} onChange={e => updateCost(i, { item: e.target.value })} className={cell} style={ink} /></td>
+                    <td className={td}><input value={r.unit} onChange={e => updateCost(i, { unit: e.target.value })} className={cell} style={ink} /></td>
+                    <td className={td}><input type="number" min="0" value={r.qty} onChange={e => updateCost(i, { qty: e.target.value })} className={`${cell} text-right`} style={ink} /></td>
+                    <td className={td}><input type="number" min="0" value={r.price} onChange={e => updateCost(i, { price: e.target.value })} className={`${cell} text-right`} style={ink} /></td>
+                    <td className={`${td} text-right`}>{fmtTaskMoney(taskCostAmount(r))}</td>
+                    <td className={td}><input value={r.note} onChange={e => updateCost(i, { note: e.target.value })} className={cell} style={ink} /></td>
+                    <td className="text-center"><button type="button" onClick={() => setDoc({ costRows: (doc.costRows ?? []).filter((_, j) => j !== i) })} className="text-red-500 text-xs">✕</button></td>
+                  </tr>
+                ))}
+                <tr>
+                  <td className={`${td} font-bold`} colSpan={5}>TỔNG CHI PHÍ</td>
+                  <td className={`${td} text-right font-bold`}>{fmtTaskMoney(costTotal)}</td>
+                  <td className={td} colSpan={2}></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+        {costTotal > 0 && <p className="italic text-xs mt-1">(Bằng chữ: {docSoThanhChu(costTotal)})</p>}
+        <button type="button" onClick={() => setDoc({ costRows: [...(doc.costRows ?? []), { item: '', unit: '', qty: '1', price: '', note: '' }] })} className="text-xs text-blue-600 mt-1 mb-4 block">+ Thêm chi phí</button>
 
         <p className="font-bold mb-1">THÔNG TIN GIAO VIỆC</p>
         <table className="w-full border-collapse mb-1">
@@ -13280,6 +13323,294 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, editingT
   )
 }
 
+// ===== Luồng xem task: Phiếu giao task -> (đóng) -> Trang chi tiết công việc =====
+function TaskViewFlow({ task, tasks, users, currentUser, readOnly = false, onClose, onEdit, onOpenInTasks }: {
+  task: Task; tasks: Task[]; users: User[]; currentUser: User; readOnly?: boolean
+  onClose: () => void; onEdit?: () => void; onOpenInTasks?: () => void
+}) {
+  const [stage, setStage] = useState<'phieu' | 'detail'>('phieu')
+  const live = tasks.find(t => t.id === task.id) ?? task   // luôn dùng bản mới nhất
+  const canApprove = !readOnly && canApproveSelfTask(live, currentUser, users)
+  const canEdit = !readOnly && !!onEdit && currentUser.role === 'manager' &&
+    (live.createdBy === currentUser.id || live.assignedTo.some(id => users.find(u => u.id === id)?.teamId === currentUser.teamId))
+  const edit = readOnly ? undefined : onEdit
+  const openCard = readOnly ? undefined : onOpenInTasks
+
+  return stage === 'phieu' ? (
+    <TaskDetailModal task={live} users={users} currentUser={currentUser} canApprove={canApprove} canEdit={canEdit}
+      onClose={() => setStage('detail')} onEdit={edit} onOpenInTasks={openCard} />
+  ) : (
+    <TaskDetailPage task={live} users={users} currentUser={currentUser} canApprove={canApprove} canEdit={canEdit}
+      onClose={onClose} onOpenPhieu={() => setStage('phieu')} onEdit={edit} onOpenInTasks={openCard} />
+  )
+}
+
+type FlowStep = { label: string; who: string; status: 'done' | 'current' | 'rejected' | 'wait' | 'skip'; at?: string; note?: string }
+
+function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, onClose, onOpenPhieu, onEdit, onOpenInTasks }: {
+  task: Task; users: User[]; currentUser: User; canApprove: boolean; canEdit: boolean
+  onClose: () => void; onOpenPhieu: () => void; onEdit?: () => void; onOpenInTasks?: () => void
+}) {
+  const f: any = task.formData ?? {}
+  const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
+  const names = (ids: string[]) => (ids.length ? ids.map(nameOf).join(', ') : '—')
+  const teamName = (id?: string) => TEAMS.find(t => t.id === id)?.name
+  const fmtDT = (s?: string) => (s ? new Date(s).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '')
+  const fmtD = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN') : '—')
+  const pri = PRIORITY_CONFIG[task.priority]
+  const bucket = BUCKET_META[statusBucket(task)]
+  const statusText = task.creationApproval === 'pending' ? '⏳ Chờ quản lý duyệt'
+    : task.creationApproval === 'rejected' ? '❌ Bị từ chối'
+    : bucket.label
+
+  // Phòng ban: của người phụ trách / hỗ trợ / phòng ban nhận (nếu giao chéo); không có thì lấy phòng ban người tạo
+  const teamIds = Array.from(new Set(
+    [...task.assignedTo, ...task.supporters].map(id => users.find(u => u.id === id)?.teamId).concat([task.targetTeamId])
+  )).filter((x): x is string => !!x)
+  const phongBan = (teamIds.length ? teamIds : [users.find(u => u.id === task.createdBy)?.teamId])
+    .map(teamName).filter(Boolean).join(', ') || '—'
+
+  const rows: TaskDocRow[] = Array.isArray(f.rows) ? f.rows : []
+  const costRows: TaskCostRow[] = Array.isArray(f.costRows) ? f.costRows : []
+  const costTotal = costRows.reduce((s, r) => s + taskCostAmount(r), 0)
+  const canCu: string[] = Array.isArray(f.canCu) ? f.canCu : []
+
+  // ----- Luồng phê duyệt -----
+  const WS: Record<string, string> = { received: 'Đã nhận', processing: 'Đang xử lý', pending: 'Tạm hoãn', complete: 'Hoàn tất' }
+  const blocked = isTaskGated(task) || !!task.crossDeptPending || !!task.crossDeptRejected
+  const finished = task.status === 'submitted' || task.status === 'completed'
+  const rejectedResult = task.status === 'in-progress' && !!task.rejectedReason
+  const steps: FlowStep[] = []
+  steps.push({ label: task.selfCreated ? 'Tự tạo task' : 'Giao task', who: nameOf(task.createdBy), status: 'done', at: task.createdAt })
+  if (task.selfCreated) {
+    const noApprover = task.creationApproval === 'approved' && !task.creationApprovedBy
+    steps.push({
+      label: 'Quản lý duyệt cho làm',
+      who: task.creationApprovedBy ? nameOf(task.creationApprovedBy) : 'Quản lý phòng ban',
+      status: noApprover ? 'skip' : task.creationApproval === 'pending' ? 'current' : task.creationApproval === 'rejected' ? 'rejected' : 'done',
+      at: task.creationApprovedAt,
+      note: noApprover ? 'Không cần duyệt' : task.creationRejectedReason,
+    })
+  }
+  if (task.crossDeptPending || task.crossDeptRejected || task.targetTeamId) {
+    steps.push({
+      label: 'Duyệt giao chéo phòng ban',
+      who: task.crossDeptRejectedBy ? nameOf(task.crossDeptRejectedBy) : (teamName(task.targetTeamId) ?? 'Quản lý phòng ban nhận'),
+      status: task.crossDeptRejected ? 'rejected' : task.crossDeptPending ? 'current' : 'done',
+      note: task.crossDeptRejectedReason,
+    })
+  }
+  steps.push({
+    label: 'Thực hiện', who: names(task.assignedTo),
+    status: blocked ? 'wait' : finished ? 'done' : 'current',
+    at: task.startedAt, note: blocked ? undefined : WS[task.workStatus ?? 'received'],
+  })
+  steps.push({ label: 'Nộp kết quả', who: names(task.assignedTo), status: finished ? 'done' : 'wait', at: task.submittedAt, note: task.completeIssue || undefined })
+  steps.push({
+    label: 'Quản lý duyệt & đóng',
+    who: task.approvedBy ? nameOf(task.approvedBy) : names(task.projectManager),
+    status: task.status === 'completed' ? 'done' : task.status === 'submitted' ? 'current' : rejectedResult ? 'rejected' : 'wait',
+    at: task.approvedAt,
+    note: task.status === 'completed'
+      ? [task.closeResult === 'with_issue' ? 'Đóng — có vấn đề' : task.closeResult === 'successful' ? 'Đóng — thành công' : '', task.closeNote].filter(Boolean).join(' · ') || undefined
+      : rejectedResult ? `Từ chối kết quả: ${task.rejectedReason}` : undefined,
+  })
+  const stepIcon = (s: FlowStep['status']) => (s === 'done' ? '✅' : s === 'current' ? '⏳' : s === 'rejected' ? '❌' : s === 'skip' ? '⏭' : '○')
+
+  // ----- Lịch sử -----
+  const events: { at: string; text: string }[] = []
+  const add = (at: string | undefined, text: string) => { if (at) events.push({ at, text }) }
+  add(task.createdAt, `${nameOf(task.createdBy)} ${task.selfCreated ? 'tự tạo task' : 'giao task'}`)
+  if (task.creationApproval === 'approved' && task.creationApprovedBy) add(task.creationApprovedAt, `${nameOf(task.creationApprovedBy)} duyệt cho làm`)
+  if (task.creationApproval === 'rejected') add(task.creationApprovedAt, `${nameOf(task.creationApprovedBy)} từ chối task${task.creationRejectedReason ? `: ${task.creationRejectedReason}` : ''}`)
+  add(task.ticketReceivedAt, `🔧 Ticket Received: ${task.ticketReceivedText ?? ''}`)
+  add(task.startedAt, `▶️ Bắt đầu làm (${names(task.assignedTo)})`)
+  add(task.ticketInProcessAt, `🔧 Ticket In-process: ${task.ticketInProcessText ?? ''}`)
+  add(task.pendingRequestedAt, `⏸ ${nameOf(task.pendingRequestedBy)} xin tạm hoãn${task.pendingReason ? `: ${task.pendingReason}` : ''}`)
+  add(task.unlockRequestedAt, `🔓 Xin mở khóa SLA${task.unlockRequestedReason ? `: ${task.unlockRequestedReason}` : ''}`)
+  add(task.ticketCompletedAt, `🔧 Ticket Completed: ${task.ticketCompletedText ?? ''}`)
+  add(task.submittedAt, `📤 Nộp kết quả${task.submissionNote ? `: ${task.submissionNote}` : ''}`)
+  add(task.approvedAt, `✅ ${nameOf(task.approvedBy)} duyệt & đóng task`)
+  events.sort((a, b) => a.at.localeCompare(b.at))
+
+  const card = { background: 'var(--bg-panel)', border: '1px solid var(--border)' }
+  const h3 = 'text-sm font-bold mb-3'
+  const info = (k: string, v: string) => (
+    <div className="grid grid-cols-3 gap-2 py-1.5 text-sm">
+      <span style={{ color: 'var(--text-muted)' }}>{k}</span>
+      <span className="col-span-2 break-words" style={{ color: 'var(--text-primary)' }}>{v || '—'}</span>
+    </div>
+  )
+  const chip = (text: string, bg: string, color: string) => (
+    <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold" style={{ background: bg, color }}>{text}</span>
+  )
+  const btn = 'px-3 py-1.5 rounded-lg text-xs font-bold'
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
+      <div className="max-w-6xl mx-auto pb-10">
+        <button type="button" onClick={onClose} className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>← Danh sách task</button>
+        <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>
+          {task.taskCode && <span className="font-mono text-sm mr-2" style={{ color: 'var(--text-muted)' }}>{task.taskCode}</span>}
+          {withCompanyPrefix(task.title, task.company)}
+        </h2>
+
+        <div className="flex flex-wrap items-center gap-2 mt-2 mb-4">
+          {chip(task.category || 'Task', '#ede9fe', '#6d28d9')}
+          {chip(statusText, `${bucket.color}22`, bucket.color)}
+          {chip(pri.label, pri.bg, pri.color)}
+          {task.slaLevel && chip(SLA_LEVELS[task.slaLevel].label, `${SLA_LEVELS[task.slaLevel].color}22`, SLA_LEVELS[task.slaLevel].color)}
+          {task.important && chip('🔥 Quan trọng', '#fbbf2422', '#d97706')}
+          {task.urgent && chip('⏰ Gấp', '#f8717122', '#dc2626')}
+          <div className="ml-auto flex flex-wrap gap-2">
+            <button type="button" onClick={onOpenPhieu} className={btn}
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>📄 Xem phiếu giao task</button>
+            {canEdit && onEdit && (
+              <button type="button" onClick={onEdit} className={btn}
+                style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>✏️ Sửa</button>
+            )}
+            {canApprove && (
+              <>
+                <button type="button" onClick={() => rejectSelfTask(task, currentUser)} className={btn} style={{ background: '#f8717122', color: '#dc2626' }}>Từ chối</button>
+                <button type="button" onClick={() => approveSelfTask(task, currentUser)} className={`${btn} text-white`} style={{ background: '#059669' }}>✓ Duyệt cho làm</button>
+              </>
+            )}
+            {onOpenInTasks && (
+              <button type="button" onClick={onOpenInTasks} className={`${btn} text-white`} style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>🗂 Mở thẻ thao tác</button>
+            )}
+          </div>
+        </div>
+
+        <div className="grid lg:grid-cols-3 gap-4">
+          {/* Cột trái */}
+          <div className="lg:col-span-2 space-y-4">
+            <section className="rounded-xl p-5" style={card}>
+              <h3 className={h3} style={{ color: 'var(--text-primary)' }}>Thông tin chung</h3>
+              {info('Nhóm task', task.category)}
+              {info('Phòng ban', phongBan)}
+              {info('Công ty', task.company ? `${COMPANY_CODES[task.company] ? `${COMPANY_CODES[task.company]} · ` : ''}${task.company}` : '')}
+              {info('Người tạo', `${nameOf(task.createdBy)}${task.selfCreated ? ' (tự tạo)' : ''}`)}
+              {info('Người phụ trách', names(task.assignedTo))}
+              {info('Hỗ trợ', names(task.supporters))}
+              {info('Quản lý (PM)', names(task.projectManager))}
+              {info('Ngày bắt đầu', fmtD(task.startDate))}
+              {info('Hạn hoàn thành', fmtD(task.dueDate))}
+              {info('Mức độ SLA', task.slaLevel ? SLA_LEVELS[task.slaLevel].label : 'Không áp dụng SLA')}
+              {info('EXP thưởng', `+${task.expReward}`)}
+            </section>
+
+            <section className="rounded-xl p-5" style={card}>
+              <h3 className={h3} style={{ color: 'var(--text-primary)' }}>Mô tả công việc</h3>
+              {!task.description && canCu.length === 0 && rows.length === 0 && !f.yeuCau && !f.thongTinKhac && (
+                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Chưa có mô tả.</p>
+              )}
+              {task.description && <p className="text-sm whitespace-pre-wrap mb-3" style={{ color: 'var(--text-primary)' }}>{task.description}</p>}
+              {canCu.length > 0 && (
+                <div className="mb-3">
+                  <p className="text-xs font-semibold mb-1" style={{ color: 'var(--text-muted)' }}>Căn cứ</p>
+                  <ul className="text-sm space-y-0.5 italic" style={{ color: 'var(--text-primary)' }}>{canCu.map((c, i) => <li key={i}>• {c}</li>)}</ul>
+                </div>
+              )}
+              {rows.length > 0 && (
+                <div className="mb-3 overflow-x-auto">
+                  <p className="text-xs font-semibold mb-1" style={{ color: 'var(--text-muted)' }}>Các hạng mục công việc</p>
+                  <table className="w-full text-xs border-collapse" style={{ minWidth: 480 }}>
+                    <thead>
+                      <tr style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
+                        {['STT', 'Hạng mục', 'Kết quả cần đạt', 'Hạn', 'Ghi chú'].map(h => <th key={h} className="px-2 py-1.5 text-left font-semibold">{h}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((r, i) => (
+                        <tr key={i} style={{ borderTop: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                          <td className="px-2 py-1.5">{i + 1}</td><td className="px-2 py-1.5">{r.item}</td><td className="px-2 py-1.5">{r.result}</td>
+                          <td className="px-2 py-1.5">{r.due ? fmtD(r.due) : ''}</td><td className="px-2 py-1.5">{r.note}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {f.yeuCau && <div className="mb-2"><p className="text-xs font-semibold mb-1" style={{ color: 'var(--text-muted)' }}>Yêu cầu thực hiện</p><p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--text-primary)' }}>{f.yeuCau}</p></div>}
+              {f.thongTinKhac && <div><p className="text-xs font-semibold mb-1" style={{ color: 'var(--text-muted)' }}>Thông tin khác</p><p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--text-primary)' }}>{f.thongTinKhac}</p></div>}
+            </section>
+
+            {costRows.length > 0 && (
+              <section className="rounded-xl p-5" style={card}>
+                <h3 className={h3} style={{ color: 'var(--text-primary)' }}>💰 Chi phí</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs border-collapse" style={{ minWidth: 520 }}>
+                    <thead>
+                      <tr style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
+                        {['STT', 'Hạng mục', 'ĐVT', 'SL', 'Đơn giá (VNĐ)', 'Thành tiền (VNĐ)', 'Ghi chú'].map(h => <th key={h} className="px-2 py-1.5 text-left font-semibold">{h}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {costRows.map((r, i) => (
+                        <tr key={i} style={{ borderTop: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                          <td className="px-2 py-1.5">{i + 1}</td><td className="px-2 py-1.5">{r.item}</td><td className="px-2 py-1.5">{r.unit}</td>
+                          <td className="px-2 py-1.5">{r.qty}</td>
+                          <td className="px-2 py-1.5">{r.price ? fmtTaskMoney(Number(r.price)) : ''}</td>
+                          <td className="px-2 py-1.5">{fmtTaskMoney(taskCostAmount(r))}</td><td className="px-2 py-1.5">{r.note}</td>
+                        </tr>
+                      ))}
+                      <tr style={{ borderTop: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                        <td className="px-2 py-2 font-bold" colSpan={5}>Tổng chi phí</td>
+                        <td className="px-2 py-2 font-bold">{fmtTaskMoney(costTotal)}</td><td></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-xs italic mt-2" style={{ color: 'var(--text-muted)' }}>(Bằng chữ: {docSoThanhChu(costTotal)})</p>
+              </section>
+            )}
+
+            <section className="rounded-xl p-5" style={card}>
+              <h3 className={h3} style={{ color: 'var(--text-primary)' }}>📝 Work Note</h3>
+              <TaskWorkNotePanel taskId={task.id} currentUser={currentUser} users={users} />
+            </section>
+          </div>
+
+          {/* Cột phải */}
+          <div className="space-y-4">
+            <section className="rounded-xl p-5" style={card}>
+              <h3 className={h3} style={{ color: 'var(--text-primary)' }}>Luồng phê duyệt</h3>
+              <div>
+                {steps.map((s, i) => (
+                  <div key={i} className="flex gap-3">
+                    <div className="flex flex-col items-center">
+                      <span className="text-base leading-none" style={{ opacity: s.status === 'wait' || s.status === 'skip' ? 0.55 : 1 }}>{stepIcon(s.status)}</span>
+                      {i < steps.length - 1 && <span className="flex-1 w-px my-1" style={{ background: 'var(--border)' }} />}
+                    </div>
+                    <div className="pb-4 min-w-0">
+                      <p className="text-sm font-semibold" style={{ color: s.status === 'rejected' ? '#dc2626' : s.status === 'current' ? '#d97706' : 'var(--text-primary)' }}>{s.label}</p>
+                      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{s.who}{s.at ? ` · ${fmtDT(s.at)}` : ''}</p>
+                      {s.note && <p className="text-xs mt-0.5 break-words" style={{ color: 'var(--text-muted)' }}>{s.note}</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="rounded-xl p-5" style={card}>
+              <h3 className={h3} style={{ color: 'var(--text-primary)' }}>Lịch sử</h3>
+              {events.length === 0 && <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Chưa có lịch sử.</p>}
+              <div className="space-y-3">
+                {events.map((e, i) => (
+                  <div key={i}>
+                    <p className="text-sm break-words" style={{ color: 'var(--text-primary)' }}>{e.text}</p>
+                    <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{fmtDT(e.at)}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Xem task dạng phiếu giao task (chỉ đọc) — thay cho khung chi tiết nhỏ cũ
 function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, onClose, onOpenInTasks, onEdit }: {
   task: Task; users: User[]; currentUser: User; canApprove: boolean; canEdit: boolean
@@ -13295,6 +13626,8 @@ function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, onClos
     : task.creationApproval === 'rejected' ? '❌ Bị từ chối'
     : bucket.label
   const rows: TaskDocRow[] = Array.isArray(f.rows) ? f.rows : []
+  const costRows: TaskCostRow[] = Array.isArray(f.costRows) ? f.costRows : []
+  const costTotal = costRows.reduce((s, r) => s + taskCostAmount(r), 0)
   const ink = { color: '#111827' }
   const th = 'border border-gray-400 px-1.5 py-1 text-xs font-bold text-center bg-gray-50'
   const td = 'border border-gray-400 px-1.5 py-1 text-xs'
@@ -13344,6 +13677,31 @@ function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, onClos
                   </tbody>
                 </table>
               </div>
+            </>
+          )}
+
+          {costRows.length > 0 && (
+            <>
+              {heading('CHI PHÍ')}
+              <div className="overflow-x-auto mb-2">
+                <table className="w-full border-collapse" style={{ minWidth: 520 }}>
+                  <thead>
+                    <tr><th className={th} style={{ width: 36 }}>STT</th><th className={th}>Hạng mục</th><th className={th}>ĐVT</th><th className={th}>SL</th><th className={th}>Đơn giá (VNĐ)</th><th className={th}>Thành tiền (VNĐ)</th><th className={th}>Ghi chú</th></tr>
+                  </thead>
+                  <tbody>
+                    {costRows.map((r, i) => (
+                      <tr key={i}>
+                        <td className={`${td} text-center`}>{i + 1}</td><td className={td}>{r.item}</td><td className={td}>{r.unit}</td>
+                        <td className={`${td} text-right`}>{r.qty}</td>
+                        <td className={`${td} text-right`}>{r.price ? fmtTaskMoney(Number(r.price)) : ''}</td>
+                        <td className={`${td} text-right`}>{fmtTaskMoney(taskCostAmount(r))}</td><td className={td}>{r.note}</td>
+                      </tr>
+                    ))}
+                    <tr><td className={`${td} font-bold`} colSpan={5}>TỔNG CHI PHÍ</td><td className={`${td} text-right font-bold`}>{fmtTaskMoney(costTotal)}</td><td className={td}></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <p className="italic text-xs mb-4">(Bằng chữ: {docSoThanhChu(costTotal)})</p>
             </>
           )}
 
@@ -13575,14 +13933,10 @@ const myTasks = tasks.filter(t =>
           <DashboardProjects currentUser={currentUser} users={users} tasks={tasks} onOpen={onOpenProject} onViewAll={() => setView('projects')} />
 
           {detailTask && (
-            <TaskDetailModal
-              task={detailTask} users={users} currentUser={currentUser}
-              canApprove={!readOnly && canApproveSelfTask(detailTask, currentUser, users)}
-              canEdit={!readOnly && !!onEditTask && isManager &&
-                (detailTask.createdBy === currentUser.id || detailTask.assignedTo.some(id => users.find(u => u.id === id)?.teamId === currentUser.teamId))}
+            <TaskViewFlow task={detailTask} tasks={tasks} users={users} currentUser={currentUser} readOnly={readOnly}
               onClose={() => setDetailTask(null)}
-              onOpenInTasks={!readOnly && onOpenTask ? () => { onOpenTask(detailTask.id); setDetailTask(null) } : undefined}
-              onEdit={!readOnly && onEditTask ? () => { onEditTask(detailTask.id); setDetailTask(null) } : undefined} />
+              onEdit={onEditTask ? () => { onEditTask(detailTask.id); setDetailTask(null) } : undefined}
+              onOpenInTasks={onOpenTask ? () => { onOpenTask(detailTask.id); setDetailTask(null) } : undefined} />
           )}
         </div>
       </div>
@@ -15898,7 +16252,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         <TaskDateFilter tasks={scoped} value={dateFilter} onChange={setDateFilter} />
       )}
       {viewMode === 'list' && !expandedRow && (
-        <TaskListTable tasks={visible} users={users} currentUser={currentUser} onOpen={t => setExpandedRow(t.id)} />
+        <TaskListTable tasks={visible} users={users} currentUser={currentUser} onOpen={t => setDocTask(t)} />
       )}
       {viewMode === 'list' && expandedRow && (
         <button type="button" onClick={() => setExpandedRow(null)}
@@ -15941,7 +16295,8 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                     {task.urgent && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold animate-pulse" style={{ background: '#f8717122', color: '#dc2626' }}>⏰ GẤP</span>}
                     {task.important && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#fbbf2422', color: '#d97706' }}>🔥 Quan trọng</span>}
                   </div>
-                  <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
+                  <h3 className="font-semibold text-sm cursor-pointer hover:underline" title="Xem phiếu giao task và chi tiết"
+                    onClick={() => setDocTask(task)} style={{ color: 'var(--text-primary)' }}>
                     {task.taskCode && <span className="font-mono text-[10px] mr-1.5" style={{ color: 'var(--text-muted)' }}>[{task.taskCode}]</span>}
                     {task.title}
                   </h3>
@@ -16263,10 +16618,6 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                             {isTaskParticipant && (
                 <>
                   <div className="flex gap-4 mt-3">
-                    <button onClick={() => setOpenCommentsFor(openCommentsFor === task.id ? null : task.id)}
-                      className="hover:text-violet-400 text-xs flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
-                      💬 Thảo luận {openCommentsFor === task.id ? '▲' : '▼'}
-                    </button>
                     <button onClick={() => setOpenWorkNoteFor(openWorkNoteFor === task.id ? null : task.id)}
                       className="hover:text-cyan-500 text-xs flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
                       📝 Work Note {openWorkNoteFor === task.id ? '▲' : '▼'}
@@ -16276,20 +16627,10 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                       📄 Phiếu giao task
                     </button>
                   </div>
-                  {openCommentsFor === task.id && (
-                    <TaskCommentsPanel taskId={task.id} currentUser={currentUser} users={users} />
-                  )}
                   {openWorkNoteFor === task.id && (
                     <TaskWorkNotePanel taskId={task.id} currentUser={currentUser} users={users} />
                   )}
 
-                  <button onClick={() => setOpenTicketFor(openTicketFor === task.id ? null : task.id)}
-                    className="hover:text-cyan-400 text-xs flex items-center gap-1 mt-2" style={{ color: 'var(--text-muted)' }}>
-                    📋 Trạng thái Ticket {openTicketFor === task.id ? '▲' : '▼'}
-                  </button>
-                  {openTicketFor === task.id && (
-                    <TaskTicketPanel task={task} currentUser={currentUser} users={users} canSubmit={isMyTask} />
-                  )}
                 </>
               )}
               </>)}
@@ -16312,8 +16653,10 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
           onSave={handleSaveTask} onClose={() => { setShowModal(false); setEditingTask(null); setSelfMode(false) }} />
       )}
       {docTask && (
-        <TaskDetailModal task={tasks.find(x => x.id === docTask.id) ?? docTask} users={users} currentUser={currentUser}
-          canApprove={false} canEdit={false} onClose={() => setDocTask(null)} />
+        <TaskViewFlow task={docTask} tasks={tasks} users={users} currentUser={currentUser}
+          onClose={() => setDocTask(null)}
+          onEdit={() => { const t = tasks.find(x => x.id === docTask.id) ?? docTask; setDocTask(null); openEditModal(t) }}
+          onOpenInTasks={viewMode === 'list' ? () => { const id = docTask.id; setDocTask(null); setExpandedRow(id) } : undefined} />
       )}
       {submittingTask && (
         <SubmitTaskModal task={submittingTask} currentUser={currentUser} users={users} onClose={() => setSubmittingTask(null)} />
@@ -22282,6 +22625,7 @@ export default function App() {
     crossDeptRejectedBy: t.cross_dept_rejected_by ?? undefined,
     creationApproval: (t.creation_approval ?? 'approved') as 'pending' | 'approved' | 'rejected',
     creationApprovedBy: t.creation_approved_by ?? undefined,
+    creationApprovedAt: t.creation_approved_at ?? undefined,
     creationRejectedReason: t.creation_rejected_reason ?? undefined,
     targetTeamId: t.target_team_id ?? undefined,
     submissionOwnFolderUrl: t.submission_own_folder_url ?? undefined,
