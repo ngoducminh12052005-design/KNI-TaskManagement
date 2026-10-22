@@ -12770,6 +12770,7 @@ function DashboardProjects({ currentUser, users, onOpen, onViewAll }: {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [noteFor, setNoteFor] = useState<Project | null>(null)
+  const [statusFilter, setStatusFilter] = useState<string>('all')
 
   useEffect(() => {
     const load = async () => {
@@ -12796,6 +12797,9 @@ function DashboardProjects({ currentUser, users, onOpen, onViewAll }: {
     isDir || p.createdBy === currentUser.id || p.managerId === currentUser.id || p.ownerId === currentUser.id ||
     p.memberIds.includes(currentUser.id) || (isMgr && p.teamId === currentUser.teamId)
   const visible = projects.filter(canSee)
+  const countOf = (k: string) => visible.filter(p => p.status === k).length
+  const filtered = visible.filter(p => statusFilter === 'all' || p.status === statusFilter)
+  const rowsToShow = statusFilter === 'all' ? filtered.slice(0, 5) : filtered.slice(0, 50)
 
   const fmtShort = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '—')
   const th = 'px-2 py-2.5 text-[10px] font-bold uppercase tracking-wide text-left'
@@ -12811,10 +12815,18 @@ function DashboardProjects({ currentUser, users, onOpen, onViewAll }: {
         </h3>
         <button type="button" onClick={onViewAll} className="text-xs font-semibold" style={{ color: '#8b5cf6' }}>Xem tất cả →</button>
       </div>
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 items-start mb-4">
+        {([['planning', '📝'], ['active', '🚀'], ['on_hold', '⏸'], ['done', '✅'], ['closed', '🔒']] as const).map(([k, icon]) => (
+          <StatusStatCard key={k} icon={icon} label={PROJECT_STATUS[k][0]} color={PROJECT_STATUS[k][2]} total={countOf(k)}
+            active={statusFilter === k} onClick={() => setStatusFilter(f => (f === k ? 'all' : k))} />
+        ))}
+      </div>
       {loading ? (
         <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Đang tải...</p>
       ) : visible.length === 0 ? (
         <p className="text-xs py-3 text-center" style={{ color: 'var(--text-muted)' }}>Bạn chưa tham gia dự án nào.</p>
+      ) : filtered.length === 0 ? (
+        <p className="text-xs py-3 text-center" style={{ color: 'var(--text-muted)' }}>Không có dự án nào ở trạng thái này.</p>
       ) : (
         <div className="w-full min-w-0 rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
           <table className="border-collapse" style={{ width: '100%', tableLayout: 'fixed' }}>
@@ -12827,7 +12839,7 @@ function DashboardProjects({ currentUser, users, onOpen, onViewAll }: {
               </tr>
             </thead>
             <tbody>
-              {visible.slice(0, 5).map((p, i) => {
+              {rowsToShow.map((p, i) => {
                 const st = PROJECT_STATUS[p.status] ?? PROJECT_STATUS.planning
                 const risk = PROJECT_RISK[p.riskLevel] ?? PROJECT_RISK.medium
                 const pm = users.find(u => u.id === (p.managerId ?? p.ownerId))
