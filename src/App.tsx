@@ -13324,11 +13324,11 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, editingT
 }
 
 // ===== Luồng xem task: Phiếu giao task -> (đóng) -> Trang chi tiết công việc =====
-function TaskViewFlow({ task, tasks, users, currentUser, readOnly = false, onClose, onEdit, onOpenInTasks }: {
-  task: Task; tasks: Task[]; users: User[]; currentUser: User; readOnly?: boolean
+function TaskViewFlow({ task, tasks, users, currentUser, readOnly = false, initialStage = 'phieu', onClose, onEdit, onOpenInTasks }: {
+  task: Task; tasks: Task[]; users: User[]; currentUser: User; readOnly?: boolean; initialStage?: 'phieu' | 'detail'
   onClose: () => void; onEdit?: () => void; onOpenInTasks?: () => void
 }) {
-  const [stage, setStage] = useState<'phieu' | 'detail'>('phieu')
+  const [stage, setStage] = useState<'phieu' | 'detail'>(initialStage)
   const live = tasks.find(t => t.id === task.id) ?? task   // luôn dùng bản mới nhất
   const canApprove = !readOnly && canApproveSelfTask(live, currentUser, users)
   const canEdit = !readOnly && !!onEdit && currentUser.role === 'manager' &&
@@ -15598,6 +15598,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   const [showModal, setShowModal] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [docTask, setDocTask] = useState<Task | null>(null)
+  const [docStage, setDocStage] = useState<'phieu' | 'detail'>('phieu')
   const [openCommentsFor, setOpenCommentsFor] = useState<string | null>(null)
   const [openWorkNoteFor, setOpenWorkNoteFor] = useState<string | null>(null)
   const [openTicketFor, setOpenTicketFor] = useState<string | null>(null)
@@ -16252,7 +16253,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         <TaskDateFilter tasks={scoped} value={dateFilter} onChange={setDateFilter} />
       )}
       {viewMode === 'list' && !expandedRow && (
-        <TaskListTable tasks={visible} users={users} currentUser={currentUser} onOpen={t => setDocTask(t)} />
+        <TaskListTable tasks={visible} users={users} currentUser={currentUser} onOpen={t => { setDocStage('phieu'); setDocTask(t) }} />
       )}
       {viewMode === 'list' && expandedRow && (
         <button type="button" onClick={() => setExpandedRow(null)}
@@ -16296,7 +16297,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                     {task.important && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#fbbf2422', color: '#d97706' }}>🔥 Quan trọng</span>}
                   </div>
                   <h3 className="font-semibold text-sm cursor-pointer hover:underline" title="Xem phiếu giao task và chi tiết"
-                    onClick={() => setDocTask(task)} style={{ color: 'var(--text-primary)' }}>
+                    onClick={() => { setDocStage('phieu'); setDocTask(task) }} style={{ color: 'var(--text-primary)' }}>
                     {task.taskCode && <span className="font-mono text-[10px] mr-1.5" style={{ color: 'var(--text-muted)' }}>[{task.taskCode}]</span>}
                     {task.title}
                   </h3>
@@ -16618,11 +16619,15 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                             {isTaskParticipant && (
                 <>
                   <div className="flex gap-4 mt-3">
+                    <button onClick={() => { setDocStage('detail'); setDocTask(task) }}
+                      className="hover:text-violet-400 text-xs flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
+                      📋 Xem chi tiết
+                    </button>
                     <button onClick={() => setOpenWorkNoteFor(openWorkNoteFor === task.id ? null : task.id)}
                       className="hover:text-cyan-500 text-xs flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
                       📝 Work Note {openWorkNoteFor === task.id ? '▲' : '▼'}
                     </button>
-                    <button onClick={() => setDocTask(task)}
+                    <button onClick={() => { setDocStage('phieu'); setDocTask(task) }}
                       className="hover:text-violet-400 text-xs flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
                       📄 Phiếu giao task
                     </button>
@@ -16653,7 +16658,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
           onSave={handleSaveTask} onClose={() => { setShowModal(false); setEditingTask(null); setSelfMode(false) }} />
       )}
       {docTask && (
-        <TaskViewFlow task={docTask} tasks={tasks} users={users} currentUser={currentUser}
+        <TaskViewFlow task={docTask} tasks={tasks} users={users} currentUser={currentUser} initialStage={docStage}
           onClose={() => setDocTask(null)}
           onEdit={() => { const t = tasks.find(x => x.id === docTask.id) ?? docTask; setDocTask(null); openEditModal(t) }}
           onOpenInTasks={viewMode === 'list' ? () => { const id = docTask.id; setDocTask(null); setExpandedRow(id) } : undefined} />
