@@ -12059,8 +12059,8 @@ function StatusStatCard({ icon, label, color, total, subs, active, onClick }: {
 }
 
 // ===== Tờ trình / đề xuất của tôi =====
-function DashboardProposals({ proposals, currentUser, onOpen, onViewAll, dateFilter }: {
-  proposals: Proposal[]; currentUser: User; onOpen?: (id: string) => void; onViewAll: () => void
+function DashboardProposals({ proposals, currentUser, users, onOpen, onViewAll, dateFilter }: {
+  proposals: Proposal[]; currentUser: User; users: User[]; onOpen?: (id: string) => void; onViewAll: () => void
   dateFilter?: DateFilterValue
 }) {
   const [myPendingIds, setMyPendingIds] = useState<string[]>([])
@@ -12098,6 +12098,7 @@ function DashboardProposals({ proposals, currentUser, onOpen, onViewAll, dateFil
   const nApproved = base.filter(p => p.status === 'approved').length
   const nRejected = base.filter(p => p.status === 'rejected').length
   const list = base.filter(p => statusFilter === 'all' || p.status === statusFilter)
+  const fmtShort = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '—')
 
   const pill = (key: 'pending' | 'approved' | 'rejected', label: string, n: number, color: string) => {
     const active = statusFilter === key
@@ -12161,24 +12162,44 @@ function DashboardProposals({ proposals, currentUser, onOpen, onViewAll, dateFil
       ) : list.length === 0 ? (
         <p className="text-xs py-3 text-center" style={{ color: 'var(--text-muted)' }}>Không có tờ trình / đề xuất nào trong bộ lọc này.</p>
       ) : (
-        <div>
-          {list.slice(0, statusFilter === 'all' && !dateActive ? 5 : 50).map(p => {
-            const [label, bg, color] = chip(p)
-            return (
-              <button key={p.id} type="button" onClick={() => onOpen?.(p.id)}
-                className="w-full text-left py-2 flex items-center justify-between gap-3" style={{ borderTop: '1px solid var(--border)' }}>
-                <div className="min-w-0">
-                  <p className="text-sm truncate" style={{ color: 'var(--text-primary)' }}>
-                    <span className="font-mono text-[11px] mr-2" style={{ color: 'var(--text-muted)' }}>{p.code ?? ''}</span>{p.title}
-                  </p>
-                  <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                    {p.groupName ?? (p.kind === 'totrinh' ? 'Tờ trình' : 'Đề xuất')} · {new Date(p.createdAt).toLocaleDateString('vi-VN')}
-                  </p>
-                </div>
-                <span className="px-2 py-0.5 rounded-lg text-[11px] font-semibold whitespace-nowrap flex-shrink-0" style={{ background: bg, color }}>{label}</span>
-              </button>
-            )
-          })}
+        <div className="overflow-x-auto">
+          <div className="rounded-2xl overflow-hidden" style={{ minWidth: 900, border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
+            <table className="border-collapse" style={{ width: '100%', tableLayout: 'fixed' }}>
+              <colgroup>{[4, 15, 6, 26, 12, 9, 12, 8, 8].map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup>
+              <thead>
+                <tr style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
+                  {['No.', 'Mã', 'Co.', 'Details', 'Status', 'Loại', 'Người gửi', 'Ngày gửi', 'Hạn'].map(h => (
+                    <th key={h} className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wide text-left whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {list.slice(0, statusFilter === 'all' && !dateActive ? 5 : 50).map((p, i) => {
+                  const [label, bg, color] = chip(p)
+                  const sender = users.find(u => u.id === p.submittedBy)
+                  return (
+                    <tr key={p.id} onClick={() => onOpen?.(p.id)}
+                      className="cursor-pointer transition-colors hover:bg-[color:var(--bg-card-alt)]"
+                      style={{ borderTop: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                      <td className="px-3 py-3 text-xs align-middle" style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                      <td className="px-3 py-3 text-xs align-middle"><div className="font-mono text-xs font-bold break-all">{p.code ?? '—'}</div></td>
+                      <td className="px-3 py-3 text-xs align-middle font-bold">{p.company ? (COMPANY_CODES[p.company] ?? p.company) : '—'}</td>
+                      <td className="px-3 py-3 text-xs align-middle"><p className="text-sm font-semibold leading-snug break-words">{withCompanyPrefix(p.title, p.company)}</p></td>
+                      <td className="px-3 py-3 text-xs align-middle">
+                        <span className="px-2 py-1 rounded-lg font-semibold whitespace-nowrap" style={{ background: bg, color }}>{label}</span>
+                      </td>
+                      <td className="px-3 py-3 text-xs align-middle break-words">{p.groupName ?? (p.kind === 'totrinh' ? 'Tờ trình' : p.kind === 'dntt' ? 'ĐNTT' : 'Đề xuất')}</td>
+                      <td className="px-3 py-3 text-xs align-middle">
+                        {sender ? <div className="flex items-center gap-1.5"><CharAvatar user={sender} size={20} /><span className="truncate">{sender.name}</span></div> : '—'}
+                      </td>
+                      <td className="px-3 py-3 text-xs align-middle">{fmtShort(p.createdAt)}</td>
+                      <td className="px-3 py-3 text-xs align-middle">{fmtShort(p.dueDate)}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
@@ -12186,8 +12207,8 @@ function DashboardProposals({ proposals, currentUser, onOpen, onViewAll, dateFil
 }
 
 // ===== Dự án trên Dashboard =====
-function DashboardProjects({ currentUser, tasks, onOpen, onViewAll }: {
-  currentUser: User; tasks: Task[]; onOpen?: (id: string) => void; onViewAll: () => void
+function DashboardProjects({ currentUser, users, tasks, onOpen, onViewAll }: {
+  currentUser: User; users: User[]; tasks: Task[]; onOpen?: (id: string) => void; onViewAll: () => void
 }) {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
@@ -12218,6 +12239,7 @@ function DashboardProjects({ currentUser, tasks, onOpen, onViewAll }: {
     p.memberIds.includes(currentUser.id) || (isMgr && p.teamId === currentUser.teamId)
   const visible = projects.filter(canSee)
   const todayStr = new Date().toISOString().split('T')[0]
+  const fmtShort = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '—')
 
   return (
     <div className="rounded-xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
@@ -12233,33 +12255,61 @@ function DashboardProjects({ currentUser, tasks, onOpen, onViewAll }: {
       ) : visible.length === 0 ? (
         <p className="text-xs py-3 text-center" style={{ color: 'var(--text-muted)' }}>Bạn chưa tham gia dự án nào.</p>
       ) : (
-        <div>
-          {visible.slice(0, 5).map(p => {
-            const list = tasks.filter(t => t.projectId === p.id)
-            const done = list.filter(t => t.status === 'completed').length
-            const pct = list.length ? Math.round((done / list.length) * 100) : 0
-            const waiting = list.filter(t => t.status === 'submitted').length
-            const overdue = list.filter(t => t.status !== 'completed' && t.dueDate && t.dueDate < todayStr).length
-            const st = PROJECT_STATUS[p.status] ?? PROJECT_STATUS.planning
-            return (
-              <button key={p.id} type="button" onClick={() => onOpen?.(p.id)} className="w-full text-left py-2.5" style={{ borderTop: '1px solid var(--border)' }}>
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm truncate" style={{ color: 'var(--text-primary)' }}>
-                    <span className="font-mono text-[11px] mr-2" style={{ color: 'var(--text-muted)' }}>{p.code}</span>{p.name}
-                  </p>
-                  <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold whitespace-nowrap flex-shrink-0" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
-                </div>
-                <div className="h-1.5 rounded-full overflow-hidden mt-1.5" style={{ background: 'var(--bg-card-alt)' }}>
-                  <div className="h-full" style={{ width: `${pct}%`, background: '#059669' }} />
-                </div>
-                <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>
-                  {pct}% · {done}/{list.length} task · {p.memberIds.length} thành viên
-                  {waiting > 0 && <span style={{ color: '#7c3aed' }}> · 📤 {waiting} chờ duyệt</span>}
-                  {overdue > 0 && <span style={{ color: '#dc2626' }}> · ⚠️ {overdue} quá hạn</span>}
-                </p>
-              </button>
-            )
-          })}
+        <div className="overflow-x-auto">
+          <div className="rounded-2xl overflow-hidden" style={{ minWidth: 900, border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
+            <table className="border-collapse" style={{ width: '100%', tableLayout: 'fixed' }}>
+              <colgroup>{[4, 14, 6, 20, 11, 9, 11, 7, 7, 11].map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup>
+              <thead>
+                <tr style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
+                  {['No.', 'Project', 'Co.', 'Details', 'Status', 'Priority', 'PM', 'Start', 'End', 'Tiến độ'].map(h => (
+                    <th key={h} className="px-3 py-2.5 text-[11px] font-bold uppercase tracking-wide text-left whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {visible.slice(0, 5).map((p, i) => {
+                  const list = tasks.filter(t => t.projectId === p.id)
+                  const done = list.filter(t => t.status === 'completed').length
+                  const pct = list.length ? Math.round((done / list.length) * 100) : 0
+                  const waiting = list.filter(t => t.status === 'submitted').length
+                  const overdue = list.filter(t => t.status !== 'completed' && t.dueDate && t.dueDate < todayStr).length
+                  const st = PROJECT_STATUS[p.status] ?? PROJECT_STATUS.planning
+                  const risk = PROJECT_RISK[p.riskLevel] ?? PROJECT_RISK.medium
+                  const pm = users.find(u => u.id === (p.managerId ?? p.ownerId))
+                  return (
+                    <tr key={p.id} onClick={() => onOpen?.(p.id)}
+                      className="cursor-pointer transition-colors hover:bg-[color:var(--bg-card-alt)]"
+                      style={{ borderTop: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                      <td className="px-3 py-3 text-xs align-middle" style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                      <td className="px-3 py-3 text-xs align-middle"><div className="font-mono text-xs font-bold break-all">{p.code || '—'}</div></td>
+                      <td className="px-3 py-3 text-xs align-middle font-bold">{p.company ? (COMPANY_CODES[p.company] ?? p.company) : '—'}</td>
+                      <td className="px-3 py-3 text-xs align-middle"><p className="text-sm font-semibold leading-snug break-words">{withCompanyPrefix(p.name, p.company)}</p></td>
+                      <td className="px-3 py-3 text-xs align-middle">
+                        <span className="px-2 py-1 rounded-lg font-semibold whitespace-nowrap" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
+                      </td>
+                      <td className="px-3 py-3 text-xs align-middle">
+                        <div className="font-bold" style={{ color: TRACKER_PRIORITY[p.priority] ?? 'var(--text-muted)' }}>{p.priority}</div>
+                        <div className="text-[10px] font-semibold" style={{ color: risk[1] }}>Rủi ro: {risk[0]}</div>
+                      </td>
+                      <td className="px-3 py-3 text-xs align-middle">
+                        {pm ? <div className="flex items-center gap-1.5"><CharAvatar user={pm} size={20} /><span className="truncate">{pm.name}</span></div> : '—'}
+                      </td>
+                      <td className="px-3 py-3 text-xs align-middle">{fmtShort(p.plannedStart)}</td>
+                      <td className="px-3 py-3 text-xs align-middle">{fmtShort(p.plannedEnd)}</td>
+                      <td className="px-3 py-3 text-xs align-middle">
+                        <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--bg-card-alt)' }}>
+                          <div className="h-full" style={{ width: `${pct}%`, background: '#059669' }} />
+                        </div>
+                        <div className="mt-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>{pct}% · {done}/{list.length}</div>
+                        {waiting > 0 && <div className="text-[10px]" style={{ color: '#7c3aed' }}>📤 {waiting} chờ duyệt</div>}
+                        {overdue > 0 && <div className="text-[10px]" style={{ color: '#dc2626' }}>⚠️ {overdue} quá hạn</div>}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
@@ -12637,8 +12687,8 @@ const myTasks = tasks.filter(t =>
               </div>
             </div>
           )}
-          <DashboardProposals proposals={proposals} currentUser={currentUser} onOpen={onOpenProposal} onViewAll={() => setView('proposals')} dateFilter={dateFilter} />
-          <DashboardProjects currentUser={currentUser} tasks={tasks} onOpen={onOpenProject} onViewAll={() => setView('projects')} />
+          <DashboardProposals proposals={proposals} currentUser={currentUser} users={users} onOpen={onOpenProposal} onViewAll={() => setView('proposals')} dateFilter={dateFilter} />
+          <DashboardProjects currentUser={currentUser} users={users} tasks={tasks} onOpen={onOpenProject} onViewAll={() => setView('projects')} />
 
           {detailTask && (
             <TaskDetailModal
@@ -19456,6 +19506,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   onJoinDiscussion: (p: Proposal) => void
   highlightProposalId?: string | null; clearHighlightProposalId?: () => void
   openProposalId?: string | null; clearOpenProposalId?: () => void
+
 }) {
   const [showModal, setShowModal] = useState(false)
   const [forwardingProposal, setForwardingProposal] = useState<Proposal | null>(null)
