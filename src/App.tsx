@@ -12329,12 +12329,106 @@ function DashboardPeople({ currentUser, users, tasks, proposals }: { currentUser
   )
 }
 
+// ===== Chi tiết công việc (xem từ Dashboard): bố cục giống form chỉnh sửa nhưng chỉ xem =====
+function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, onClose, onOpenInTasks, onEdit }: {
+  task: Task; users: User[]; currentUser: User; canApprove: boolean; canEdit: boolean
+  onClose: () => void; onOpenInTasks?: () => void; onEdit?: () => void
+}) {
+  const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
+  const names = (ids: string[]) => (ids.length ? ids.map(nameOf).join(', ') : '—')
+  const pri = PRIORITY_CONFIG[task.priority]
+  const bucket = BUCKET_META[statusBucket(task)]
+  const statusText = task.creationApproval === 'pending' ? '⏳ Chờ quản lý duyệt'
+    : task.creationApproval === 'rejected' ? '❌ Bị từ chối'
+    : bucket.label
+
+  const field = (label: string, value: string, pre = false) => (
+    <div>
+      <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>{label}</label>
+      <div className={`w-full px-3 py-2.5 rounded-lg text-sm min-h-[42px] break-words ${pre ? 'whitespace-pre-wrap' : ''}`}
+        style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+        {value || '—'}
+      </div>
+    </div>
+  )
+
+  const doApprove = async () => { await approveSelfTask(task, currentUser); onClose() }
+  const doReject = async () => { await rejectSelfTask(task, currentUser); onClose() }
+
+  const btn = 'flex-1 py-2.5 rounded-xl text-sm font-bold'
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.8)' }} onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl p-6 max-h-[90vh] overflow-y-auto"
+        style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }} onClick={e => e.stopPropagation()}>
+        <div className="flex justify-between items-start mb-5">
+          <div>
+            <h3 className="font-bold text-lg" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>📋 Chi tiết công việc</h3>
+            {task.taskCode && <p className="font-mono text-[11px]" style={{ color: 'var(--text-muted)' }}>{task.taskCode}</p>}
+          </div>
+          <button onClick={onClose} className="text-2xl leading-none hover:opacity-70" style={{ color: 'var(--text-muted)' }}>×</button>
+        </div>
+
+        <div className="space-y-4">
+          {field('Công ty', task.company ? `${COMPANY_CODES[task.company] ? `${COMPANY_CODES[task.company]} · ` : ''}${task.company}` : '')}
+          {field('Tên task', task.title)}
+          {field('Mô tả', task.description, true)}
+          <div className="grid grid-cols-2 gap-3">
+            {field('Ngày bắt đầu', task.startDate ? fmtDate(task.startDate) : '')}
+            {field('Hạn hoàn thành', task.dueDate ? fmtDate(task.dueDate) : '')}
+          </div>
+          {field('EXP thưởng', `+${task.expReward}`)}
+          <div className="grid grid-cols-2 gap-3">
+            {field('Danh mục', task.category)}
+            {field('Ưu tiên', pri.label)}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {field('Mức độ quan trọng', task.important ? 'Quan trọng' : 'Bình thường')}
+            {field('Mức độ gấp', task.urgent ? 'Gấp' : 'Không gấp')}
+          </div>
+          {field('Mức độ SLA', task.slaLevel ? SLA_LEVELS[task.slaLevel].label : 'Không áp dụng SLA')}
+          {field('Người phụ trách', names(task.assignedTo))}
+          {field('Người hỗ trợ', names(task.supporters))}
+          {field('Quản lý dự án (PM)', names(task.projectManager))}
+          {field('Người tạo', `${nameOf(task.createdBy)}${task.selfCreated ? ' (tự tạo)' : ''}`)}
+          {field('Trạng thái', statusText)}
+          {task.creationApproval === 'rejected' && task.creationRejectedReason && field('Lý do từ chối', task.creationRejectedReason, true)}
+        </div>
+
+        {canApprove && (
+          <p className="text-xs mt-4" style={{ color: '#d97706' }}>🎯 {nameOf(task.createdBy)} tự tạo task này, cần bạn duyệt trước khi làm.</p>
+        )}
+        <div className="flex gap-2 pt-4">
+          {canEdit && onEdit && (
+            <button onClick={onEdit} className={btn}
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>✏️ Sửa</button>
+          )}
+          {canApprove ? (
+            <>
+              <button onClick={doReject} className={btn} style={{ background: '#f8717122', color: '#dc2626' }}>Từ chối</button>
+              <button onClick={doApprove} className={`${btn} text-white`} style={{ background: 'linear-gradient(135deg, #059669, #047857)' }}>✓ Duyệt cho làm</button>
+            </>
+          ) : (
+            <>
+              <button onClick={onClose} className={btn}
+                style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>Đóng</button>
+              {onOpenInTasks && (
+                <button onClick={onOpenInTasks} className={`${btn} text-white`} style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>Mở ở trang Task →</button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ==================== DASHBOARD ====================
 
-function DashboardView({ currentUser, tasks, users, proposals, setView, onOpenProposal, onOpenProject, onOpenTask, readOnly = false }: {
+function DashboardView({ currentUser, tasks, users, proposals, setView, onOpenProposal, onOpenProject, onOpenTask, onEditTask, readOnly = false }: {
   currentUser: User; tasks: Task[]; users: User[]; proposals: Proposal[]
   setView: (v: View) => void
   onOpenProposal?: (id: string) => void; onOpenProject?: (id: string) => void; onOpenTask?: (id: string) => void
+  onEditTask?: (id: string) => void
   readOnly?: boolean
 }) {
   const { progress, needed, level } = getExpProgress(currentUser.exp)
@@ -12361,6 +12455,7 @@ const myTasks = tasks.filter(t =>
     ).length
 
   const [bucketFilter, setBucketFilter] = useState<'all' | TaskBucket>('all')
+  const [detailTask, setDetailTask] = useState<Task | null>(null)
   const toggleBucket = (b: TaskBucket) => setBucketFilter(f => (f === b ? 'all' : b))
   const shown = bucketFilter === 'all'
     ? pending
@@ -12467,9 +12562,10 @@ const myTasks = tasks.filter(t =>
                 {shown.filter(needMyApproval).map(task => (
                   <div key={task.id} className="p-3 rounded-lg flex items-center gap-3"
                     style={{ background: '#fbbf2414', border: '1px solid #fbbf2455' }}>
-                    <div className="flex-1 min-w-0 text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                    <div className="flex-1 min-w-0 text-sm font-medium truncate cursor-pointer" onClick={() => setDetailTask(task)}
+                      style={{ color: 'var(--text-primary)' }}>
                       <span className="font-mono text-[11px] mr-2" style={{ color: 'var(--text-muted)' }}>{task.taskCode}</span>
-                      {task.title}
+                      {withCompanyPrefix(task.title, task.company)}
                     </div>
                     <button onClick={() => rejectSelfTask(task, currentUser)}
                       className="text-xs px-2.5 py-1 rounded-lg font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>Từ chối</button>
@@ -12480,7 +12576,7 @@ const myTasks = tasks.filter(t =>
               </div>
             )}
 
-            <TaskListTable tasks={tableRows} users={users} currentUser={currentUser} onOpen={t => onOpenTask?.(t.id)} />
+            <TaskListTable tasks={tableRows} users={users} currentUser={currentUser} onOpen={t => setDetailTask(t)} />
           </div>
                     {/* Task bạn đã duyệt (chỉ quản lý) */}
           {showPeople && (
@@ -12496,8 +12592,8 @@ const myTasks = tasks.filter(t =>
                 {approvedByMe.slice(0, 8).map(task => {
                   const b = BUCKET_META[statusBucket(task)]
                   return (
-                    <div key={task.id} onClick={() => onOpenTask?.(task.id)}
-                      className={`px-3 py-2.5 rounded-lg flex items-center gap-2 min-w-0 ${onOpenTask ? 'cursor-pointer hover:opacity-80' : ''}`}
+                    <div key={task.id} onClick={() => setDetailTask(task)}
+                      className="px-3 py-2.5 rounded-lg flex items-center gap-2 min-w-0 cursor-pointer hover:opacity-80"
                       style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
                       <span className="font-mono text-[11px] flex-shrink-0" style={{ color: 'var(--text-muted)' }}>{task.taskCode ?? '—'}</span>
                       <span className="text-sm font-medium truncate flex-1 min-w-0" style={{ color: 'var(--text-primary)' }}>{task.title}</span>
@@ -12513,6 +12609,17 @@ const myTasks = tasks.filter(t =>
           )}
           <DashboardProposals proposals={proposals} currentUser={currentUser} onOpen={onOpenProposal} onViewAll={() => setView('proposals')} dateFilter={dateFilter} />
           <DashboardProjects currentUser={currentUser} tasks={tasks} onOpen={onOpenProject} onViewAll={() => setView('projects')} />
+
+          {detailTask && (
+            <TaskDetailModal
+              task={detailTask} users={users} currentUser={currentUser}
+              canApprove={!readOnly && canApproveSelfTask(detailTask, currentUser, users)}
+              canEdit={!readOnly && !!onEditTask && isManager &&
+                (detailTask.createdBy === currentUser.id || detailTask.assignedTo.some(id => users.find(u => u.id === id)?.teamId === currentUser.teamId))}
+              onClose={() => setDetailTask(null)}
+              onOpenInTasks={!readOnly && onOpenTask ? () => { onOpenTask(detailTask.id); setDetailTask(null) } : undefined}
+              onEdit={!readOnly && onEditTask ? () => { onEditTask(detailTask.id); setDetailTask(null) } : undefined} />
+          )}
         </div>
       </div>
     </div>
@@ -14152,11 +14259,12 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
 
 // ==================== TASKS VIEW ====================
 
-function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collaborations, highlightTaskId, clearHighlightTaskId }: {
+function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collaborations, highlightTaskId, clearHighlightTaskId, openEditTaskId, clearOpenEditTaskId }: {
   currentUser: User; tasks: Task[]; users: User[]
   setTasks: (t: Task[]) => void; setCurrentUser: (u: User) => void
   collaborations: Collaboration[]
   highlightTaskId?: string | null; clearHighlightTaskId?: () => void
+  openEditTaskId?: string | null; clearOpenEditTaskId?: () => void
 }) {
   const [filter, setFilter] = useState<'all' | TaskBucket>('all')
   const [search, setSearch] = useState('')
@@ -14237,6 +14345,13 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     const t = setTimeout(tryScroll, 150)
     return () => clearTimeout(t)
   }, [highlightTaskId])
+
+  // Từ Dashboard bấm "Sửa": mở thẳng form Chỉnh sửa Task của task đó
+  useEffect(() => {
+    if (!openEditTaskId) return
+    const t = tasks.find(x => x.id === openEditTaskId)
+    if (t) { openEditModal(t); clearOpenEditTaskId?.() }
+  }, [openEditTaskId, tasks])
   const now = new Date()
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   const [form, setForm] = useState({
@@ -14858,7 +14973,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                   </h3>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  {canEdit && (
+                  {canEdit && !(task.creationApproval === 'pending' && canApproveSelfTask(task, currentUser, users)) && (
                     <button onClick={() => openEditModal(task)}
                       className="hover:text-violet-400 text-[10px] mb-1 block ml-auto" style={{ color: 'var(--text-muted)' }}>
                       ✏️ Sửa
@@ -15022,6 +15137,13 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                         🎯 {getUserById(task.createdBy)?.name} tự tạo task này, cần bạn duyệt trước khi làm
                       </p>
                       <div className="flex gap-1.5">
+                        {canEdit && (
+                          <button onClick={() => openEditModal(task)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold"
+                            style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                            ✏️ Sửa
+                          </button>
+                        )}
                         <button onClick={() => rejectSelfTask(task, currentUser)}
                           className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>
                           Từ chối
@@ -21094,6 +21216,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   const [lastSeenMention, setLastSeenMention] = useState(() => localStorage.getItem('lastSeenMention') || '')
   const [socialTarget, setSocialTarget] = useState<{ channel: ChatChannel; dmUserId?: string; proposalId?: string } | null>(null)
   const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null)
+  const [editTaskId, setEditTaskId] = useState<string | null>(null)
   const [highlightProposalId, setHighlightProposalId] = useState<string | null>(null)
   const [projectFocusId, setProjectFocusId] = useState<string | null>(null)
 
@@ -21155,10 +21278,12 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
       case 'dashboard': return <DashboardView {...sharedProps} proposals={proposals}
         onOpenProposal={id => { setView('proposals'); setHighlightProposalId(id) }}
         onOpenProject={id => { setProjectFocusId(id); setView('projects') }}
-        onOpenTask={id => { setView('tasks'); setHighlightTaskId(id) }} />
+        onOpenTask={id => { setView('tasks'); setHighlightTaskId(id) }}
+        onEditTask={id => { setView('tasks'); setEditTaskId(id) }} />
       case 'tasks': return (
         <TasksView {...sharedProps} collaborations={collaborations}
-          highlightTaskId={highlightTaskId} clearHighlightTaskId={() => setHighlightTaskId(null)} />
+          highlightTaskId={highlightTaskId} clearHighlightTaskId={() => setHighlightTaskId(null)}
+          openEditTaskId={editTaskId} clearOpenEditTaskId={() => setEditTaskId(null)} />
       )
       case 'projects': return <ProjectsView currentUser={currentUser} users={users} tasks={tasks} proposals={proposals}
         focusProjectId={projectFocusId} onFocusHandled={() => setProjectFocusId(null)}
