@@ -2762,7 +2762,7 @@ const fmtClock = (sec: number) => {
 }
 
 // Ô đếm giờ SLA trong Tracker (tự chạy từng giây, chỉ khi task còn đang tính giờ)
-function SlaCell({ task }: { task: Task }) {
+function SlaCell({ task, compact = false }: { task: Task; compact?: boolean }) {
   const [, setTick] = useState(0)
   const done = task.status === 'completed' || task.workStatus === 'complete'
   const deadline = getSlaDeadline(task)
@@ -2797,7 +2797,7 @@ function SlaCell({ task }: { task: Task }) {
 
   return (
     <div className="space-y-1 text-center">
-      <div className="px-2 py-1 rounded-md font-bold font-mono whitespace-nowrap" style={{ background: bg, color }}>{text}</div>
+      <div className={compact ? 'px-1.5 py-1 rounded-md font-bold text-[11px] leading-snug break-words tabular-nums' : 'px-2 py-1 rounded-md font-bold font-mono whitespace-nowrap'} style={{ background: bg, color }}>{text}</div>
       {sub && <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{sub}</div>}
       {showElapsed && <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>⏱ Đã xử lý {formatDuration(getElapsedProcessingSeconds(task))}</div>}
     </div>
@@ -3537,7 +3537,7 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
   const fmtShort = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '—')
   const th = 'px-2 py-2.5 text-[10px] font-bold uppercase tracking-wide text-left'
   const td = 'px-2 py-3 text-xs align-middle'
-  const cols = [3, 10, 4, 22, 9, 6, 17, 9, 5, 5, 10]  // % của khung: vừa khung, không cuộn ngang
+  const cols = [3, 11, 4, 20, 10, 6, 17, 9, 5, 5, 10]  // % của khung: vừa khung, không cuộn ngang
   // Trạng thái dùng cùng nhóm với các thẻ lọc (Received, In-process, Pending, Completed, Close)
   const toTracker: Record<TaskBucket, string> = { received: 'received', processing: 'processing', pending: 'pending', completed: 'complete', closed: 'closed' }
 
@@ -3577,11 +3577,13 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
                 style={{ borderTop: '1px solid var(--border)', background: over ? '#dc262612' : undefined, color: 'var(--text-primary)' }}>
                 <td className={td} style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
                 <td className={td}>
-                  <div className="font-mono text-xs font-bold break-all" style={{ color: 'var(--text-primary)' }}>
-                    {t.taskCode ?? '—'}
-                    {t.urgent && <span className="ml-1" title="Gấp">⏰</span>}
-                    {t.important && <span className="ml-0.5" title="Quan trọng">🔥</span>}
-                  </div>
+                  <div className="font-mono text-[11px] font-bold break-all leading-tight" style={{ color: 'var(--text-primary)' }}>{t.taskCode ?? '—'}</div>
+                  {(t.urgent || t.important) && (
+                    <div className="mt-0.5">
+                      {t.urgent && <span title="Gấp">⏰</span>}
+                      {t.important && <span title="Quan trọng">🔥</span>}
+                    </div>
+                  )}
                 </td>
                 <td className={`${td} font-bold`}>{t.company ? (COMPANY_CODES[t.company] ?? t.company) : '—'}</td>
                 <td className={td}>
@@ -3590,13 +3592,13 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
                   </p>
                 </td>
                 <td className={td}>
-                  <span className="px-2 py-1 rounded-lg font-semibold" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
+                  <span className="px-2 py-1 rounded-lg font-semibold whitespace-nowrap" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
                 </td>
                 <td className={td}>
                   <span className="text-[11px] font-bold" style={{ color: pri.color }}>{pri.label}</span>
                 </td>
                 <td className={td}>
-                  <SlaCell task={t} />
+                  <SlaCell task={t} compact />
                 </td>
                 <td className={td}>
                   {pics.length === 0 && '—'}
@@ -3609,7 +3611,7 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
                 <td className={td}>{fmtShort(t.dueDate)}</td>
                 <td className={td}>
                   <button type="button" onClick={e => { e.stopPropagation(); setUpdateTask(t) }}
-                    className="px-2 py-1.5 rounded-lg text-[11px] font-bold leading-tight"
+                    className="px-2 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap"
                     style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>
                     📝 Work Note
                   </button>
