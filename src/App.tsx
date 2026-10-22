@@ -11263,7 +11263,6 @@
 //   )
 // }
 
-
 import { useState, useRef, useEffect, createContext, useContext } from 'react'
 import { supabase } from './supabaseClient'
 import companyLogo from './assets/company-logo.png'
@@ -13007,7 +13006,7 @@ function DocPeoplePicker({ options, value, onChange, empty = 'Chưa chọn' }: {
       <div className="flex gap-2">
         <select value={teamId} onChange={e => { setTeamId(e.target.value); setQ('') }} className="flex-1 rounded px-2 py-1 text-xs outline-none" style={box}>
           <option value="">-- Chọn phòng ban --</option>
-          {TEAMS.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
+          {TEAMS.filter(t => options.some(u => u.teamId === t.id)).map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
         </select>
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="hoặc gõ tên để tìm" className="flex-1 rounded px-2 py-1 text-xs outline-none" style={box} />
       </div>
@@ -13040,6 +13039,13 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, editingT
   const range = getExpRange(form.priority, form.important, form.urgent)
   const expBad = form.expReward < range.min || form.expReward > range.max
   const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? ''
+
+  // Mặc định PM = trưởng bộ phận của mình (vẫn đổi được). Chỉ áp khi tạo mới và chưa chọn PM.
+  useEffect(() => {
+    if (editingTask || form.projectManager.length > 0) return
+    const heads = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId).map(u => u.id)
+    if (heads.length > 0) setForm((f: any) => ({ ...f, projectManager: heads }))
+  }, [])
 
   const line = 'w-full bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500 py-0.5'
   const ink = { color: '#111827' }
@@ -13123,7 +13129,7 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, editingT
           <>
             <div className="flex gap-3 mb-3">
               <b className="shrink-0 w-24">Quản lý (PM):</b>
-              <div className="flex-1"><DocPeoplePicker options={teamUsers} value={form.projectManager} onChange={v => patchForm({ projectManager: v })} empty="Chưa chọn PM (nhận đủ 100% EXP)" /></div>
+              <div className="flex-1"><DocPeoplePicker options={users.filter(u => u.role === 'manager')} value={form.projectManager} onChange={v => patchForm({ projectManager: v })} empty="Chưa chọn PM (nhận đủ 100% EXP)" /></div>
             </div>
             <div className="flex gap-3 mb-3">
               <b className="shrink-0 w-24">Hỗ trợ:</b>
