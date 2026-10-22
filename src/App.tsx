@@ -12084,7 +12084,10 @@ function DashboardProposals({ proposals, currentUser, onOpen, onViewAll, dateFil
 
   const mine = proposals.filter(p => p.submittedBy === currentUser.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const base = mine.filter(inRange)
-  const needMe = proposals.filter(p => p.status === 'pending' && myPendingIds.includes(p.id)).length
+  const needMeList = proposals
+    .filter(p => p.status === 'pending' && myPendingIds.includes(p.id))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const needMe = needMeList.length
   const isReview = (p: Proposal) => p.status === 'rejected' && !!p.rejectedReason?.startsWith('[REVIEW]')
   const chip = (p: Proposal): [string, string, string] =>
     p.status === 'pending' ? ['⏳ Chờ duyệt', '#fbbf2422', '#d97706']
@@ -12121,13 +12124,40 @@ function DashboardProposals({ proposals, currentUser, onOpen, onViewAll, dateFil
         {pill('approved', '✅ Đã duyệt', nApproved, '#059669')}
         {pill('rejected', '❌ Từ chối / xem xét lại', nRejected, '#dc2626')}
         {needMe > 0 && (
-          <button type="button" onClick={onViewAll} className="text-[11px] px-2 py-0.5 rounded-full font-bold" style={{ background: '#7c3aed22', color: '#7c3aed' }}>
+          <span className="text-[11px] px-2 py-0.5 rounded-full font-bold" style={{ background: '#7c3aed22', color: '#7c3aed' }}>
             📥 {needMe} cái cần bạn duyệt
-          </button>
+          </span>
         )}
       </div>
+
+      {/* Tờ trình đang chờ MÌNH duyệt, luôn hiện ở trên cùng */}
+      {needMeList.length > 0 && (
+        <div className="mb-3 rounded-lg overflow-hidden" style={{ border: '1px solid #7c3aed55', background: '#7c3aed0d' }}>
+          <p className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide" style={{ color: '#7c3aed' }}>📥 Cần bạn duyệt</p>
+          {needMeList.slice(0, 5).map(p => (
+            <button key={p.id} type="button" onClick={() => onOpen?.(p.id)}
+              className="w-full text-left px-3 py-2 flex items-center justify-between gap-3 hover:bg-[color:var(--bg-card-alt)]"
+              style={{ borderTop: '1px solid #7c3aed33' }}>
+              <div className="min-w-0">
+                <p className="text-sm truncate" style={{ color: 'var(--text-primary)' }}>
+                  <span className="font-mono text-[11px] mr-2" style={{ color: 'var(--text-muted)' }}>{p.code ?? ''}</span>{p.title}
+                </p>
+                <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                  {p.groupName ?? (p.kind === 'totrinh' ? 'Tờ trình' : 'Đề xuất')} · {new Date(p.createdAt).toLocaleDateString('vi-VN')}
+                </p>
+              </div>
+              <span className="px-2 py-0.5 rounded-lg text-[11px] font-bold whitespace-nowrap flex-shrink-0" style={{ background: '#7c3aed', color: '#fff' }}>Xem và duyệt</span>
+            </button>
+          ))}
+          {needMeList.length > 5 && (
+            <button type="button" onClick={onViewAll} className="w-full py-1.5 text-[11px] font-semibold" style={{ color: '#7c3aed', borderTop: '1px solid #7c3aed33' }}>
+              Còn {needMeList.length - 5} cái nữa, xem tất cả →
+            </button>
+          )}
+        </div>
+      )}
       {mine.length === 0 ? (
-        <p className="text-xs py-3 text-center" style={{ color: 'var(--text-muted)' }}>Bạn chưa gửi tờ trình hay đề xuất nào.</p>
+        needMe > 0 ? null : <p className="text-xs py-3 text-center" style={{ color: 'var(--text-muted)' }}>Bạn chưa gửi tờ trình hay đề xuất nào.</p>
       ) : list.length === 0 ? (
         <p className="text-xs py-3 text-center" style={{ color: 'var(--text-muted)' }}>Không có tờ trình / đề xuất nào trong bộ lọc này.</p>
       ) : (
@@ -19420,11 +19450,12 @@ function ProposalTracker({ proposals, users, approvals, kindTab, isMyTurn, onOpe
   )
 }
 
-function ProposalsView({ currentUser, users, proposals, proposalApprovals, proposalRevisions, onJoinDiscussion, highlightProposalId, clearHighlightProposalId }: {
+function ProposalsView({ currentUser, users, proposals, proposalApprovals, proposalRevisions, onJoinDiscussion, highlightProposalId, clearHighlightProposalId, openProposalId, clearOpenProposalId }: {
   currentUser: User; users: User[]; proposals: Proposal[]; proposalApprovals: ProposalApproval[]
   proposalRevisions: ProposalRevision[]
   onJoinDiscussion: (p: Proposal) => void
   highlightProposalId?: string | null; clearHighlightProposalId?: () => void
+  openProposalId?: string | null; clearOpenProposalId?: () => void
 }) {
   const [showModal, setShowModal] = useState(false)
   const [forwardingProposal, setForwardingProposal] = useState<Proposal | null>(null)
@@ -19457,6 +19488,15 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   if (target.kind === 'totrinh' || target.kind === 'dntt') { setDetailProposal(null); setDocProposal(target) }
   else { setDocProposal(null); setDetailProposal(target) }
   }
+    // Dashboard bấm vào một tờ trình: mở thẳng chi tiết (tờ trình/DNTT mở bản văn bản, đề xuất mở chi tiết)
+  useEffect(() => {
+    if (!openProposalId) return
+    const target = proposals.find(x => x.id === openProposalId)
+    if (!target) return   // dữ liệu chưa tải xong, effect sẽ chạy lại khi proposals đổi
+    if (target.kind === 'totrinh' || target.kind === 'dntt') { setDetailProposal(null); setDocProposal(target) }
+    else { setDocProposal(null); setDetailProposal(target) }
+    clearOpenProposalId?.()
+  }, [openProposalId, proposals])
   const proposalRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [flashProposalId, setFlashProposalId] = useState<string | null>(null)
 
@@ -21218,6 +21258,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null)
   const [editTaskId, setEditTaskId] = useState<string | null>(null)
   const [highlightProposalId, setHighlightProposalId] = useState<string | null>(null)
+    const [openProposalId, setOpenProposalId] = useState<string | null>(null)
   const [projectFocusId, setProjectFocusId] = useState<string | null>(null)
 
   const handleJoinProposal = async (proposal: Proposal) => {
@@ -21276,7 +21317,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   const renderView = () => {
     switch (view) {
       case 'dashboard': return <DashboardView {...sharedProps} proposals={proposals}
-        onOpenProposal={id => { setView('proposals'); setHighlightProposalId(id) }}
+        onOpenProposal={id => { setView('proposals'); setOpenProposalId(id) }}
         onOpenProject={id => { setProjectFocusId(id); setView('projects') }}
         onOpenTask={id => { setView('tasks'); setHighlightTaskId(id) }}
         onEditTask={id => { setView('tasks'); setEditTaskId(id) }} />
@@ -21288,7 +21329,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
       case 'projects': return <ProjectsView currentUser={currentUser} users={users} tasks={tasks} proposals={proposals}
         focusProjectId={projectFocusId} onFocusHandled={() => setProjectFocusId(null)}
         onOpenTask={id => { setView('tasks'); setHighlightTaskId(id) }}
-        onOpenProposal={id => { setView('proposals'); setHighlightProposalId(id) }} />
+        onOpenProposal={id => { setView('proposals'); setOpenProposalId(id) }} />
       case 'leaderboard': return <LeaderboardView users={users} tasks={tasks} />
       case 'rewards': return <RewardsView currentUser={currentUser} redemptions={redemptions} users={users} />
       case 'social': return (
@@ -21299,7 +21340,8 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
       )
       case 'profile': return <ProfileView currentUser={currentUser} setCurrentUser={setCurrentUser} tasks={tasks} />
       case 'proposals': return <ProposalsView currentUser={currentUser} users={users} proposals={proposals} proposalApprovals={proposalApprovals} proposalRevisions={proposalRevisions} onJoinDiscussion={handleJoinProposal}
-          highlightProposalId={highlightProposalId} clearHighlightProposalId={() => setHighlightProposalId(null)} />
+          highlightProposalId={highlightProposalId} clearHighlightProposalId={() => setHighlightProposalId(null)}
+          openProposalId={openProposalId} clearOpenProposalId={() => setOpenProposalId(null)} />
           case 'bodlog': return currentUser.isDirector ? <BodLogView tasks={tasks} users={users} /> : <DashboardView {...sharedProps} proposals={proposals} />
     }
   }
