@@ -2120,6 +2120,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   const steps: FlowStep[] = []
   steps.push({ label: task.selfCreated ? 'Tự tạo task' : 'Giao task', who: nameOf(task.createdBy), status: 'done', at: task.createdAt })
   if (task.selfCreated) {
+    steps.push({ label: 'Gửi quản lý duyệt', who: nameOf(task.createdBy), status: task.creationApproval === 'draft' ? 'current' : 'done', note: task.creationApproval === 'draft' ? task.creationRejectedReason : undefined })
     const noApprover = task.creationApproval === 'approved' && !task.creationApprovedBy
     steps.push({
       label: 'Quản lý duyệt cho làm',
@@ -4767,7 +4768,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
     }
 
     if (editingTask) {
-      const resubmit = editingTask.creationApproval === 'rejected' && editingTask.selfCreated && editingTask.createdBy === currentUser.id
+      const resubmit = false   // sửa xong vẫn ở New; bấm 'Gửi task cho quản lý' mới gửi
       await supabase.from('tasks').update({
         title: finalTitle, company: form.company || null, description: form.description, exp_reward: form.expReward,
         assigned_to: form.assignedTo, project_manager: form.projectManager, supporters: form.supporters,
@@ -4814,7 +4815,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         category: form.category, priority: form.priority, self_created: creatingForSelf,
         important: form.important, urgent: form.urgent, is_team_project: form.isTeamProject,
         cross_dept_pending: isCrossDept,
-        creation_approval: needsApproval ? 'pending' : 'approved',
+        creation_approval: needsApproval ? 'draft' : 'approved',
         target_team_id: targetTeamId,
         drive_folder_created: !creatingForSelf && form.driveFolderCreated,
         drive_folder_name: (!creatingForSelf && form.driveFolderCreated) ? (form.driveFolderName.trim() || null) : null,
@@ -4852,7 +4853,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
             })
           }
         }
-      } else if (creatingForSelf) {
+      } else if (creatingForSelf && !needsApproval) {
         const taskContent = form.description.trim() || form.title
         for (const mgrId of getTaskApproverIds(currentUser.id, form.projectManager, users)) {
           await supabase.from('notifications').insert({
@@ -4942,7 +4943,9 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
           </button>
         ))}
       </div> */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 items-start mb-5">
+      <div className={`grid grid-cols-2 ${isManager ? 'sm:grid-cols-5' : 'sm:grid-cols-6'} gap-4 items-start mb-5`}>
+        {!isManager && <StatusStatCard icon="📝" label="New" color={BUCKET_META.new.color}
+          total={bucketCount('new')} active={filter === 'new'} onClick={() => toggleBucket('new')} />}
         <StatusStatCard icon="📥" label="Received" color={BUCKET_META.received.color}
           total={bucketCount('received')} active={filter === 'received'} onClick={() => toggleBucket('received')} />
         <StatusStatCard icon="⚙️" label="In-process" color={BUCKET_META.processing.color}
@@ -4986,7 +4989,8 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
           const isTaskParticipant = task.assignedTo.includes(currentUser.id) || task.projectManager.includes(currentUser.id) || task.supporters.includes(currentUser.id) || task.createdBy === currentUser.id
           const isBeforeStartDate = !!task.startDate && task.startDate > new Date().toISOString().split('T')[0]
           const catColor = CATEGORY_COLORS[task.category] ?? '#6b7280'
-          const canEdit = isManager && (task.createdBy === currentUser.id || assignees.some(a => a.teamId === currentUser.teamId))
+          const isMyDraft = task.selfCreated && task.createdBy === currentUser.id && task.creationApproval === 'draft'
+          const canEdit = isMyDraft || (isManager && (task.createdBy === currentUser.id || assignees.some(a => a.teamId === currentUser.teamId)))
 
           const isFlashed = flashTaskId === task.id
           return (
@@ -5205,15 +5209,22 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                       ⏳ Chờ quản lý duyệt task này mới được làm
                     </span>
 
-                  ) : task.creationApproval === 'rejected' ? (
-                    <div className="flex flex-col gap-1 items-end max-w-[240px]">
-                      <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#f8717122', color: '#dc2626' }}>
-                        ❌ Quản lý {getUserById(task.creationApprovedBy)?.name ?? ''} từ chối
+                  ) : task.creationApproval === 'draft' || task.creationApproval === 'rejected' ? (
+                    <div className="flex flex-col gap-1.5 items-end max-w-[260px]">
+                      <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: task.creationRejectedReason ? '#f8717122' : '#0ea5e922', color: task.creationRejectedReason ? '#dc2626' : '#0284c7' }}>
+                        {task.creationRejectedReason ? `↩️ ${getUserById(task.creationApprovedBy)?.name ?? 'Quản lý'} trả về` : '📝 Nháp, chưa gửi quản lý'}
                       </span>
                       {task.creationRejectedReason && (
                         <p className="text-xs text-right" style={{ color: 'var(--text-muted)' }}>Lý do: {task.creationRejectedReason}</p>
                       )}
-                      <p className="text-[10px] text-right" style={{ color: 'var(--text-muted)' }}>Bấm "Sửa" rồi lưu để gửi duyệt lại</p>
+                      {task.createdBy === currentUser.id && (
+                        <div className="flex gap-1.5">
+                          <button onClick={() => openEditModal(task)} className="px-3 py-1.5 rounded-lg text-xs font-bold"
+                            style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>✏️ Sửa</button>
+                          <button onClick={() => sendSelfTask(task, currentUser, users)} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white"
+                            style={{ background: '#0ea5e9' }}>📤 Gửi task cho quản lý</button>
+                        </div>
+                      )}
                     </div>
 
                   ) : task.status === 'completed' ? (
@@ -11426,6 +11437,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
     : t.status === 'completed')
 
   const stateOf = (t: Task): [string, string] => {
+    if (t.creationApproval === 'draft') return [t.creationRejectedReason ? '↩️ Bị trả về' : '📝 Nháp', '#0284c7']
     if (t.creationApproval === 'pending') return ['⏳ Chờ duyệt tạo task', '#d97706']
     if (t.creationApproval === 'rejected') return ['❌ Bị từ chối', '#dc2626']
     if (t.status === 'completed') return ['✅ Hoàn thành', '#059669']
@@ -12087,16 +12099,9 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
                       }}
                       className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors text-left mb-0.5"
                       style={{
-                        // Luôn tô màu đậm để người dùng nhận ra module ngay khi mở app.
-                        background: item.id === 'tasks' ? '#1D4ED8'
-                          : item.id === 'proposals' ? '#D97706'
-                          : item.id === 'projects' ? '#059669'
-                          : active ? 'linear-gradient(135deg, #6d5ae6, #5b4bd5)' : 'transparent',
-                        color: ['tasks', 'proposals', 'projects'].includes(item.id) || active ? '#ffffff' : 'var(--text-secondary)',
-                        boxShadow: item.id === 'tasks' ? '0 4px 12px #1D4ED833'
-                          : item.id === 'proposals' ? '0 4px 12px #D9770633'
-                          : item.id === 'projects' ? '0 4px 12px #05966933'
-                          : active ? '0 6px 16px #6d5ae640' : 'none',
+                        background: active ? 'linear-gradient(135deg, #6d5ae6, #5b4bd5)' : 'transparent',
+                        color: active ? '#ffffff' : 'var(--text-secondary)',
+                        boxShadow: active ? '0 6px 16px #6d5ae640' : 'none',
                       }}>
                       <span className="text-base w-5 text-center">{item.icon}</span>
                       <span className="flex-1">{item.label}</span>
