@@ -8833,7 +8833,7 @@
 //   const code = raw.trim().toUpperCase()
 //   const target = proposals.find(x => (x.code ?? '').toUpperCase() === code)
 //   if (!target) { alert(`Không tìm thấy tờ trình ${code}, hoặc bạn không có quyền xem.`); return }
-//   if (target.kind === 'totrinh' || target.kind === 'dntt') { setDetailProposal(null); setDocProposal(target) }
+//   if (target.kind === 'totrinh' || target.kind === 'dntt' || isFormDoc(target)) { setDetailProposal(null); setDocProposal(target) }
 //   else { setDocProposal(null); setDetailProposal(target) }
 //   }
 //     // Dashboard bấm vào một tờ trình: mở thẳng chi tiết (tờ trình/DNTT mở bản văn bản, đề xuất mở chi tiết)
@@ -8841,7 +8841,7 @@
 //     if (!openProposalId) return
 //     const target = proposals.find(x => x.id === openProposalId)
 //     if (!target) return   // dữ liệu chưa tải xong, effect sẽ chạy lại khi proposals đổi
-//     if (target.kind === 'totrinh' || target.kind === 'dntt') { setDetailProposal(null); setDocProposal(target) }
+//     if (target.kind === 'totrinh' || target.kind === 'dntt' || isFormDoc(target)) { setDetailProposal(null); setDocProposal(target) }
 //     else { setDocProposal(null); setDetailProposal(target) }
 //     clearOpenProposalId?.()
 //   }, [openProposalId, proposals])
@@ -18925,6 +18925,743 @@ function ProposalDnttForm({ currentUser, users, onClose }: { currentUser: User; 
     </div>
   )
 }
+// ===== 3 biểu mẫu Word dưới dạng văn bản: Nghỉ phép, Đi công tác, Mua sắm =====
+type FormTpl = 'nghiphep' | 'congtac' | 'muasam'
+
+const FORM_TPL: Record<FormTpl, { group: string; icon: string; title: string; en: string; formNo: string; roles: string[]; hint: string; noun: string }> = {
+  nghiphep: {
+    group: 'Nghỉ phép', icon: '🏖️', title: 'ĐƠN XIN NGHỈ PHÉP', en: '(Leave Application Form)', formNo: 'BM-HR-01',
+    roles: ['Trưởng bộ phận', 'Phòng Nhân sự (HR)', 'Ban Giám đốc (nếu > 3 ngày)'],
+    hint: 'chọn phòng ban rồi chọn lần lượt <b>Phòng Nhân sự (HR)</b>, <b>Ban Giám đốc</b> (nếu nghỉ trên 3 ngày)',
+    noun: 'đơn xin nghỉ phép',
+  },
+  congtac: {
+    group: 'Đi công tác', icon: '✈️', title: 'GIẤY ĐỀ XUẤT ĐI CÔNG TÁC', en: '(Business Trip Proposal & Requisition Form)', formNo: 'BM-HR-02',
+    roles: ['Trưởng bộ phận', 'Phòng Tài chính Kế toán', 'Ban Giám đốc / BOD'],
+    hint: 'chọn phòng ban rồi chọn lần lượt <b>Phòng Tài chính Kế toán</b>, <b>Ban Giám đốc / BOD</b>',
+    noun: 'giấy đề xuất đi công tác',
+  },
+  muasam: {
+    group: 'Mua sắm', icon: '🛒', title: 'PHIẾU ĐỀ XUẤT MUA SẮM', en: '(Purchase Requisition Form)', formNo: 'BM-PROC-01',
+    roles: ['Trưởng bộ phận', 'Bộ phận Tài chính / Kế toán', 'Ban Giám đốc / BOD'],
+    hint: 'chọn phòng ban rồi chọn lần lượt <b>Bộ phận Tài chính / Kế toán</b>, <b>Ban Giám đốc / BOD</b>',
+    noun: 'phiếu đề xuất mua sắm',
+  },
+}
+const FORM_TPL_BY_GROUP: Record<string, FormTpl> = { 'Nghỉ phép': 'nghiphep', 'Đi công tác': 'congtac', 'Mua sắm': 'muasam' }
+const isFormDoc = (p: Proposal) => p.kind !== 'totrinh' && p.kind !== 'dntt' && !!p.formData?.tpl
+
+const LEAVE_TYPES: [string, string][] = [
+  ['annual', 'Phép năm (Annual Leave)'],
+  ['paid', 'Nghỉ việc riêng hưởng nguyên lương (Kết hôn, đám cưới con, tang chế...)'],
+  ['unpaid', 'Nghỉ không hưởng lương (Unpaid Leave)'],
+  ['sick', 'Nghỉ ốm / Thai sản (Có xác nhận y tế)'],
+  ['comp', 'Nghỉ bù (Compensatory Leave)'],
+  ['other', 'Khác'],
+]
+const PURCHASE_REASONS: [string, string][] = [
+  ['new', 'Trang bị mới cho nhân sự / dự án mới'],
+  ['replace', 'Thay thế thiết bị hỏng hóc / hết hạn sử dụng'],
+  ['supply', 'Bổ sung vật tư tiêu hao hàng tháng / định kỳ'],
+  ['other', 'Khác (Ghi rõ)'],
+]
+
+const fmtD = (iso?: string) => (iso ? new Date(iso + 'T00:00:00').toLocaleDateString('vi-VN') : '')
+const calcDays = (from?: string, to?: string) => {
+  if (!from || !to) return ''
+  const n = Math.round((new Date(to + 'T00:00:00').getTime() - new Date(from + 'T00:00:00').getTime()) / 864e5) + 1
+  return n > 0 ? String(n) : ''
+}
+const moneyVN = (n: number) => Number(n || 0).toLocaleString('vi-VN')
+const rowAmt = (r: any) => (Number(r.qty) || 0) * (Number(r.price) || 0)
+
+function initFormData(tpl: FormTpl, u: User): Record<string, any> {
+  const base = { tpl, dept: u.department ?? '', position: '', empCode: '' }
+  if (tpl === 'nghiphep') {
+    return { ...base, leaveType: 'annual', leaveOther: '', fromDate: '', toDate: '', totalDays: '', session: 'full', reason: '',
+      handoverId: '', handoverPosition: '', handoverDept: '', handoverContent: '', phone: '', email: '' }
+  }
+  if (tpl === 'congtac') {
+    return { ...base, destination: '', fromDate: '', toDate: '', totalDays: '', purpose: '',
+      staff: [{ name: u.name, empCode: '', position: '', dept: u.department ?? '', task: '' }],
+      costs: [
+        { cat: 'Máy bay / Tàu / Xe công tác', unit: 'Lượt', qty: '', price: '', note: '' },
+        { cat: 'Khách sạn / Lưu trú', unit: 'Đêm', qty: '', price: '', note: '' },
+        { cat: 'Phụ cấp đi đường / Phụ cấp công tác', unit: 'Ngày', qty: '', price: '', note: '' },
+        { cat: 'Chi phí tiếp khách / Mối quan hệ', unit: 'Lần', qty: '', price: '', note: '' },
+        { cat: 'Chi phí phát sinh khác', unit: '', qty: '', price: '', note: '' },
+      ],
+      advance: 'no', advanceAmount: '' }
+  }
+  return { ...base, priority: 'normal', purposeType: 'new', purposeOther: '', reason: '',
+    items: [{ name: '', spec: '', unit: '', qty: '1', price: '', need: '' }],
+    old: [], techNeed: '', techReuse: '', techUserId: '', techDate: '' }
+}
+
+// Phần thân của văn bản: dùng chung cho form (ro = false) và bản xem (ro = true)
+function FormDocBody({ tpl, f, set, ro, users, requester, code, dateText }: {
+  tpl: FormTpl; f: Record<string, any>; set: (patch: Record<string, any>) => void; ro: boolean
+  users: User[]; requester?: User; code?: string; dateText: string
+}) {
+  const cfg = FORM_TPL[tpl]
+  const ink = { color: '#111827' }
+  const line = 'w-full bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500 py-0.5'
+  const th = 'border border-gray-500 px-1.5 py-1 text-xs font-bold text-center bg-gray-50'
+  const td = 'border border-gray-500 px-1 py-0.5 text-xs align-top'
+  const cell = 'w-full bg-transparent outline-none'
+  const userName = (id?: string) => users.find(u => u.id === id)?.name ?? ''
+
+  // Ô nhập: ở chế độ xem thì chỉ hiện chữ
+  const txt = (k: string, ph = '') => ro
+    ? <span className="whitespace-pre-wrap">{f[k] || '…………'}</span>
+    : <input value={f[k] ?? ''} onChange={e => set({ [k]: e.target.value })} placeholder={ph} className={line} style={ink} />
+  const area = (k: string, rows = 3, ph = '') => ro
+    ? <span className="whitespace-pre-wrap block">{f[k] || '…………'}</span>
+    : <textarea value={f[k] ?? ''} onChange={e => set({ [k]: e.target.value })} rows={rows} placeholder={ph} className={`${line} resize-none`} style={ink} />
+  const date = (k: string) => ro
+    ? <span>{fmtD(f[k]) || '……/……/……'}</span>
+    : <input type="date" value={f[k] ?? ''} onChange={e => set({ [k]: e.target.value })} className="bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500" style={ink} />
+  const opt = (k: string, val: string, label: string) => ro
+    ? <span className="block">{f[k] === val ? '☑' : '☐'} {label}</span>
+    : <label className="flex items-center gap-2 cursor-pointer"><input type="radio" name={`${tpl}-${k}`} checked={f[k] === val} onChange={() => set({ [k]: val })} /> {label}</label>
+  const userPick = (k: string, excludeId?: string) => ro
+    ? <span>{userName(f[k]) || '…………'}</span>
+    : (
+      <select value={f[k] ?? ''} onChange={e => set({ [k]: e.target.value })} className="bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500 py-0.5" style={ink}>
+        <option value="">-- Chọn người --</option>
+        {users.filter(u => u.id !== excludeId).map(u => <option key={u.id} value={u.id}>{u.name}{u.department ? ` — ${u.department}` : ''}</option>)}
+      </select>
+    )
+
+  const setRow = (key: string, i: number, patch: Record<string, any>) =>
+    set({ [key]: (f[key] as any[]).map((r, j) => (j === i ? { ...r, ...patch } : r)) })
+  const addRow = (key: string, blank: Record<string, any>) => set({ [key]: [...(f[key] as any[]), blank] })
+  const delRow = (key: string, i: number) => set({ [key]: (f[key] as any[]).filter((_, j) => j !== i) })
+  const cellIn = (key: string, i: number, field: string, extra: Record<string, any> = {}) => ro
+    ? <span className="whitespace-pre-wrap">{(f[key][i] as any)[field]}</span>
+    : <input value={(f[key][i] as any)[field] ?? ''} onChange={e => setRow(key, i, { [field]: e.target.value })} className={cell} style={ink} {...extra} />
+  const addBtn = (key: string, blank: Record<string, any>, label = '+ Thêm dòng') => !ro && (
+    <button type="button" onClick={() => addRow(key, blank)} className="text-xs text-blue-600 mt-1">{label}</button>
+  )
+  const delBtn = (key: string, i: number, min = 1) => !ro && (f[key] as any[]).length > min
+    ? <button type="button" onClick={() => delRow(key, i)} className="text-red-500 text-xs">✕</button>
+    : null
+  const days = f.totalDays !== '' && f.totalDays != null ? f.totalDays : calcDays(f.fromDate, f.toDate)
+
+  const head = (
+    <>
+      <p className="font-bold text-[12px]">TẬP ĐOÀN ĐẦU TƯ KHÔI NGUYÊN (KNI GROUP)</p>
+      <p className="text-[11px] text-gray-600">Mẫu số: {cfg.formNo} · Ngày ban hành: 21/10/2026</p>
+      <div className="text-center my-5">
+        <p className="text-lg font-bold">{cfg.title}</p>
+        <p className="text-lg font-bold text-blue-600">{cfg.en}</p>
+        <p className="text-[11px] text-gray-500 mt-1">Số/No: <span className="font-mono">{code ?? 'RTASK… (tự sinh khi gửi)'}</span></p>
+      </div>
+    </>
+  )
+  const sec = (t: string) => <p className="font-bold mt-4 mb-1">{t}</p>
+
+  if (tpl === 'nghiphep') {
+    return (
+      <>
+        {head}
+        <div className="space-y-1.5 mb-3">
+          <div className="flex items-center gap-2"><span className="shrink-0">Mã nhân viên:</span>{txt('empCode')}</div>
+          <p>Họ và tên: <b>{requester?.name}</b></p>
+          <div className="flex items-center gap-2"><span className="shrink-0">Chức danh / Vị trí:</span>{txt('position')}</div>
+          <div className="flex items-center gap-2"><span className="shrink-0">Bộ phận / Phòng ban:</span>{txt('dept')}</div>
+          <p>Ngày làm đơn: {dateText}</p>
+        </div>
+        {sec('I. THÔNG TIN NGHỈ PHÉP')}
+        <p className="font-semibold">1. Loại nghỉ phép</p>
+        <div className="pl-4 space-y-0.5 mb-2">
+          {LEAVE_TYPES.map(([v, l]) => <div key={v}>{opt('leaveType', v, l)}</div>)}
+          {f.leaveType === 'other' && <div className="pl-6">{txt('leaveOther', 'Ghi rõ loại nghỉ')}</div>}
+        </div>
+        <p className="font-semibold">2. Thời gian nghỉ</p>
+        <div className="pl-4 space-y-1 mb-2">
+          <p className="flex flex-wrap items-center gap-2">Từ ngày: {date('fromDate')} đến hết ngày: {date('toDate')}</p>
+          <p className="flex items-center gap-2">Tổng số ngày nghỉ:{' '}
+            {ro ? <b>{days || '…'}</b> : <input type="number" min="0" step="0.5" value={days} onChange={e => set({ totalDays: e.target.value })} className="w-20 bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500" style={ink} />} ngày
+          </p>
+          <div className="flex flex-wrap items-center gap-6">Chi tiết ca nghỉ: {opt('session', 'full', 'Cả ngày')}{opt('session', 'am', 'Sáng')}{opt('session', 'pm', 'Chiều')}</div>
+        </div>
+        <p className="font-semibold">3. Lý do xin nghỉ</p>
+        <div className="pl-4 mb-2">{area('reason', 3, 'Nêu rõ lý do xin nghỉ...')}</div>
+        {sec('II. BÀN GIAO CÔNG VIỆC TRONG THỜI GIAN NGHỈ')}
+        <div className="space-y-1.5 pl-4">
+          <p className="flex flex-wrap items-center gap-2">Người nhận bàn giao: {userPick('handoverId', requester?.id)}</p>
+          <div className="flex items-center gap-2"><span className="shrink-0">Chức danh:</span>{txt('handoverPosition')}</div>
+          <div className="flex items-center gap-2"><span className="shrink-0">Bộ phận:</span>{txt('handoverDept')}</div>
+          <div><p>Nội dung công việc bàn giao:</p>{area('handoverContent', 3)}</div>
+          <p className="font-semibold">Thông tin liên lạc khẩn cấp khi nghỉ:</p>
+          <div className="flex items-center gap-2 pl-4"><span className="shrink-0">SĐT:</span>{txt('phone')}</div>
+          <div className="flex items-center gap-2 pl-4"><span className="shrink-0">Email:</span>{txt('email')}</div>
+        </div>
+      </>
+    )
+  }
+
+  if (tpl === 'congtac') {
+    const staff: any[] = f.staff ?? []
+    const costs: any[] = f.costs ?? []
+    const total = costs.reduce((s, r) => s + rowAmt(r), 0)
+    return (
+      <>
+        {head}
+        <div className="space-y-1.5 mb-3">
+          <p>Ngày đề xuất: {dateText}</p>
+          <p>Người đề xuất: <b>{requester?.name}</b></p>
+          <div className="flex items-center gap-2"><span className="shrink-0">Chức danh:</span>{txt('position')}</div>
+          <div className="flex items-center gap-2"><span className="shrink-0">Bộ phận / Phòng ban:</span>{txt('dept')}</div>
+        </div>
+        {sec('I. THÔNG TIN CHUYẾN CÔNG TÁC')}
+        <div className="space-y-1.5 pl-4">
+          <div className="flex items-center gap-2"><span className="shrink-0">Lịch trình / Địa điểm công tác:</span>{txt('destination')}</div>
+          <p className="flex flex-wrap items-center gap-2">Thời gian: Từ ngày {date('fromDate')} đến ngày {date('toDate')} (Tổng số:{' '}
+            {ro ? <b>{days || '…'}</b> : <input type="number" min="0" value={days} onChange={e => set({ totalDays: e.target.value })} className="w-16 bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500" style={ink} />} ngày)
+          </p>
+          <div><p>Mục đích công tác:</p>{area('purpose', 3)}</div>
+        </div>
+        <p className="font-bold mt-3 mb-1">Danh sách nhân sự tham gia công tác:</p>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse" style={{ minWidth: 640 }}>
+            <thead><tr>
+              <th className={th} style={{ width: 34 }}>STT</th><th className={th}>Họ và tên</th><th className={th} style={{ width: 80 }}>Mã nhân viên</th>
+              <th className={th}>Chức danh</th><th className={th}>Bộ phận</th><th className={th}>Nhiệm vụ chính</th>{!ro && <th style={{ width: 22 }}></th>}
+            </tr></thead>
+            <tbody>
+              {staff.map((r, i) => (
+                <tr key={i}>
+                  <td className={`${td} text-center`}>{i + 1}</td>
+                  <td className={td}>{cellIn('staff', i, 'name')}</td>
+                  <td className={td}>{cellIn('staff', i, 'empCode')}</td>
+                  <td className={td}>{cellIn('staff', i, 'position')}</td>
+                  <td className={td}>{cellIn('staff', i, 'dept')}</td>
+                  <td className={td}>{cellIn('staff', i, 'task')}</td>
+                  {!ro && <td className="text-center">{delBtn('staff', i)}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {addBtn('staff', { name: '', empCode: '', position: '', dept: '', task: '' }, '+ Thêm nhân sự')}
+        {sec('II. DỰ TRÙ CHI PHÍ CÔNG TÁC (ESTIMATED EXPENSES)')}
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse" style={{ minWidth: 700 }}>
+            <thead><tr>
+              <th className={th} style={{ width: 34 }}>STT</th><th className={th}>Danh mục chi phí</th><th className={th} style={{ width: 60 }}>ĐVT</th>
+              <th className={th} style={{ width: 70 }}>Số lượng</th><th className={th} style={{ width: 100 }}>Đơn giá dự kiến (VNĐ)</th>
+              <th className={th} style={{ width: 110 }}>Thành tiền dự kiến (VNĐ)</th><th className={th}>Ghi chú / Phương tiện</th>{!ro && <th style={{ width: 22 }}></th>}
+            </tr></thead>
+            <tbody>
+              {costs.map((r, i) => (
+                <tr key={i}>
+                  <td className={`${td} text-center`}>{i + 1}</td>
+                  <td className={td}>{cellIn('costs', i, 'cat')}</td>
+                  <td className={td}>{cellIn('costs', i, 'unit')}</td>
+                  <td className={td}>{cellIn('costs', i, 'qty', { type: 'number', min: '0' })}</td>
+                  <td className={`${td} ${ro ? 'text-right' : ''}`}>{ro ? (r.price ? moneyVN(Number(r.price)) : '') : cellIn('costs', i, 'price', { type: 'number', min: '0' })}</td>
+                  <td className={`${td} text-right`}>{moneyVN(rowAmt(r))}</td>
+                  <td className={td}>{cellIn('costs', i, 'note')}</td>
+                  {!ro && <td className="text-center">{delBtn('costs', i)}</td>}
+                </tr>
+              ))}
+              <tr>
+                <td className={`${td} font-bold text-center`} colSpan={5}>Tổng cộng</td>
+                <td className={`${td} font-bold text-right`}>{moneyVN(total)}</td>
+                <td className={td}></td>{!ro && <td></td>}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        {addBtn('costs', { cat: '', unit: '', qty: '', price: '', note: '' })}
+        <p className="text-right font-bold mt-2">{vnMoneyWords(total)}</p>
+        <p className="font-bold mt-3 mb-1">Đề xuất tạm ứng chi phí công tác:</p>
+        <div className="pl-4 space-y-1">
+          {opt('advance', 'yes', 'Có tạm ứng')}
+          {f.advance === 'yes' && (
+            <div className="pl-8 space-y-1">
+              <p className="flex items-center gap-2">Số tiền bằng số:{' '}
+                {ro ? <b>{moneyVN(Number(f.advanceAmount))}</b> : <input type="number" min="0" value={f.advanceAmount ?? ''} onChange={e => set({ advanceAmount: e.target.value })} className="w-40 bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500" style={ink} />} VNĐ
+              </p>
+              <p>Số tiền bằng chữ: <i>{vnMoneyWords(Number(f.advanceAmount) || 0)}</i></p>
+            </div>
+          )}
+          {opt('advance', 'no', 'Không tạm ứng (Thanh toán sau khi hoàn thành)')}
+        </div>
+      </>
+    )
+  }
+
+  // muasam
+  const items: any[] = f.items ?? []
+  const olds: any[] = f.old ?? []
+  const total = items.reduce((s, r) => s + rowAmt(r), 0)
+  return (
+    <>
+      {head}
+      <div className="space-y-1.5 mb-3">
+        <p>Ngày đề xuất: {dateText}</p>
+        <div className="flex items-center gap-2"><span className="shrink-0">Bộ phận đề xuất:</span>{txt('dept')}</div>
+        <p className="flex flex-wrap items-center gap-2">Người đề xuất: <b>{requester?.name}</b> | Chức danh: <span className="flex-1 min-w-[160px]">{txt('position')}</span></p>
+        <div>
+          <p>Mức độ ưu tiên:</p>
+          <div className="pl-8 space-y-0.5">
+            {opt('priority', 'urgent', 'Gấp (Cần trong 24-48h)')}
+            {opt('priority', 'normal', 'Bình thường (Theo quy trình mua sắm tiêu chuẩn)')}
+          </div>
+        </div>
+      </div>
+      {sec('I. MỤC ĐÍCH & LÝ DO MUA SẮM')}
+      <div className="pl-4 space-y-0.5">
+        {PURCHASE_REASONS.map(([v, l]) => <div key={v}>{opt('purposeType', v, l)}</div>)}
+        {f.purposeType === 'other' && <div className="pl-6">{txt('purposeOther', 'Ghi rõ lý do khác')}</div>}
+      </div>
+      <p className="font-bold mt-2">Chi tiết lý do / Mục đích sử dụng:</p>
+      {area('reason', 3)}
+      {sec('II. DANH MỤC HÀNG HÓA / THIẾT BỊ ĐỀ XUẤT')}
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse" style={{ minWidth: 760 }}>
+          <thead><tr>
+            <th className={th} style={{ width: 34 }}>STT</th><th className={th}>Tên hàng hóa / Thiết bị / Dịch vụ</th><th className={th}>Thông số kỹ thuật / Quy cách</th>
+            <th className={th} style={{ width: 55 }}>ĐVT</th><th className={th} style={{ width: 65 }}>Số lượng</th><th className={th} style={{ width: 95 }}>Đơn giá dự kiến (VNĐ)</th>
+            <th className={th} style={{ width: 100 }}>Thành tiền dự kiến (VNĐ)</th><th className={th} style={{ width: 90 }}>Thời gian cần</th>{!ro && <th style={{ width: 22 }}></th>}
+          </tr></thead>
+          <tbody>
+            {items.map((r, i) => (
+              <tr key={i}>
+                <td className={`${td} text-center`}>{i + 1}</td>
+                <td className={td}>{cellIn('items', i, 'name')}</td>
+                <td className={td}>{cellIn('items', i, 'spec')}</td>
+                <td className={td}>{cellIn('items', i, 'unit')}</td>
+                <td className={td}>{cellIn('items', i, 'qty', { type: 'number', min: '0' })}</td>
+                <td className={`${td} ${ro ? 'text-right' : ''}`}>{ro ? (r.price ? moneyVN(Number(r.price)) : '') : cellIn('items', i, 'price', { type: 'number', min: '0' })}</td>
+                <td className={`${td} text-right`}>{moneyVN(rowAmt(r))}</td>
+                <td className={td}>{cellIn('items', i, 'need')}</td>
+                {!ro && <td className="text-center">{delBtn('items', i)}</td>}
+              </tr>
+            ))}
+            <tr>
+              <td className={`${td} font-bold text-center`} colSpan={6}>Tổng cộng</td>
+              <td className={`${td} font-bold text-right`}>{moneyVN(total)}</td>
+              <td className={td}></td>{!ro && <td></td>}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      {addBtn('items', { name: '', spec: '', unit: '', qty: '1', price: '', need: '' })}
+      <p className="font-bold mt-2">Tổng số tiền bằng chữ: <span className="font-normal italic">{vnMoneyWords(total)}</span></p>
+      {sec('III. DANH MỤC THIẾT BỊ THAY THẾ / THU HỒI (Nếu có)')}
+      {(olds.length > 0 || !ro) && (
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse" style={{ minWidth: 640 }}>
+            <thead><tr>
+              <th className={th} style={{ width: 34 }}>STT</th><th className={th}>Tên thiết bị cũ / Mã tài sản</th><th className={th}>Hiện trạng / Lý do thay thế</th>
+              <th className={th}>Phương án xử lý đề xuất (Thanh lý / Sửa chữa / Kho)</th>{!ro && <th style={{ width: 22 }}></th>}
+            </tr></thead>
+            <tbody>
+              {olds.map((r, i) => (
+                <tr key={i}>
+                  <td className={`${td} text-center`}>{i + 1}</td>
+                  <td className={td}>{cellIn('old', i, 'name')}</td>
+                  <td className={td}>{cellIn('old', i, 'status')}</td>
+                  <td className={td}>{cellIn('old', i, 'plan')}</td>
+                  {!ro && <td className="text-center">{delBtn('old', i, 0)}</td>}
+                </tr>
+              ))}
+              {olds.length === 0 && ro && <tr><td className={td} colSpan={4}>—</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {addBtn('old', { name: '', status: '', plan: '' }, '+ Thêm thiết bị thay thế / thu hồi')}
+      {sec('IV. Ý KIẾN BỘ PHẬN CHUYÊN MÔN / KỸ THUẬT (IT / Hành chính / Cơ điện)')}
+      <p className="text-[11px] italic text-gray-600 mb-1">(Chỉ áp dụng đối với tài sản, phần mềm, thiết bị CNTT, máy móc chuyên dụng)</p>
+      <div className="space-y-1.5">
+        <div><p>Đánh giá về tính cần thiết & thông số kỹ thuật:</p>{area('techNeed', 2)}</div>
+        <div><p>Đánh giá khả năng tái sử dụng kho hiện có:</p>{area('techReuse', 2)}</div>
+        <p className="flex flex-wrap items-center gap-2">Ký tên / Xác nhận của BP Chuyên môn: {userPick('techUserId')} | Ngày: {date('techDate')}</p>
+      </div>
+    </>
+  )
+}
+
+// ---------- Form tạo mới ----------
+function ProposalFormDocForm({ tpl, currentUser, users, onClose }: { tpl: FormTpl; currentUser: User; users: User[]; onClose: () => void }) {
+  const cfg = FORM_TPL[tpl]
+  const now = new Date()
+  const dateText = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`
+  const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)
+
+  const [f, setF] = useState<Record<string, any>>(() => initFormData(tpl, currentUser))
+  const set = (patch: Record<string, any>) => setF(prev => ({ ...prev, ...patch }))
+  const [files, setFiles] = useState<File[]>([])
+  const [driveUrl, setDriveUrl] = useState('')
+  const [recipientId, setRecipientId] = useState(myManagers[0]?.id ?? '')
+  const [extraApprovers, setExtraApprovers] = useState<string[]>([])
+  const [approvalMode, setApprovalMode] = useState<'seq' | 'par'>('seq')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? ''
+  const approverIds = [recipientId, ...extraApprovers.filter(id => id !== recipientId)].filter(Boolean)
+  const roleOf = (i: number) => cfg.roles[i] ?? `Người duyệt ${i + 1}`
+  const ink = { color: '#111827' }
+
+  const pickFiles = (e: { target: HTMLInputElement }) => {
+    const picked = Array.from(e.target.files ?? [])
+    const tooBig = picked.find(x => x.size > MAX_FILE_MB * 1024 * 1024)
+    if (tooBig) { setError(`File "${tooBig.name}" lớn hơn ${MAX_FILE_MB}MB. Hãy dùng link Drive cho file lớn.`); e.target.value = ''; return }
+    if (files.length + picked.length > MAX_FILES) { setError(`Tối đa ${MAX_FILES} file.`); e.target.value = ''; return }
+    setError('')
+    setFiles(prev => [...prev, ...picked])
+    e.target.value = ''
+  }
+
+  const submit = async () => {
+    const days = f.totalDays !== '' && f.totalDays != null ? String(f.totalDays) : calcDays(f.fromDate, f.toDate)
+    let title = ''
+    let brief = ''
+    let items: { item: string; cost: string; amount: number }[] = []
+    let total = 0
+    let dueDate: string | null = null
+    let cleaned: Record<string, any> = { ...f }
+
+    if (tpl === 'nghiphep') {
+      if (!f.fromDate || !f.toDate) { setError('Vui lòng chọn ngày bắt đầu và ngày kết thúc nghỉ.'); return }
+      if (f.toDate < f.fromDate) { setError('Ngày kết thúc không được trước ngày bắt đầu.'); return }
+      if (!days || Number(days) <= 0) { setError('Vui lòng nhập tổng số ngày nghỉ.'); return }
+      if (f.leaveType === 'other' && !String(f.leaveOther).trim()) { setError('Vui lòng ghi rõ loại nghỉ khác.'); return }
+      if (!String(f.reason).trim()) { setError('Vui lòng nhập lý do xin nghỉ.'); return }
+      if (!f.handoverId) { setError('Vui lòng chọn người nhận bàn giao.'); return }
+      const typeLabel = LEAVE_TYPES.find(([v]) => v === f.leaveType)?.[1].replace(/\s*\(.*\)\s*$/, '') ?? 'Nghỉ phép'
+      title = `Xin nghỉ: ${typeLabel} (${fmtD(f.fromDate)} - ${fmtD(f.toDate)}, ${days} ngày)`
+      brief = String(f.reason).trim().slice(0, 200)
+      dueDate = f.toDate
+      cleaned = { ...f, totalDays: days }
+    } else if (tpl === 'congtac') {
+      if (!String(f.destination).trim()) { setError('Vui lòng nhập lịch trình / địa điểm công tác.'); return }
+      if (!f.fromDate || !f.toDate) { setError('Vui lòng chọn thời gian công tác.'); return }
+      if (f.toDate < f.fromDate) { setError('Ngày kết thúc không được trước ngày bắt đầu.'); return }
+      if (!String(f.purpose).trim()) { setError('Vui lòng nhập mục đích công tác.'); return }
+      const staff = (f.staff as any[]).filter(r => String(r.name).trim())
+      if (staff.length === 0) { setError('Vui lòng nhập ít nhất một nhân sự tham gia.'); return }
+      const costs = (f.costs as any[]).filter(r => String(r.cat).trim() && (Number(r.qty) || Number(r.price)))
+      total = costs.reduce((s, r) => s + rowAmt(r), 0)
+      if (f.advance === 'yes' && !(Number(f.advanceAmount) > 0)) { setError('Vui lòng nhập số tiền tạm ứng.'); return }
+      items = costs.map(r => ({ item: String(r.cat).trim(), cost: `${r.qty || ''} ${r.unit || ''}`.trim() + (r.price ? ` × ${moneyVN(Number(r.price))}` : ''), amount: rowAmt(r) }))
+      title = `Đi công tác ${String(f.destination).trim()} (${fmtD(f.fromDate)} - ${fmtD(f.toDate)})`
+      brief = String(f.purpose).trim().slice(0, 200)
+      dueDate = f.toDate
+      cleaned = { ...f, staff, costs, totalDays: days }
+    } else {
+      const rows = (f.items as any[]).filter(r => String(r.name).trim())
+      total = rows.reduce((s, r) => s + rowAmt(r), 0)
+      if (rows.length === 0) { setError('Vui lòng nhập ít nhất một hàng hóa / thiết bị đề xuất.'); return }
+      if (f.purposeType === 'other' && !String(f.purposeOther).trim()) { setError('Vui lòng ghi rõ lý do mua sắm khác.'); return }
+      if (!String(f.reason).trim()) { setError('Vui lòng nhập chi tiết lý do / mục đích sử dụng.'); return }
+      items = rows.map(r => ({ item: String(r.name).trim(), cost: `${r.qty || ''} ${r.unit || ''}`.trim() + (r.price ? ` × ${moneyVN(Number(r.price))}` : ''), amount: rowAmt(r) }))
+      const names = rows.map(r => String(r.name).trim())
+      title = `Mua sắm: ${names[0]}${names.length > 1 ? ` và ${names.length - 1} mục khác` : ''}`
+      brief = String(f.reason).trim().slice(0, 200)
+      cleaned = { ...f, items: rows, old: (f.old as any[]).filter(r => String(r.name).trim()) }
+    }
+    if (!recipientId) { setError('Vui lòng chọn người duyệt đầu tiên.'); return }
+
+    setSaving(true); setError('')
+    let uploaded: { name: string; path: string; size: number; type: string }[] = []
+    try { uploaded = await uploadProposalFiles(currentUser.id, files) }
+    catch (err: any) { setSaving(false); setError('Tải file thất bại: ' + (err?.message ?? '')); return }
+
+    const formData = { ...cleaned, tpl, dateText, total, bangChu: vnMoneyWords(total) }
+    const participants = Array.from(new Set([currentUser.id, ...approverIds, ...(tpl === 'nghiphep' && f.handoverId ? [f.handoverId] : [])]))
+
+    let data: any = null
+    let insertError: any = null
+    for (let i = 0; i < 3; i++) {
+      const res = await supabase.from('proposals').insert({
+        title: title.slice(0, 200), description: brief, drive_url: driveUrl.trim(),
+        submitted_by: currentUser.id, recipient_id: recipientId, status: 'pending',
+        participants,
+        code: await generateProposalCode(currentUser.id),
+        group_name: cfg.group, department: String(f.dept || currentUser.department || ''), company: null,
+        brief, days: days ? Math.max(1, Math.ceil(Number(days))) : null, due_date: dueDate,
+        approval_mode: approvalMode, attachments: uploaded, items,
+        kind: 'dexuat', form_data: formData,
+      }).select('id').single()
+      data = res.data; insertError = res.error
+      if (!insertError && data?.id) {
+        await supabase.from('proposal_steps').insert(approverIds.map((id, k) => ({
+          proposal_id: data.id, approver_id: id, step_order: k + 1,
+          status: k === 0 || approvalMode === 'par' ? 'pending' : 'waiting',
+        })))
+      }
+      if (!insertError || insertError.code !== '23505') break
+    }
+    setSaving(false)
+    if (insertError) { setError(insertError.message); return }
+
+    const notifyIds = approvalMode === 'par' ? approverIds : [recipientId]
+    for (const id of notifyIds) {
+      await supabase.from('notifications').insert({
+        message: `${cfg.icon} ${currentUser.name} vừa gửi ${cfg.noun} "${title.slice(0, 80)}" cho bạn`,
+        target_user_id: id,
+        link_proposal_id: data?.id,
+      })
+    }
+    if (tpl === 'nghiphep' && f.handoverId && f.handoverId !== currentUser.id) {
+      await supabase.from('notifications').insert({
+        message: `🏖️ ${currentUser.name} nhờ bạn nhận bàn giao công việc khi nghỉ (${fmtD(f.fromDate)} - ${fmtD(f.toDate)})`,
+        target_user_id: f.handoverId,
+        link_proposal_id: data?.id,
+      })
+    }
+    onClose()
+  }
+
+  const sigCols = (tpl === 'nghiphep' ? 2 : 1) + Math.max(approverIds.length, 1)
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
+      <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
+        <span className="text-sm font-bold text-gray-800">{cfg.icon} Tạo {cfg.noun} (RTASK)</span>
+        <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-[860px] mx-auto my-4 bg-white shadow-xl p-6 sm:p-10 text-[13px] leading-relaxed" style={{ ...ink, fontFamily: '"Times New Roman", Times, serif' }}>
+          <FormDocBody tpl={tpl} f={f} set={set} ro={false} users={users} requester={currentUser} dateText={dateText} />
+
+          <div className="mt-4">
+            <p className="font-bold text-xs mb-1">Tài liệu đính kèm (giấy xác nhận y tế, báo giá, lịch trình...):</p>
+            <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={pickFiles} className="text-xs" />
+            {files.length > 0 && (
+              <ul className="mt-1 space-y-0.5">
+                {files.map((x, i) => (
+                  <li key={i} className="flex items-center justify-between text-xs">
+                    <span className="truncate">☐ {x.name} ({(x.size / 1024 / 1024).toFixed(1)}MB)</span>
+                    <button type="button" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} className="text-red-500 px-1">✕</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <input value={driveUrl} onChange={e => setDriveUrl(e.target.value)} placeholder="Hoặc dán link Google Drive (file lớn)"
+              className="w-full bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500 py-0.5 mt-2 text-xs" style={ink} />
+          </div>
+
+          <p className="mt-8 mb-1 font-bold text-center">XÁC NHẬN & PHÊ DUYỆT</p>
+          <div className="grid gap-3 text-center text-xs" style={{ gridTemplateColumns: `repeat(${Math.min(5, sigCols)}, minmax(0, 1fr))` }}>
+            <div>
+              <p className="font-bold">{tpl === 'nghiphep' ? 'Người làm đơn' : 'Người đề xuất'}</p>
+              <p className="italic text-blue-600">(Ký & ghi rõ họ tên)</p>
+              <p className="mt-8 font-semibold">{currentUser.name}</p>
+              <p className="text-gray-500">Ngày: {dateText}</p>
+            </div>
+            {tpl === 'nghiphep' && (
+              <div>
+                <p className="font-bold">Người nhận bàn giao</p>
+                <p className="italic text-blue-600">(Ký & ghi rõ họ tên)</p>
+                <p className="mt-8 font-semibold">{f.handoverId ? nameOf(f.handoverId) : '…………'}</p>
+                <p className="text-gray-500">Ngày: ……/……/……</p>
+              </div>
+            )}
+            {(approverIds.length > 0 ? approverIds : ['']).map((id, i) => (
+              <div key={i}>
+                <p className="font-bold">{roleOf(i)}</p>
+                <p className="italic text-blue-600">&nbsp;</p>
+                <p className="mt-8 font-semibold">{id ? nameOf(id) : '…………'}</p>
+                <p className="text-gray-500">Ngày: ……/……/……</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="max-w-[860px] mx-auto mb-4 bg-white shadow-xl p-6 text-[13px] space-y-4" style={ink}>
+          <p className="font-bold">Luồng phê duyệt</p>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">1. Trưởng bộ phận / Quản lý đơn vị {myManagers.length > 0 ? '(quản lý phòng ban của bạn)' : ''} *</label>
+            <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
+              {myManagers.length === 0 && <option value="">-- Chọn người duyệt --</option>}
+              {myManagers.length > 0
+                ? myManagers.map(u => <option key={u.id} value={u.id}>{u.name} — {u.department}</option>)
+                : (
+                  <>
+                    {TEAMS.map(t => {
+                      const members = users.filter(u => u.id !== currentUser.id && u.teamId === t.id)
+                      return members.length === 0 ? null : (
+                        <optgroup key={t.id} label={`${t.emoji} ${t.name}`}>
+                          {members.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+                        </optgroup>
+                      )
+                    })}
+                  </>
+                )}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Người duyệt tiếp theo: <span dangerouslySetInnerHTML={{ __html: cfg.hint }} /> (duyệt theo thứ tự trong danh sách)</label>
+            <ApproverPicker users={users} excludeIds={[currentUser.id, recipientId]} value={extraApprovers} onChange={setExtraApprovers} />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Luồng phê duyệt</label>
+            <select value={approvalMode} onChange={e => setApprovalMode(e.target.value as 'seq' | 'par')} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
+              <option value="seq">Nối tiếp (lần lượt)</option>
+              <option value="par">Song song (cùng lúc)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div className="shrink-0 px-4 py-3 flex items-center justify-end gap-3" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
+        {error && <span className="text-xs text-red-600 mr-auto">{error}</span>}
+        <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600">Hủy</button>
+        <button type="button" onClick={submit} disabled={saving}
+          className="px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40"
+          style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
+          {saving ? 'Đang gửi...' : 'Gửi đề xuất'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------- Bản xem / duyệt ----------
+function ProposalFormDocView({ p, users, currentUserId, onClose, canAct, onApprove, onReject, onRequestReview }: {
+  p: Proposal; users: User[]; currentUserId: string; onClose: () => void; canAct: boolean
+  onApprove: (note: string) => Promise<void>; onReject: (note: string) => Promise<void>; onRequestReview: (note: string) => Promise<void>
+}) {
+  const f: Record<string, any> = p.formData ?? {}
+  const tpl = (f.tpl as FormTpl) in FORM_TPL ? (f.tpl as FormTpl) : 'muasam'
+  const cfg = FORM_TPL[tpl]
+  const [steps, setSteps] = useState<{ id: string; approverId: string; order: number; status: string; decidedAt?: string; note?: string }[]>([])
+  const [busy, setBusy] = useState(false)
+  const [myNote, setMyNote] = useState('')
+  const [warn, setWarn] = useState('')
+  const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? ''
+  const fmt = (d?: string) => (d ? new Date(d).toLocaleString('vi-VN') : '')
+
+  useEffect(() => {
+    let alive = true
+    supabase.from('proposal_steps').select('*').eq('proposal_id', p.id).order('step_order').then(({ data }: any) => {
+      if (!alive) return
+      setSteps((data ?? []).map((s: any) => ({ id: s.id, approverId: s.approver_id, order: s.step_order, status: s.status, decidedAt: s.decided_at ?? undefined, note: s.note ?? undefined })))
+    })
+    return () => { alive = false }
+  }, [p.id, p.status, p.recipientId])
+
+  const flow = steps.length > 0 ? steps : [{
+    id: 'legacy', approverId: p.recipientId, order: 1,
+    status: p.status === 'approved' ? 'approved' : p.status === 'rejected' ? 'rejected' : 'pending',
+    decidedAt: undefined as string | undefined, note: undefined as string | undefined,
+  }]
+  const STATUS: Record<string, string> = {
+    approved: '✓ Đã duyệt', pending: 'Chờ duyệt', waiting: 'Chưa đến lượt', rejected: '✕ Từ chối', revision: '🔁 Yêu cầu xem xét lại', skipped: 'Bỏ qua',
+  }
+  const STATUS_COLOR: Record<string, string> = {
+    approved: '#059669', pending: '#b45309', waiting: '#6b7280', rejected: '#dc2626', revision: '#b45309', skipped: '#6b7280',
+  }
+  const roleOf = (i: number) => cfg.roles[i] ?? `Người duyệt ${i + 1}`
+  const ink = { color: '#111827' }
+  const isReview = p.status === 'rejected' && !!p.rejectedReason?.startsWith('[REVIEW]')
+  const requester = users.find(u => u.id === p.submittedBy)
+  const dateText = new Date(p.createdAt).toLocaleDateString('vi-VN')
+  const sigCols = (tpl === 'nghiphep' ? 2 : 1) + flow.length
+
+  const act = async (fn: (note: string) => Promise<void>, needNote = false) => {
+    if (needNote && !myNote.trim()) { setWarn('Hãy ghi ý kiến của bạn vào ô dưới tên bạn ở cuối văn bản.'); return }
+    setWarn(''); setBusy(true)
+    try { await fn(myNote.trim()) } finally { setBusy(false) }
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
+      <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
+        <span className="text-sm font-bold text-gray-800">{cfg.icon} {cfg.title.charAt(0) + cfg.title.slice(1).toLowerCase()} {p.code ?? ''}</span>
+        <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {isReview && (
+          <div className="max-w-[860px] mx-auto mt-4 rounded-lg px-4 py-3 text-sm" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d' }}>
+            🔁 <b>Người duyệt yêu cầu xem xét lại:</b> {(p.rejectedReason ?? '').replace('[REVIEW]', '').trim()}
+          </div>
+        )}
+        <div className="max-w-[860px] mx-auto my-4 bg-white shadow-xl p-6 sm:p-10 text-[13px] leading-relaxed" style={{ ...ink, fontFamily: '"Times New Roman", Times, serif' }}>
+          <FormDocBody tpl={tpl} f={f} set={() => {}} ro users={users} requester={requester} code={p.code} dateText={f.dateText ?? dateText} />
+
+          {((p.attachments ?? []).length > 0 || p.driveUrl) && (
+            <div className="mt-4">
+              <p className="font-bold text-xs mb-1">Tài liệu đính kèm:</p>
+              <div className="flex flex-col gap-1 items-start">
+                {(p.attachments ?? []).map(a => (
+                  <button key={a.path} type="button" onClick={() => openProposalFile(a.path)} className="text-xs underline text-blue-600">📎 {a.name}</button>
+                ))}
+                {p.driveUrl && <a href={p.driveUrl} target="_blank" rel="noopener noreferrer" className="text-xs underline text-blue-600">📁 Xem tài liệu đính kèm trên Drive</a>}
+              </div>
+            </div>
+          )}
+
+          <p className="mt-8 mb-1 font-bold text-center">XÁC NHẬN & PHÊ DUYỆT</p>
+          <div className="grid gap-3 text-center text-xs" style={{ gridTemplateColumns: `repeat(${Math.min(5, sigCols)}, minmax(0, 1fr))` }}>
+            <div>
+              <p className="font-bold">{tpl === 'nghiphep' ? 'Người làm đơn' : 'Người đề xuất'}</p>
+              <p className="italic text-blue-600">(Ký & ghi rõ họ tên)</p>
+              <p className="mt-8 font-semibold">{nameOf(p.submittedBy)}</p>
+              <p className="text-gray-500">Ngày: {dateText}</p>
+            </div>
+            {tpl === 'nghiphep' && (
+              <div>
+                <p className="font-bold">Người nhận bàn giao</p>
+                <p className="italic text-blue-600">(Ký & ghi rõ họ tên)</p>
+                <p className="mt-8 font-semibold">{nameOf(f.handoverId)}</p>
+                <p className="text-gray-500">Ngày: ……/……/……</p>
+              </div>
+            )}
+            {flow.map((s, i) => {
+              const mine = canAct && s.approverId === currentUserId && s.status === 'pending'
+              return (
+                <div key={s.id}>
+                  <p className="font-bold">{roleOf(i)}</p>
+                  <p className="italic text-blue-600">&nbsp;</p>
+                  <p className="mt-8 font-semibold">{nameOf(s.approverId)}</p>
+                  <p className="font-semibold" style={{ color: STATUS_COLOR[s.status] ?? '#6b7280' }}>{STATUS[s.status] ?? s.status}</p>
+                  {s.decidedAt && <p className="text-gray-500">Ngày: {fmt(s.decidedAt)}</p>}
+                  {mine ? (
+                    <textarea value={myNote} onChange={e => setMyNote(e.target.value)} rows={3}
+                      placeholder="Ý kiến của bạn (VD: cần bổ sung báo giá...)"
+                      className="mt-2 w-full text-xs border border-amber-300 rounded p-1.5 outline-none focus:border-amber-500 bg-amber-50" style={ink} />
+                  ) : (
+                    s.note && <p className="mt-1 italic" style={{ color: s.status === 'revision' ? '#b45309' : '#374151' }}>“{s.note}”</p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          {p.status === 'rejected' && p.rejectedReason && !isReview && (
+            <p className="mt-6 text-xs text-red-600">Lý do từ chối: {p.rejectedReason}</p>
+          )}
+        </div>
+      </div>
+
+      <div className="shrink-0 px-4 py-3 flex items-center justify-end gap-3" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
+        {warn && <span className="text-xs text-red-600 mr-auto">{warn}</span>}
+        <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600">Đóng</button>
+        {canAct && (
+          <>
+            <button type="button" disabled={busy} onClick={() => act(async n => { await onReject(n) })}
+              className="px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-40" style={{ background: '#fee2e2', color: '#dc2626' }}>Từ chối</button>
+            <button type="button" disabled={busy} onClick={() => act(onRequestReview, true)}
+              className="px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-40" style={{ background: '#fef3c7', color: '#b45309' }}>🔁 Yêu cầu xem xét lại</button>
+            <button type="button" disabled={busy} onClick={() => act(onApprove)}
+              className="px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40" style={{ background: '#059669' }}>✓ Duyệt</button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 
 function ProposalGroupPicker({ onPick, onBack, onClose }: { onPick: (g: string) => void; onBack: () => void; onClose: () => void }) {
   const opts: [string, string, string][] = [
@@ -20403,8 +21140,8 @@ function ProposalTracker({ proposals, users, approvals, kindTab, isMyTurn, onOpe
                   <td className={`${td} font-mono`} style={cellBorder}>{p.code ?? '—'}</td>
                   <td className={td} style={cellBorder}>
                     <button type="button" onClick={() => onOpenDetail(p)} className="text-left font-semibold underline" style={{ color: '#7c3aed' }}>{p.title}</button>
-                    {(p.kind === 'totrinh' || p.kind === 'dntt') && (
-                      <button type="button" onClick={() => onOpenDoc(p)} title={p.kind === 'dntt' ? 'Xem đề nghị thanh toán' : 'Xem tờ trình'} className="ml-2">📄</button>
+                    {(p.kind === 'totrinh' || p.kind === 'dntt' || isFormDoc(p)) && (
+                      <button type="button" onClick={() => onOpenDoc(p)} title={p.kind === 'dntt' ? 'Xem đề nghị thanh toán' : isFormDoc(p) ? 'Xem văn bản' : 'Xem tờ trình'} className="ml-2">📄</button>
                     )}
                   </td>
                   <td className={td} style={cellBorder}>{groupOf(p)}</td>
@@ -20580,7 +21317,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   const code = raw.trim().toUpperCase()
   const target = proposals.find(x => (x.code ?? '').toUpperCase() === code)
   if (!target) { alert(`Không tìm thấy tờ trình ${code}, hoặc bạn không có quyền xem.`); return }
-  if (target.kind === 'totrinh' || target.kind === 'dntt') { setDetailProposal(null); setDocProposal(target) }
+  if (target.kind === 'totrinh' || target.kind === 'dntt' || isFormDoc(target)) { setDetailProposal(null); setDocProposal(target) }
   else { setDocProposal(null); setDetailProposal(target) }
   }
     // Dashboard bấm vào một tờ trình: mở thẳng chi tiết (tờ trình/DNTT mở bản văn bản, đề xuất mở chi tiết)
@@ -20588,7 +21325,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
     if (!openProposalId) return
     const target = proposals.find(x => x.id === openProposalId)
     if (!target) return   // dữ liệu chưa tải xong, effect sẽ chạy lại khi proposals đổi
-    if (target.kind === 'totrinh' || target.kind === 'dntt') { setDetailProposal(null); setDocProposal(target) }
+    if (target.kind === 'totrinh' || target.kind === 'dntt' || isFormDoc(target)) { setDetailProposal(null); setDocProposal(target) }
     else { setDocProposal(null); setDetailProposal(target) }
     clearOpenProposalId?.()
   }, [openProposalId, proposals])
@@ -20815,10 +21552,10 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
       <p className="text-xs mb-3 leading-relaxed" style={{ color: 'var(--text-muted)' }}>{p.description}</p>
       <button type="button" onClick={() => setDetailProposal(p)}
         className="text-xs font-semibold mb-3 underline" style={{ color: '#7c3aed' }}>🔍 Xem chi tiết</button>
-      {(p.kind === 'totrinh' || p.kind === 'dntt') && (
+      {(p.kind === 'totrinh' || p.kind === 'dntt' || isFormDoc(p)) && (
         <button type="button" onClick={() => setDocProposal(p)}
           className="text-xs font-semibold mb-3 ml-4 underline" style={{ color: '#059669' }}>
-          {p.kind === 'dntt' ? '📄 Xem đề nghị thanh toán' : '📄 Xem tờ trình'}
+          {p.kind === 'dntt' ? '📄 Xem đề nghị thanh toán' : isFormDoc(p) ? '📄 Xem văn bản' : '📄 Xem tờ trình'}
         </button>
       )}
       {p.status === 'rejected' && p.rejectedReason && (
@@ -20965,7 +21702,11 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
         <ProposalGroupPicker onPick={g => setCreateGroup(g)} onBack={() => setCreateKind(null)}
           onClose={() => { setShowModal(false); setCreateKind(null); setCreateGroup(null) }} />
       )}
-      {showModal && createKind === 'dexuat' && createGroup && createGroup !== 'Đề nghị thanh toán' && (
+      {showModal && createKind === 'dexuat' && createGroup && FORM_TPL_BY_GROUP[createGroup] && (
+        <ProposalFormDocForm tpl={FORM_TPL_BY_GROUP[createGroup]} currentUser={currentUser} users={users}
+          onClose={() => { setShowModal(false); setCreateKind(null); setCreateGroup(null) }} />
+      )}
+      {showModal && createKind === 'dexuat' && createGroup && createGroup !== 'Đề nghị thanh toán' && !FORM_TPL_BY_GROUP[createGroup] && (
         <ProposalModal kind="dexuat" initialGroup={createGroup === 'Khác' ? '' : createGroup} currentUser={currentUser} users={users}
           onClose={() => { setShowModal(false); setCreateKind(null); setCreateGroup(null) }} />
       )}
@@ -20992,7 +21733,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
           onReject: async (note: string) => { await handleReject(cur, note) },
           onRequestReview: async (note: string) => { await handleRequestReview(cur, note) },
         }
-        return cur.kind === 'dntt' ? <ProposalDnttView {...common} /> : <ProposalDocView {...common} />
+        return cur.kind === 'dntt' ? <ProposalDnttView {...common} /> : isFormDoc(cur) ? <ProposalFormDocView {...common} /> : <ProposalDocView {...common} />
       })()}
       {editingProposal && (
         <ProposalModal currentUser={currentUser} users={users} editingProposal={editingProposal} onClose={() => setEditingProposal(null)} />
