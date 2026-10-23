@@ -4534,7 +4534,7 @@
 
 //                   ) : task.creationApproval === 'pending' ? (
 //                     <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#fbbf2422', color: '#d97706' }}>
-//                       ⏳ Chờ nhận: quản lý duyệt thì task mới chuyển sang Đang xử lý
+//                       ⏳ Chờ quản lý duyệt task này mới được làm
 //                     </span>
 
 //                   ) : task.creationApproval === 'rejected' ? (
@@ -11328,7 +11328,7 @@ interface Task {
   crossDeptRejected?: boolean
   crossDeptRejectedReason?: string
   crossDeptRejectedBy?: string
-  creationApproval?: 'draft' | 'pending' | 'approved' | 'rejected'
+  creationApproval?: 'pending' | 'approved' | 'rejected'
   creationApprovedBy?: string
   creationApprovedAt?: string
   creationRejectedReason?: string
@@ -12396,34 +12396,23 @@ const handleSignIn = async () => {
   )
 }
 // ===== Nhóm trạng thái task cho Dashboard =====
-type TaskBucket =
-  | 'new'
-  | 'receive'
-  | 'processing'
-  | 'pending'
-  | 'completed'
-  | 'closed'
+type TaskBucket = 'received' | 'processing' | 'pending' | 'completed' | 'closed'
 
-const BUCKET_META: Record<
-  TaskBucket,
-  { label: string; color: string }
-> = {
-  new: { label: 'New', color: '#6b7280' },
-  receive: { label: 'Receive', color: '#d97706' },
+const BUCKET_META: Record<TaskBucket, { label: string; color: string }> = {
+  received: { label: 'Received', color: '#6b7280' },
   processing: { label: 'In-process', color: '#2563eb' },
-  pending: { label: 'Pending', color: '#9333ea' },
+  pending: { label: 'Pending', color: '#d97706' },
   completed: { label: 'Completed', color: '#059669' },
-  closed: { label: 'Closed', color: '#7c3aed' },
+  closed: { label: 'Close', color: '#7c3aed' },
 }
 
-// Mỗi task thuộc đúng 1 nhóm: New -> Receive -> In process -> Complete -> Close
+// Mỗi task thuộc đúng 1 nhóm
 const statusBucket = (t: Task): TaskBucket => {
-  if (t.status === 'completed') return 'closed'                                     // quản lý đã đóng
-  if (t.workStatus === 'complete' || t.status === 'submitted') return 'completed'   // nhân viên đã nộp, chờ quản lý đóng
-  if (t.creationApproval === 'pending') return 'receive'                            // đã Submit, chờ quản lý duyệt cho làm
-  if (t.creationApproval === 'draft' || t.creationApproval === 'rejected') return 'new'
-  if (t.workStatus === 'processing' || t.workStatus === 'pending' || t.status === 'in-progress') return 'processing'
-  return 'new'                                                                      // quản lý giao, chưa bắt đầu
+  if (t.status === 'completed') return 'closed'                                     // quản lý đã duyệt
+  if (t.workStatus === 'complete' || t.status === 'submitted') return 'completed'   // đã làm xong / đã nộp, chờ quản lý đóng
+  if (t.workStatus === 'pending') return 'pending'
+  if (t.workStatus === 'processing' || t.status === 'in-progress') return 'processing'
+  return 'received'
 }
 
 // Ô Completed: tính theo nhân viên báo (complete_issue).
@@ -13322,10 +13311,8 @@ function TaskViewFlow({ task, tasks, users, currentUser, readOnly = false, initi
   const [stage, setStage] = useState<'phieu' | 'detail'>(initialStage)
   const live = tasks.find(t => t.id === task.id) ?? task   // luôn dùng bản mới nhất
   const canApprove = !readOnly && canApproveSelfTask(live, currentUser, users)
-  const isOwnDraft = isDraftLike(live) && live.createdBy === currentUser.id
-  const canEdit = !readOnly && !!onEdit && (isOwnDraft || (currentUser.role === 'manager' &&
-    (live.createdBy === currentUser.id || live.assignedTo.some(id => users.find(u => u.id === id)?.teamId === currentUser.teamId))))
-  const canSubmit = !readOnly && isOwnDraft
+  const canEdit = !readOnly && !!onEdit && currentUser.role === 'manager' &&
+    (live.createdBy === currentUser.id || live.assignedTo.some(id => users.find(u => u.id === id)?.teamId === currentUser.teamId))
   const edit = readOnly ? undefined : onEdit
   const openCard = readOnly ? undefined : onOpenInTasks
 
@@ -13333,15 +13320,15 @@ function TaskViewFlow({ task, tasks, users, currentUser, readOnly = false, initi
     <TaskDetailModal task={live} users={users} currentUser={currentUser} canApprove={canApprove} canEdit={canEdit}
       onClose={() => setStage('detail')} onEdit={edit} onOpenInTasks={openCard} />
   ) : (
-    <TaskDetailPage task={live} users={users} currentUser={currentUser} canApprove={canApprove} canEdit={canEdit} canSubmit={canSubmit}
+    <TaskDetailPage task={live} users={users} currentUser={currentUser} canApprove={canApprove} canEdit={canEdit}
       onClose={onClose} onOpenPhieu={() => setStage('phieu')} onEdit={edit} onOpenInTasks={openCard} />
   )
 }
 
 type FlowStep = { label: string; who: string; status: 'done' | 'current' | 'rejected' | 'wait' | 'skip'; at?: string; note?: string }
 
-function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSubmit = false, onClose, onOpenPhieu, onEdit, onOpenInTasks }: {
-  task: Task; users: User[]; currentUser: User; canApprove: boolean; canEdit: boolean; canSubmit?: boolean
+function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, onClose, onOpenPhieu, onEdit, onOpenInTasks }: {
+  task: Task; users: User[]; currentUser: User; canApprove: boolean; canEdit: boolean
   onClose: () => void; onOpenPhieu: () => void; onEdit?: () => void; onOpenInTasks?: () => void
 }) {
   const f: any = task.formData ?? {}
@@ -13352,7 +13339,9 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSubm
   const fmtD = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN') : '—')
   const pri = PRIORITY_CONFIG[task.priority]
   const bucket = BUCKET_META[statusBucket(task)]
-  const statusText = bucket.label
+  const statusText = task.creationApproval === 'pending' ? '⏳ Chờ quản lý duyệt'
+    : task.creationApproval === 'rejected' ? '❌ Bị từ chối'
+    : bucket.label
 
   // Phòng ban: của người phụ trách / hỗ trợ / phòng ban nhận (nếu giao chéo); không có thì lấy phòng ban người tạo
   const teamIds = Array.from(new Set(
@@ -13378,11 +13367,9 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSubm
     steps.push({
       label: 'Quản lý duyệt cho làm',
       who: task.creationApprovedBy ? nameOf(task.creationApprovedBy) : 'Quản lý phòng ban',
-      status: noApprover ? 'skip' : task.creationApproval === 'pending' ? 'current' : isDraftLike(task) ? 'wait' : 'done',
+      status: noApprover ? 'skip' : task.creationApproval === 'pending' ? 'current' : task.creationApproval === 'rejected' ? 'rejected' : 'done',
       at: task.creationApprovedAt,
-      note: noApprover ? 'Không cần duyệt'
-        : isDraftLike(task) ? (task.creationRejectedReason ? `Trả về Mới: ${task.creationRejectedReason}` : 'Task đang ở Mới, chưa Submit')
-        : undefined,
+      note: noApprover ? 'Không cần duyệt' : task.creationRejectedReason,
     })
   }
   if (task.crossDeptPending || task.crossDeptRejected || task.targetTeamId) {
@@ -13415,7 +13402,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSubm
   const add = (at: string | undefined, text: string) => { if (at) events.push({ at, text }) }
   add(task.createdAt, `${nameOf(task.createdBy)} ${task.selfCreated ? 'tự tạo task' : 'giao task'}`)
   if (task.creationApproval === 'approved' && task.creationApprovedBy) add(task.creationApprovedAt, `${nameOf(task.creationApprovedBy)} duyệt cho làm`)
-  if (isDraftLike(task) && task.creationRejectedReason) add(task.creationApprovedAt, `↩️ ${nameOf(task.creationApprovedBy)} từ chối, trả về Mới: ${task.creationRejectedReason}`)
+  if (task.creationApproval === 'rejected') add(task.creationApprovedAt, `${nameOf(task.creationApprovedBy)} từ chối task${task.creationRejectedReason ? `: ${task.creationRejectedReason}` : ''}`)
   add(task.ticketReceivedAt, `🔧 Ticket Received: ${task.ticketReceivedText ?? ''}`)
   add(task.startedAt, `▶️ Bắt đầu làm (${names(task.assignedTo)})`)
   add(task.ticketInProcessAt, `🔧 Ticket In-process: ${task.ticketInProcessText ?? ''}`)
@@ -13461,10 +13448,6 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSubm
             {canEdit && onEdit && (
               <button type="button" onClick={onEdit} className={btn}
                 style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>✏️ Sửa</button>
-            )}
-            {canSubmit && (
-              <button type="button" onClick={() => submitDraftTask(task, currentUser, users)} className={`${btn} text-white`}
-                style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>📤 Submit</button>
             )}
             {canApprove && (
               <>
@@ -13619,7 +13602,9 @@ function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, onClos
   const fmtD = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN') : '—')
   const pri = PRIORITY_CONFIG[task.priority]
   const bucket = BUCKET_META[statusBucket(task)]
-  const statusText = bucket.label
+  const statusText = task.creationApproval === 'pending' ? '⏳ Chờ quản lý duyệt'
+    : task.creationApproval === 'rejected' ? '❌ Bị từ chối'
+    : bucket.label
   const rows: TaskDocRow[] = Array.isArray(f.rows) ? f.rows : []
   const costRows: TaskCostRow[] = Array.isArray(f.costRows) ? f.costRows : []
   const costTotal = costRows.reduce((s, r) => s + taskCostAmount(r), 0)
@@ -13766,6 +13751,7 @@ const myTasks = tasks.filter(t =>
   const myTasksInRange = myTasks.filter(t => matchDateFilter(t, dateFilter))
   const bucketCount = (b: TaskBucket, issue?: boolean) =>
     myTasksInRange.filter(t =>
+      (!isTaskGated(t) || needMyApproval(t)) &&   // task chờ duyệt: chỉ người duyệt mới thấy trong Received
       statusBucket(t) === b &&
       (issue === undefined || taskHadIssue(t) === issue)
     ).length
@@ -13775,7 +13761,7 @@ const myTasks = tasks.filter(t =>
   const toggleBucket = (b: TaskBucket) => setBucketFilter(f => (f === b ? 'all' : b))
   const shown = bucketFilter === 'all'
     ? pending
-    : myTasks.filter(t => statusBucket(t) === bucketFilter)
+    : myTasks.filter(t => (!isTaskGated(t) || needMyApproval(t)) && statusBucket(t) === bucketFilter)
 
   const tableRows = shown
     .filter(t => matchDateFilter(t, dateFilter))
@@ -13846,8 +13832,8 @@ const myTasks = tasks.filter(t =>
 
             {/* Trạng thái task của tôi */}
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 items-start mb-4">
-              <StatusStatCard icon="📥" label="Received" color={BUCKET_META.receive.color} total={bucketCount('receive')}
-                active={bucketFilter === 'receive'} onClick={() => toggleBucket('receive')} />
+              <StatusStatCard icon="📥" label="Received" color={BUCKET_META.received.color} total={bucketCount('received')}
+                active={bucketFilter === 'received'} onClick={() => toggleBucket('received')} />
               <StatusStatCard icon="⚙️" label="In-process" color={BUCKET_META.processing.color} total={bucketCount('processing')}
                 active={bucketFilter === 'processing'} onClick={() => toggleBucket('processing')} />
               <StatusStatCard icon="⏸" label="Pending" color={BUCKET_META.pending.color} total={bucketCount('pending')}
@@ -14512,31 +14498,7 @@ function MultiUserSelect({ label, options, selected, onToggle, placeholder = 'Ch
 //==================== TASKS COMMENTS =====================
 //==================== TASKS COMMENTS =====================
 // ===== Task nhân viên tự tạo phải được quản lý duyệt trước khi làm =====
-// Chưa được làm: đang ở New (nháp / bị trả về) hoặc Receive (chờ quản lý duyệt)
-const isTaskGated = (t: Task) => t.creationApproval === 'draft' || t.creationApproval === 'pending' || t.creationApproval === 'rejected'
-// New: nháp hoặc bị trả về (rejected là dữ liệu cũ)
-const isDraftLike = (t: Task) => t.creationApproval === 'draft' || t.creationApproval === 'rejected'
-// Task nháp chỉ người tạo thấy, quản lý chỉ thấy sau khi nhân viên bấm Submit
-const canSeeTaskStage = (t: Task, userId: string) => !isDraftLike(t) || t.createdBy === userId
-
-// Nhân viên bấm Submit: New -> Receive
-async function submitDraftTask(task: Task, user: User, users: User[]) {
-  const approvers = getTaskApproverIds(task.createdBy, task.projectManager, users)
-  if (approvers.length === 0) {
-    alert('Chưa có quản lý nào để duyệt (cùng phòng ban hoặc quản lý được chọn). Hãy chọn Quản lý (PM) trong task rồi Submit lại.')
-    return
-  }
-  const { error } = await supabase.from('tasks').update({
-    creation_approval: 'pending', creation_rejected_reason: null,
-  }).eq('id', task.id).in('creation_approval', ['draft', 'rejected'])
-  if (error) { alert('Không Submit được task: ' + error.message); return }
-  for (const mgrId of approvers) {
-    await supabase.from('notifications').insert({
-      message: `📥 ${user.name} đã Submit task [${task.taskCode ?? task.title}] và đang chờ bạn duyệt trước khi làm: ${task.title}`,
-      target_user_id: mgrId, link_task_id: task.id,
-    })
-  }
-}
+const isTaskGated = (t: Task) => t.creationApproval === 'pending' || t.creationApproval === 'rejected'
 
 // Những người được quyền duyệt: quản lý cùng phòng ban với người tạo + quản lý được chọn làm PM của task
 const getTaskApproverIds = (creatorId: string, projectManagerIds: string[], users: User[]) => {
@@ -14576,17 +14538,15 @@ async function approveSelfTask(task: Task, approver: User) {
 }
 
 async function rejectSelfTask(task: Task, approver: User) {
-  const reason = window.prompt('Lý do từ chối (người tạo sẽ thấy lý do và sửa lại):') ?? ''
+  const reason = window.prompt('Lý do từ chối (người tạo sẽ thấy lý do này):') ?? ''
   if (reason.trim() === '' && !window.confirm('Bạn chưa nhập lý do, vẫn muốn từ chối?')) return
   const { error } = await supabase.from('tasks').update({
-    creation_approval: 'draft',   // trả về New
-    creation_approved_by: approver.id,
-    creation_approved_at: new Date().toISOString(),
-    creation_rejected_reason: reason.trim() || null,
+    creation_approval: 'rejected', creation_approved_by: approver.id,
+    creation_approved_at: new Date().toISOString(), creation_rejected_reason: reason.trim() || null,
   }).eq('id', task.id).eq('creation_approval', 'pending')
   if (error) { alert('Không từ chối được task: ' + error.message); return }
   await supabase.from('notifications').insert({
-    message: `↩️ ${approver.name} đã từ chối task [${task.taskCode ?? task.title}] và trả về New${reason.trim() ? `: ${reason.trim()}` : ''}. Bạn sửa lại rồi bấm Submit nhé`,
+    message: `❌ ${approver.name} đã từ chối task [${task.taskCode ?? task.title}] bạn tự tạo${reason.trim() ? `: ${reason.trim()}` : ''}. Hãy sửa lại rồi gửi duyệt lại`,
     target_user_id: task.createdBy, link_task_id: task.id,
   })
 }
@@ -14658,13 +14618,11 @@ function TaskCommentsPanel({ taskId, currentUser, users }: { taskId: string; cur
 }
 
 const TRACKER_STATUS: Record<string, [string, string, string]> = {
-  new: ['Mới', '#6b728022', '#6b7280'],
-  receive: ['Chờ nhận', '#fbbf2422', '#d97706'],
-  received: ['Đã nhận', '#3b82f622', '#2563eb'],
-  processing: ['Đang xử lý', '#f59e0b22', '#b45309'],
-  pending: ['Tạm hoãn', '#8b5cf622', '#7c3aed'],
-  complete: ['Hoàn tất', '#34d39922', '#059669'],
-  closed: ['Đã đóng', '#64748b22', '#64748b'],
+  received: ['Receive', '#3b82f622', '#2563eb'],
+  processing: ['In process', '#f59e0b22', '#b45309'],
+  pending: ['Pending', '#8b5cf622', '#7c3aed'],
+  complete: ['Complete', '#34d39922', '#059669'],
+  closed: ['Closed', '#64748b22', '#64748b'],
 }
 const TRACKER_PRIORITY: Record<string, string> = { P1: '#dc2626', P2: '#ea580c', P3: '#ca8a04', P4: '#16a34a' }
 
@@ -15453,7 +15411,7 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
   const td = 'px-2 py-3 text-xs align-middle'
   const cols = [3, 11, 4, 20, 10, 6, 17, 9, 5, 5, 10]  // % của khung: vừa khung, không cuộn ngang
   // Trạng thái dùng cùng nhóm với các thẻ lọc (Received, In-process, Pending, Completed, Close)
-  const toTracker: Record<TaskBucket, string> = { new: 'new', receive: 'receive', processing: 'processing', pending: 'pending', completed: 'complete', closed: 'closed' }
+  const toTracker: Record<TaskBucket, string> = { received: 'received', processing: 'processing', pending: 'pending', completed: 'complete', closed: 'closed' }
 
   return (
     <div className="w-full min-w-0 rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
@@ -15480,7 +15438,9 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
           )}
           {tasks.map((t, i) => {
             const over = isSlaOverdue(t) || !!t.isLocked
-            const st: [string, string, string] = TRACKER_STATUS[toTracker[statusBucket(t)]] ?? TRACKER_STATUS.received
+            const st: [string, string, string] = isTaskGated(t)
+              ? ['⏳ Chờ duyệt', '#fbbf2422', '#d97706']
+              : (TRACKER_STATUS[toTracker[statusBucket(t)]] ?? TRACKER_STATUS.received)
             const pics = t.assignedTo.map(userOf).filter(Boolean) as User[]
             const pri = PRIORITY_CONFIG[t.priority]
             return (
@@ -15664,7 +15624,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     ? users
     : users.filter(u => u.teamId === currentUser.teamId)
 
-  const isCountable = (t: Task) => canSeeTaskStage(t, currentUser.id)
+  const isCountable = (t: Task) => !isTaskGated(t) || canApproveSelfTask(t, currentUser, users)
 
 const scoped = tasks.filter(t => {
     const isMyTask = t.assignedTo.includes(currentUser.id) || (t.selfCreated && t.createdBy === currentUser.id) || t.supporters.includes(currentUser.id) || t.projectManager.includes(currentUser.id)
@@ -15679,7 +15639,6 @@ const scoped = tasks.filter(t => {
       ? (isMyTask || t.createdBy === currentUser.id || assignees.some(a => a.teamId === currentUser.teamId) || isCrossDeptForMyDept)
       : (isMyTask && !t.crossDeptRejected)
     if (!inScope) return false
-    if (!canSeeTaskStage(t, currentUser.id)) return false   // task New (nháp) chỉ người tạo thấy
     if (search.trim() && !t.title.toLowerCase().includes(search.trim().toLowerCase()) && !t.description.toLowerCase().includes(search.trim().toLowerCase())) return false
     return true
   })
@@ -16019,10 +15978,12 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
     }
 
     if (editingTask) {
+      const resubmit = editingTask.creationApproval === 'rejected' && editingTask.selfCreated && editingTask.createdBy === currentUser.id
       await supabase.from('tasks').update({
         title: finalTitle, company: form.company || null, description: form.description, exp_reward: form.expReward,
         assigned_to: form.assignedTo, project_manager: form.projectManager, supporters: form.supporters,
         start_date: form.startDate, due_date: form.dueDate,
+        ...(resubmit ? { creation_approval: 'pending', creation_rejected_reason: null } : {}),
         category: form.category, priority: form.priority,
         important: form.important, urgent: form.urgent, is_team_project: form.isTeamProject,
               drive_folder_created: form.driveFolderCreated,
@@ -16030,6 +15991,14 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       sla_level: form.slaLevel || null,
       form_data: cleanTaskDoc(form.doc),
     }).eq('id', editingTask.id)
+    if (resubmit) {
+      for (const mgrId of getTaskApproverIds(currentUser.id, form.projectManager, users)) {
+        await supabase.from('notifications').insert({
+          message: `🔁 ${currentUser.name} đã chỉnh sửa và gửi duyệt lại task [${editingTask.taskCode ?? finalTitle}]`,
+          target_user_id: mgrId, link_task_id: editingTask.id,
+        })
+      }
+    }
   } else {
       const creatingForSelf = !isManager || selfMode
       const needsApproval = creatingForSelf && currentUser.role === 'employee'
@@ -16056,7 +16025,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         category: form.category, priority: form.priority, self_created: creatingForSelf,
         important: form.important, urgent: form.urgent, is_team_project: form.isTeamProject,
         cross_dept_pending: isCrossDept,
-        creation_approval: needsApproval ? 'draft' : 'approved',   // nhân viên tự tạo: New, bấm Submit mới gửi quản lý
+        creation_approval: needsApproval ? 'pending' : 'approved',
         target_team_id: targetTeamId,
         drive_folder_created: !creatingForSelf && form.driveFolderCreated,
         drive_folder_name: (!creatingForSelf && form.driveFolderCreated) ? (form.driveFolderName.trim() || null) : null,
@@ -16094,7 +16063,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
             })
           }
         }
-      } else if (creatingForSelf && !needsApproval) {
+      } else if (creatingForSelf) {
         const taskContent = form.description.trim() || form.title
         for (const mgrId of getTaskApproverIds(currentUser.id, form.projectManager, users)) {
           await supabase.from('notifications').insert({
@@ -16185,23 +16154,23 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         ))}
       </div> */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 items-start mb-5">
-        <StatusStatCard icon="🆕" label="Mới" color={BUCKET_META.new.color}
-          total={bucketCount('new')} active={filter === 'new'} onClick={() => toggleBucket('new')} />
-        <StatusStatCard icon="📥" label="Chờ nhận" color={BUCKET_META.receive.color}
-          total={bucketCount('receive')} active={filter === 'receive'} onClick={() => toggleBucket('receive')} />
-        <StatusStatCard icon="⚙️" label="Đang xử lý" color={BUCKET_META.processing.color}
+        <StatusStatCard icon="📥" label="Received" color={BUCKET_META.received.color}
+          total={bucketCount('received')} active={filter === 'received'} onClick={() => toggleBucket('received')} />
+        <StatusStatCard icon="⚙️" label="In-process" color={BUCKET_META.processing.color}
           total={bucketCount('processing')} active={filter === 'processing'} onClick={() => toggleBucket('processing')} />
-        <StatusStatCard icon="✅" label="Hoàn tất" color={BUCKET_META.completed.color}
+        <StatusStatCard icon="⏸" label="Pending" color={BUCKET_META.pending.color}
+          total={bucketCount('pending')} active={filter === 'pending'} onClick={() => toggleBucket('pending')} />
+        <StatusStatCard icon="✅" label="Completed" color={BUCKET_META.completed.color}
           total={bucketCount('completed')} active={filter === 'completed'} onClick={() => toggleBucket('completed')}
           subs={[
-            { label: 'Hoàn tất có vấn đề', value: bucketCount('completed', true), color: '#dc2626' },
-            { label: 'Hoàn tất thành công', value: bucketCount('completed', false), color: '#059669' },
+            { label: 'Complete with issue', value: bucketCount('completed', true), color: '#dc2626' },
+            { label: 'Complete successful', value: bucketCount('completed', false), color: '#059669' },
           ]} />
-        <StatusStatCard icon="🔒" label="Đã đóng" color={BUCKET_META.closed.color}
+        <StatusStatCard icon="🔒" label="Close" color={BUCKET_META.closed.color}
           total={bucketCount('closed')} active={filter === 'closed'} onClick={() => toggleBucket('closed')}
           subs={[
-            { label: 'Đóng có vấn đề', value: bucketCount('closed', true), color: '#dc2626' },
-            { label: 'Đóng thành công', value: bucketCount('closed', false), color: '#059669' },
+            { label: 'Close with issue', value: bucketCount('closed', true), color: '#dc2626' },
+            { label: 'Close successful', value: bucketCount('closed', false), color: '#059669' },
           ]} />
       </div>
 
@@ -16228,8 +16197,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
           const isTaskParticipant = task.assignedTo.includes(currentUser.id) || task.projectManager.includes(currentUser.id) || task.supporters.includes(currentUser.id) || task.createdBy === currentUser.id
           const isBeforeStartDate = !!task.startDate && task.startDate > new Date().toISOString().split('T')[0]
           const catColor = CATEGORY_COLORS[task.category] ?? '#6b7280'
-          const canEdit = (isManager && (task.createdBy === currentUser.id || assignees.some(a => a.teamId === currentUser.teamId)))
-            || (isDraftLike(task) && task.createdBy === currentUser.id)
+          const canEdit = isManager && (task.createdBy === currentUser.id || assignees.some(a => a.teamId === currentUser.teamId))
 
           const isFlashed = flashTaskId === task.id
           return (
@@ -16261,7 +16229,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                   </h3>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  {canEdit && !(task.creationApproval === 'pending' && canApproveSelfTask(task, currentUser, users)) && !(isDraftLike(task) && task.createdBy === currentUser.id) && (
+                  {canEdit && !(task.creationApproval === 'pending' && canApproveSelfTask(task, currentUser, users)) && (
                     <button onClick={() => openEditModal(task)}
                       className="hover:text-violet-400 text-[10px] mb-1 block ml-auto" style={{ color: 'var(--text-muted)' }}>
                       ✏️ Sửa
@@ -16448,34 +16416,15 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                       ⏳ Chờ quản lý duyệt task này mới được làm
                     </span>
 
-                  ) : isDraftLike(task) ? (
-                    <div className="flex flex-col gap-1.5 items-end max-w-[260px]">
-                      <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#6b728022', color: '#6b7280' }}>
-                        📝 Mới: chưa gửi quản lý
+                  ) : task.creationApproval === 'rejected' ? (
+                    <div className="flex flex-col gap-1 items-end max-w-[240px]">
+                      <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#f8717122', color: '#dc2626' }}>
+                        ❌ Quản lý {getUserById(task.creationApprovedBy)?.name ?? ''} từ chối
                       </span>
                       {task.creationRejectedReason && (
-                        <p className="text-xs text-right" style={{ color: '#dc2626' }}>
-                          ↩️ {getUserById(task.creationApprovedBy)?.name ?? 'Quản lý'} trả về: {task.creationRejectedReason}
-                        </p>
+                        <p className="text-xs text-right" style={{ color: 'var(--text-muted)' }}>Lý do: {task.creationRejectedReason}</p>
                       )}
-                      {task.createdBy === currentUser.id && (
-                        <>
-                          <p className="text-[10px] text-right" style={{ color: 'var(--text-muted)' }}>Bạn vẫn sửa được. Xong thì bấm Submit để gửi quản lý.</p>
-                          <div className="flex gap-1.5">
-                            {canEdit && (
-                              <button onClick={() => openEditModal(task)}
-                                className="px-3 py-1.5 rounded-lg text-xs font-bold"
-                                style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-                                ✏️ Sửa
-                              </button>
-                            )}
-                            <button onClick={() => submitDraftTask(task, currentUser, users)}
-                              className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
-                              📤 Submit
-                            </button>
-                          </div>
-                        </>
-                      )}
+                      <p className="text-[10px] text-right" style={{ color: 'var(--text-muted)' }}>Bấm "Sửa" rồi lưu để gửi duyệt lại</p>
                     </div>
 
                   ) : task.status === 'completed' ? (
@@ -22352,7 +22301,7 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
         category: 'development', priority, self_created: creatingForSelf,
         important: false, urgent: false, is_team_project: false,
         cross_dept_pending: false, target_team_id: null,
-        creation_approval: creatingForSelf && currentUser.role === 'employee' ? 'draft' : 'approved',
+        creation_approval: creatingForSelf && currentUser.role === 'employee' ? 'pending' : 'approved',
         drive_folder_created: false, drive_folder_name: null,
       }).select('id').single()
       newTask = res.data; lastError = res.error
@@ -22379,7 +22328,7 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
         })
       }
     }
-    if (project.managerId && project.managerId !== currentUser.id && !notified.has(project.managerId) && !(creatingForSelf && currentUser.role === 'employee')) {
+    if (project.managerId && project.managerId !== currentUser.id && !notified.has(project.managerId)) {
       await supabase.from('notifications').insert({
         message: creatingForSelf
           ? `🎯 ${currentUser.name} vừa tự tạo task [${code}] ${where} và đang chờ bạn duyệt trước khi làm: ${title.trim()}`
@@ -22689,7 +22638,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
 
   const stateOf = (t: Task): [string, string] => {
     if (t.creationApproval === 'pending') return ['⏳ Chờ duyệt tạo task', '#d97706']
-    if (isDraftLike(t)) return ['📝 Mới (chưa gửi)', '#6b7280']
+    if (t.creationApproval === 'rejected') return ['❌ Bị từ chối', '#dc2626']
     if (t.status === 'completed') return ['✅ Hoàn thành', '#059669']
     if (t.status === 'submitted') return ['📤 Chờ duyệt', '#7c3aed']
     const w = WORK_STATUS_CONFIG[t.workStatus ?? 'received']
@@ -23525,7 +23474,7 @@ export default function App() {
     crossDeptRejected: t.cross_dept_rejected ?? false,
     crossDeptRejectedReason: t.cross_dept_rejected_reason ?? undefined,
     crossDeptRejectedBy: t.cross_dept_rejected_by ?? undefined,
-    creationApproval: (t.creation_approval ?? 'approved') as 'draft' | 'pending' | 'approved' | 'rejected',
+    creationApproval: (t.creation_approval ?? 'approved') as 'pending' | 'approved' | 'rejected',
     creationApprovedBy: t.creation_approved_by ?? undefined,
     creationApprovedAt: t.creation_approved_at ?? undefined,
     creationRejectedReason: t.creation_rejected_reason ?? undefined,
