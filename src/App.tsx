@@ -13304,7 +13304,7 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, editingT
 }
 
 // ===== Luồng xem task: Phiếu giao task -> (đóng) -> Trang chi tiết công việc =====
-function TaskViewFlow({ task, tasks, users, currentUser, readOnly = false, initialStage = 'phieu', onClose, onEdit, onOpenInTasks }: {
+function TaskViewFlow({ task, tasks, users, currentUser, readOnly = false, initialStage = 'detail', onClose, onEdit, onOpenInTasks }: {
   task: Task; tasks: Task[]; users: User[]; currentUser: User; readOnly?: boolean; initialStage?: 'phieu' | 'detail'
   onClose: () => void; onEdit?: () => void; onOpenInTasks?: () => void
 }) {
@@ -15524,7 +15524,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   const [showModal, setShowModal] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [docTask, setDocTask] = useState<Task | null>(null)
-  const [docStage, setDocStage] = useState<'phieu' | 'detail'>('phieu')
+  const [docStage, setDocStage] = useState<'phieu' | 'detail'>('detail')
   const [openCommentsFor, setOpenCommentsFor] = useState<string | null>(null)
   const [openWorkNoteFor, setOpenWorkNoteFor] = useState<string | null>(null)
   const [openTicketFor, setOpenTicketFor] = useState<string | null>(null)
@@ -16179,7 +16179,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         <TaskDateFilter tasks={scoped} value={dateFilter} onChange={setDateFilter} />
       )}
       {viewMode === 'list' && !expandedRow && (
-        <TaskListTable tasks={visible} users={users} currentUser={currentUser} onOpen={t => { setDocStage('phieu'); setDocTask(t) }} />
+        <TaskListTable tasks={visible} users={users} currentUser={currentUser} onOpen={t => { setDocStage('detail'); setDocTask(t) }} />
       )}
       {viewMode === 'list' && expandedRow && (
         <button type="button" onClick={() => setExpandedRow(null)}
@@ -16223,7 +16223,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                     {task.important && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#fbbf2422', color: '#d97706' }}>🔥 Quan trọng</span>}
                   </div>
                   <h3 className="font-semibold text-sm cursor-pointer hover:underline" title="Xem phiếu giao task và chi tiết"
-                    onClick={() => { setDocStage('phieu'); setDocTask(task) }} style={{ color: 'var(--text-primary)' }}>
+                    onClick={() => { setDocStage('detail'); setDocTask(task) }} style={{ color: 'var(--text-primary)' }}>
                     {task.taskCode && <span className="font-mono text-[10px] mr-1.5" style={{ color: 'var(--text-muted)' }}>[{task.taskCode}]</span>}
                     {task.title}
                   </h3>
