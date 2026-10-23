@@ -12588,7 +12588,7 @@ function DashboardProposals({ proposals, currentUser, users, onOpen, onViewAll, 
   dateFilter?: DateFilterValue
 }) {
   const [myPendingIds, setMyPendingIds] = useState<string[]>([])
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'need' | 'pending' | 'approved' | 'rejected'>('all')
   const [noteFor, setNoteFor] = useState<Proposal | null>(null)
   useEffect(() => {
     const load = async () => {
@@ -12622,86 +12622,44 @@ function DashboardProposals({ proposals, currentUser, users, onOpen, onViewAll, 
   const nPending = base.filter(p => p.status === 'pending').length
   const nApproved = base.filter(p => p.status === 'approved').length
   const nRejected = base.filter(p => p.status === 'rejected').length
-  const list = base.filter(p => statusFilter === 'all' || p.status === statusFilter)
+  const isNeed = (p: Proposal) => needMeList.some(n => n.id === p.id)
+  const list =
+    statusFilter === 'need' ? needMeList
+    : statusFilter === 'all' ? [...needMeList, ...base.filter(p => !isNeed(p))]
+    : base.filter(p => p.status === statusFilter)
 
   const fmtShort = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '—')
   const th = 'px-2 py-2.5 text-[10px] font-bold uppercase tracking-wide text-left'
   const td = 'px-2 py-3 text-xs align-middle'
   const cols = [4, 14, 6, 26, 12, 14, 7, 7, 10]
 
-  const box = (key: 'pending' | 'approved' | 'rejected', icon: string, label: string, n: number, color: string) => {
-    const active = statusFilter === key
-    return (
-      <button type="button" onClick={() => setStatusFilter(f => (f === key ? 'all' : key))}
-        className="rounded-xl p-3 text-left transition-all"
-        style={{
-          background: 'var(--bg-panel)',
-          border: `1px solid ${active ? color : 'var(--border)'}`,
-          boxShadow: active ? `0 0 0 2px ${color}33` : 'none',
-        }}>
-        <div className="flex items-center justify-between">
-          <span className="text-lg">{icon}</span>
-          <span className="text-xl font-black" style={{ color, fontFamily: 'Rajdhani, sans-serif' }}>{n}</span>
-        </div>
-        <div className="text-xs font-semibold mt-1" style={{ color: 'var(--text-muted)' }}>{label}</div>
-      </button>
-    )
-  }
-
-  return (
+   return (
     <div className="rounded-xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
       <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
         <h3 className="font-bold flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
           📜 Tờ trình / Đề xuất của tôi
           <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: 'var(--border)', color: 'var(--text-muted)' }}>{base.length}</span>
         </h3>
-        <div className="flex items-center gap-2">
-          {needMe > 0 && (
-            <span className="text-[11px] px-2 py-0.5 rounded-full font-bold" style={{ background: '#7c3aed22', color: '#7c3aed' }}>
-              📥 {needMe} cái cần bạn duyệt
-            </span>
-          )}
-          <button type="button" onClick={onViewAll} className="text-xs font-semibold" style={{ color: '#8b5cf6' }}>Xem tất cả →</button>
-        </div>
+        <button type="button" onClick={onViewAll} className="text-xs font-semibold" style={{ color: '#8b5cf6' }}>Xem tất cả →</button>
       </div>
 
-      <div className="grid grid-cols-3 gap-3 mb-3">
-        {box('pending', '⏳', 'Chờ duyệt', nPending, '#d97706')}
-        {box('approved', '✅', 'Đã duyệt', nApproved, '#059669')}
-        {box('rejected', '❌', 'Từ chối / xem xét lại', nRejected, '#dc2626')}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 items-start mb-4">
+        <StatusStatCard icon="📥" label="Cần bạn duyệt" color="#7c3aed" total={needMe}
+          active={statusFilter === 'need'} onClick={() => setStatusFilter(f => (f === 'need' ? 'all' : 'need'))} />
+        <StatusStatCard icon="⏳" label="Chờ duyệt" color="#d97706" total={nPending}
+          active={statusFilter === 'pending'} onClick={() => setStatusFilter(f => (f === 'pending' ? 'all' : 'pending'))} />
+        <StatusStatCard icon="✅" label="Đã duyệt" color="#059669" total={nApproved}
+          active={statusFilter === 'approved'} onClick={() => setStatusFilter(f => (f === 'approved' ? 'all' : 'approved'))} />
+        <StatusStatCard icon="❌" label="Từ chối / xem xét lại" color="#dc2626" total={nRejected}
+          active={statusFilter === 'rejected'} onClick={() => setStatusFilter(f => (f === 'rejected' ? 'all' : 'rejected'))} />
       </div>
 
-      {/* Tờ trình đang chờ MÌNH duyệt, luôn hiện ở trên cùng */}
-      {needMeList.length > 0 && (
-        <div className="mb-3 rounded-lg overflow-hidden" style={{ border: '1px solid #7c3aed55', background: '#7c3aed0d' }}>
-          <p className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide" style={{ color: '#7c3aed' }}>📥 Cần bạn duyệt</p>
-          {needMeList.slice(0, 5).map(p => (
-            <button key={p.id} type="button" onClick={() => onOpen?.(p.id)}
-              className="w-full text-left px-3 py-2 flex items-center justify-between gap-3 hover:bg-[color:var(--bg-card-alt)]"
-              style={{ borderTop: '1px solid #7c3aed33' }}>
-              <div className="min-w-0">
-                <p className="text-sm truncate" style={{ color: 'var(--text-primary)' }}>
-                  <span className="font-mono text-[11px] mr-2" style={{ color: 'var(--text-muted)' }}>{p.code ?? ''}</span>{p.title}
-                </p>
-                <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                  {p.groupName ?? (p.kind === 'totrinh' ? 'Tờ trình' : 'Đề xuất')} · {new Date(p.createdAt).toLocaleDateString('vi-VN')}
-                </p>
-              </div>
-              <span className="px-2 py-0.5 rounded-lg text-[11px] font-bold whitespace-nowrap flex-shrink-0" style={{ background: '#7c3aed', color: '#fff' }}>Xem và duyệt</span>
-            </button>
-          ))}
-          {needMeList.length > 5 && (
-            <button type="button" onClick={onViewAll} className="w-full py-1.5 text-[11px] font-semibold" style={{ color: '#7c3aed', borderTop: '1px solid #7c3aed33' }}>
-              Còn {needMeList.length - 5} cái nữa, xem tất cả →
-            </button>
-          )}
-        </div>
-      )}
-
-      {mine.length === 0 ? (
-        needMe > 0 ? null : <p className="text-xs py-3 text-center" style={{ color: 'var(--text-muted)' }}>Bạn chưa gửi tờ trình hay đề xuất nào.</p>
-      ) : list.length === 0 ? (
-        <p className="text-xs py-3 text-center" style={{ color: 'var(--text-muted)' }}>Không có tờ trình / đề xuất nào trong bộ lọc này.</p>
+      {list.length === 0 ? (
+        <p className="text-xs py-3 text-center" style={{ color: 'var(--text-muted)' }}>
+          {statusFilter === 'need' ? 'Không có tờ trình nào đang chờ bạn duyệt.'
+            : mine.length === 0 && needMe === 0 ? 'Bạn chưa gửi tờ trình hay đề xuất nào.'
+            : 'Không có tờ trình / đề xuất nào trong bộ lọc này.'}
+        </p>
       ) : (
         <div className="w-full min-w-0 rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
           <table className="border-collapse" style={{ width: '100%', tableLayout: 'fixed' }}>
@@ -12717,16 +12675,20 @@ function DashboardProposals({ proposals, currentUser, users, onOpen, onViewAll, 
               {list.slice(0, statusFilter === 'all' && !dateActive ? 5 : 50).map((p, i) => {
                 const [label, bg, color] = chip(p)
                 const sender = users.find(u => u.id === p.submittedBy)
+                const need = isNeed(p)
                 return (
                   <tr key={p.id} onClick={() => onOpen?.(p.id)}
                     className="cursor-pointer transition-colors hover:bg-[color:var(--bg-card-alt)]"
-                    style={{ borderTop: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                    style={{ borderTop: '1px solid var(--border)', background: need ? '#7c3aed12' : undefined, color: 'var(--text-primary)' }}>
                     <td className={td} style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
-                    <td className={td}><div className="font-mono text-xs font-bold break-all">{p.code ?? '—'}</div></td>
+                    <td className={td}>
+                      <div className="font-mono text-xs font-bold break-all">{p.code ?? '—'}</div>
+                      {need && <div className="text-[10px] font-bold mt-0.5" style={{ color: '#7c3aed' }}>📥 Cần bạn duyệt</div>}
+                    </td>
                     <td className={`${td} font-bold`}>{p.company ? (COMPANY_CODES[p.company] ?? p.company) : '—'}</td>
                     <td className={td}><p className="text-sm font-semibold leading-snug break-words">{withCompanyPrefix(p.title, p.company)}</p></td>
                     <td className={td}>
-                      <span className="px-2 py-1 rounded-lg font-semibold" style={{ background: bg, color }}>{label}</span>
+                      <span className="inline-block px-2 py-1 rounded-lg font-semibold whitespace-nowrap" style={{ background: bg, color }}>{label}</span>
                     </td>
                     <td className={td}>
                       {sender ? <div className="flex items-center gap-1.5"><CharAvatar user={sender} size={20} /><span className="truncate">{sender.name}</span></div> : '—'}
