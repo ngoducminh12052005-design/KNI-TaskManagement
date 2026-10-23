@@ -12422,6 +12422,12 @@ const taskHadIssue = (t: Task) =>
     ? (t.closeResult ? t.closeResult === 'with_issue' : !!t.completeIssue)
     : !!t.completeIssue
 
+// Khung Dashboard: mỗi mục một màu riêng để dễ phân biệt
+const sectionFrame = (color: string) => ({
+  background: `color-mix(in srgb, ${color} 7%, var(--bg-panel))`,
+  border: `1px solid ${color}55`,
+  borderTop: `4px solid ${color}`,
+})
 function StatusStatCard({ icon, label, color, total, subs, active, onClick }: {
   icon: string; label: string; color: string; total: number
   subs?: { label: string; value: number; color: string }[]
@@ -12634,13 +12640,13 @@ function DashboardProposals({ proposals, currentUser, users, onOpen, onViewAll, 
   const cols = [4, 14, 6, 26, 12, 14, 7, 7, 10]
 
    return (
-    <div className="rounded-xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+    <div className="rounded-xl p-5" style={sectionFrame('#7c3aed')}>
       <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-        <h3 className="font-bold flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
+        <h3 className="font-bold flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: '#7c3aed' }}>
           📜 Tờ trình / Đề xuất của tôi
           <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: 'var(--border)', color: 'var(--text-muted)' }}>{base.length}</span>
         </h3>
-        <button type="button" onClick={onViewAll} className="text-xs font-semibold" style={{ color: '#8b5cf6' }}>Xem tất cả →</button>
+        <button type="button" onClick={onViewAll} className="text-xs font-semibold" style={{ color: '#7c3aed' }}>Xem tất cả →</button>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 items-start mb-4">
@@ -12769,13 +12775,13 @@ function DashboardProjects({ currentUser, users, onOpen, onViewAll }: {
   const cols = [4, 13, 6, 22, 11, 9, 12, 7, 7, 9]
 
   return (
-    <div className="rounded-xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+    <div className="rounded-xl p-5" style={sectionFrame('#0d9488')}>
       <div className="flex items-center justify-between mb-3">
-        <h3 className="font-bold flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
+        <h3 className="font-bold flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: '#0d9488' }}>
           🗂️ Dự án
           <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: 'var(--border)', color: 'var(--text-muted)' }}>{visible.length}</span>
         </h3>
-        <button type="button" onClick={onViewAll} className="text-xs font-semibold" style={{ color: '#8b5cf6' }}>Xem tất cả →</button>
+        <button type="button" onClick={onViewAll} className="text-xs font-semibold" style={{ color: '#0d9488' }}>Xem tất cả →</button>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 items-start mb-4">
         {([['planning', '📝'], ['active', '🚀'], ['on_hold', '⏸'], ['done', '✅'], ['closed', '🔒']] as const).map(([k, icon]) => (
@@ -12893,7 +12899,7 @@ function DashboardPeople({ currentUser, users, tasks, proposals }: { currentUser
   })
   const [selectedId, setSelectedId] = useState('')
   const team = TEAMS.find(t => t.id === currentUser.teamId)
-  const box = { background: 'var(--bg-panel)', border: '1px solid var(--border)' }
+  const box = sectionFrame('#ea580c')
 
   return (
     <div className="w-full min-w-0 rounded-xl p-4" style={box}>
@@ -13808,9 +13814,9 @@ const myTasks = tasks.filter(t =>
       <div className="grid grid-cols-1 gap-4 w-full min-w-0">
         <div className="space-y-4 w-full min-w-0">
                     {/* Task của tôi */}
-          <div className="rounded-xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+          <div className="rounded-xl p-5" style={sectionFrame('#2563eb')}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
+              <h3 className="font-bold flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: '#2563eb' }}>
                 ⚡ Task của tôi
                 {bucketFilter === 'all'
                   ? <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: 'var(--border)', color: 'var(--text-muted)' }}>{pending.length} chờ</span>
@@ -13820,7 +13826,7 @@ const myTasks = tasks.filter(t =>
                 {bucketFilter !== 'all' && (
                   <button type="button" onClick={() => setBucketFilter('all')} className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>✕ Bỏ lọc</button>
                 )}
-                <button type="button" onClick={() => setView('tasks')} className="text-xs font-semibold" style={{ color: '#8b5cf6' }}>Xem tất cả →</button>
+                <button type="button" onClick={() => setView('tasks')} className="text-xs font-semibold" style={{ color: '#2563eb' }}>Xem tất cả →</button>
               </div>
             </div>
 
