@@ -6845,6 +6845,13 @@ function ProposalAttachments({ p, users }: { p: Proposal; users: User[] }) {
     </div>
   )
 }
+// Tên chức danh ở phần ký của tờ trình: 1 Trưởng bộ phận, 2 Kế toán trưởng, 3 Giám đốc, người cuối (từ 4 người trở lên) là Ban Giám đốc
+const docRoleLabel = (i: number, n: number) => {
+  if (n >= 4 && i === n - 1) return 'Ban Giám đốc'
+  return ['Trưởng bộ phận', 'Kế toán trưởng', 'Giám đốc'][i] ?? `Người duyệt ${i + 1}`
+}
+// P1, P2 = duyệt song song; P3, P4 = duyệt nối tiếp
+const docModeOf = (priority: string): 'seq' | 'par' => (priority === 'P1' || priority === 'P2' ? 'par' : 'seq')
 type DocCostRow = { item: string; unit: string; qty: string; price: string; note: string }
 // Số < 1.000 coi như đơn vị "triệu" (dữ liệu cũ) -> đổi ra VNĐ đầy đủ
 const toVnd = (n: number) => {
@@ -6914,7 +6921,8 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
   const [driveUrl, setDriveUrl] = useState('')
   const [recipientId, setRecipientId] = useState(myManagers[0]?.id ?? '')
   const [extraApprovers, setExtraApprovers] = useState<string[]>([])
-  const [approvalMode, setApprovalMode] = useState<'seq' | 'par'>('seq')
+  const [priority, setPriority] = useState('P3')
+  const approvalMode = docModeOf(priority)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -6974,7 +6982,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
       amount: rowAmount(r),
     }))
     const formData = {
-      place, dateText, kinhGui: kinhGui.filter(s => s.trim()), canCu: canCu.filter(s => s.trim()),
+      priority, place, dateText, kinhGui: kinhGui.filter(s => s.trim()), canCu: canCu.filter(s => s.trim()),
       intro: intro.trim(), noiDung: noiDung.trim(), costRows: cleanRows, bangChu: docSoThanhChu(total),
       thongTinKhac: thongTinKhac.trim(), deNghi: deNghi.trim(),
     }
@@ -7146,7 +7154,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
           </div>
           {(approverIds.length > 0 ? approverIds : ['']).map((id, i) => (
             <div key={i}>
-              <p className="font-bold">{i === approverIds.length - 1 && approverIds.length > 1 ? 'Phê duyệt cuối cùng' : `Người duyệt ${i + 1}`}</p>
+              <p className="font-bold">{docRoleLabel(i, approverIds.length)}</p>
               <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
               <p className="mt-10 text-xs text-gray-500">{id ? nameOf(id) : '—'}</p>
             </div>
@@ -7157,7 +7165,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
       <div className="max-w-[860px] mx-auto mb-4 bg-white shadow-xl p-6 text-[13px] space-y-4" style={ink}>
         <p className="font-bold">Luồng phê duyệt</p>
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Người duyệt đầu tiên {myManagers.length > 0 ? '(quản lý phòng ban của bạn)' : ''} *</label>
+          <label className="block text-xs text-gray-500 mb-1">1. Trưởng bộ phận {myManagers.length > 0 ? '(quản lý phòng ban của bạn)' : ''} *</label>
           <select value={recipientId} disabled={myManagers.length === 1} onChange={e => setRecipientId(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white disabled:bg-gray-100" style={ink}>
             {myManagers.length === 0 && <option value="">-- Chọn người duyệt --</option>}
             {(myManagers.length > 0 ? myManagers : users.filter(u => u.id !== currentUser.id)).map(u => (
@@ -7166,15 +7174,20 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
           </select>
         </div>
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Người duyệt tiếp theo (không bắt buộc, duyệt theo thứ tự bạn tick)</label>
+          <label className="block text-xs text-gray-500 mb-1">Người duyệt tiếp theo, chọn lần lượt: <b>Kế toán trưởng</b>, <b>Giám đốc</b>… Người cuối cùng là <b>Ban Giám đốc</b> (thứ tự trong danh sách là thứ tự ký)</label>
           <ApproverPicker users={users} excludeIds={[currentUser.id, recipientId]} value={extraApprovers} onChange={setExtraApprovers} />
         </div>
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Luồng phê duyệt</label>
-          <select value={approvalMode} onChange={e => setApprovalMode(e.target.value as 'seq' | 'par')} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
-            <option value="seq">Nối tiếp (lần lượt)</option>
-            <option value="par">Song song (cùng lúc)</option>
+          <div>
+          <label className="block text-xs text-gray-500 mb-1">Mức độ ưu tiên *</label>
+          <select value={priority} onChange={e => setPriority(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
+            <option value="P1">P1 · Rất khẩn cấp</option>
+            <option value="P2">P2 · Khẩn cấp</option>
+            <option value="P3">P3 · Bình thường</option>
+            <option value="P4">P4 · Thấp</option>
           </select>
+          <p className="text-[11px] text-gray-500 mt-1">
+            {approvalMode === 'par' ? '⚡ P1, P2: các người duyệt được gửi cùng lúc (song song).' : '➡️ P3, P4: duyệt lần lượt từng người (nối tiếp).'}
+          </p>
         </div>
       </div>
 
@@ -7339,7 +7352,9 @@ function ProposalDocView({ p, users, currentUserId, onClose, canAct, onApprove, 
             </div>
           </div>
         )}
-
+        {f.priority && (
+          <p className="mt-6 text-xs text-gray-600">Mức độ: <b>{f.priority}</b> · {p.approvalMode === 'par' ? 'Duyệt song song' : 'Duyệt nối tiếp'}</p>
+        )}
         <div className="grid gap-4 mt-8 text-center" style={{ gridTemplateColumns: `repeat(${Math.min(4, 1 + flow.length)}, minmax(0, 1fr))` }}>
           <div>
             <p className="font-bold">Người lập tờ trình</p>
@@ -7351,7 +7366,7 @@ function ProposalDocView({ p, users, currentUserId, onClose, canAct, onApprove, 
             const mine = canAct && s.approverId === currentUserId && s.status === 'pending'
             return (
               <div key={s.id}>
-                <p className="font-bold">{i === flow.length - 1 && flow.length > 1 ? 'Phê duyệt cuối cùng' : `Người duyệt ${i + 1}`}</p>
+                <p className="font-bold">{docRoleLabel(i, flow.length)}</p>
                 <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
                 <p className="mt-8 font-semibold">{nameOf(s.approverId)}</p>
                 <p className="text-[11px] font-semibold" style={{ color: STATUS_COLOR[s.status] ?? '#6b7280' }}>{STATUS[s.status] ?? s.status}</p>
