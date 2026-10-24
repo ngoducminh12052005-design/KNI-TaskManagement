@@ -6900,7 +6900,28 @@ function docSoThanhChu(value: number): string {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
-
+// Chọn người ký theo 2 bước: chọn phòng ban trước, rồi mới hiện người trong phòng đó
+function DeptUserSelect({ users, excludeId, value, onChange }: {
+  users: User[]; excludeId: string; value: string; onChange: (id: string) => void
+}) {
+  const [teamId, setTeamId] = useState(() => users.find(u => u.id === value)?.teamId ?? '')
+  const members = users
+    .filter(u => u.id !== excludeId && u.teamId === teamId)
+    .sort((a, b) => (b.role === 'manager' ? 1 : 0) - (a.role === 'manager' ? 1 : 0))
+  const cls = 'w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white disabled:bg-gray-100'
+  return (
+    <div className="mt-4 space-y-1.5">
+      <select value={teamId} onChange={e => { setTeamId(e.target.value); onChange('') }} className={cls} style={{ color: '#111827' }}>
+        <option value="">-- Chọn phòng ban --</option>
+        {TEAMS.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
+      </select>
+      <select value={value} onChange={e => onChange(e.target.value)} disabled={!teamId} className={cls} style={{ color: '#111827' }}>
+        <option value="">{teamId ? '-- Chọn người ký --' : '(chọn phòng ban trước)'}</option>
+        {members.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+      </select>
+    </div>
+  )
+}
 function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void }) {
   const now = new Date()
   const dateText = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()}`
@@ -6922,6 +6943,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
   const [recipientId, setRecipientId] = useState(myManagers[0]?.id ?? '')
   const [kttId, setKttId] = useState('')                 // Kế toán trưởng
   const [gdId, setGdId] = useState('')                   // Giám đốc
+  const [gdCompany, setGdCompany] = useState('')         // Công ty của Giám đốc (chọn hoặc tự điền)
   const [bgdIds, setBgdIds] = useState<string[]>([])     // Ban Giám đốc KNI (chọn 1 hoặc nhiều người)
   const [priority, setPriority] = useState('P3')
   const approvalMode = docModeOf(priority)
@@ -6936,7 +6958,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
   const slots = [
     { role: 'Trưởng bộ phận', id: recipientId },
     { role: 'Kế toán trưởng', id: kttId },
-    { role: 'Giám đốc', id: gdId },
+    { role: gdCompany.trim() ? `Giám đốc ${gdCompany.trim()}` : 'Giám đốc', id: gdId },
     ...bgdIds.map(id => ({ role: 'Ban Giám đốc KNI', id })),
   ].filter((s, i, arr) => s.id && arr.findIndex(x => x.id === s.id) === i)
   const approverIds = slots.map(s => s.id)
@@ -7191,21 +7213,19 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
           <div>
             <p className="font-bold">Kế toán trưởng</p>
             <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
-            <select value={kttId} onChange={e => setKttId(e.target.value)} className={sel} style={ink}>
-              <option value="">-- Chọn người ký --</option>
-              {userOptions()}
-            </select>
+            <DeptUserSelect users={users} excludeId={currentUser.id} value={kttId} onChange={setKttId} />
           </div>
-
           <div>
             <p className="font-bold">Giám đốc</p>
-            <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
-            <select value={gdId} onChange={e => setGdId(e.target.value)} className={sel} style={ink}>
-              <option value="">-- Chọn người ký --</option>
-              {userOptions()}
-            </select>
+            <input list="gd-companies" value={gdCompany} onChange={e => setGdCompany(e.target.value)}
+              placeholder="Chọn công ty hoặc tự điền"
+              className="mt-1 w-full border-b border-dashed border-gray-300 bg-transparent outline-none text-center text-xs" style={ink} />
+            <datalist id="gd-companies">
+              {COMPANIES.map(c => <option key={c} value={c} />)}
+            </datalist>
+            <p className="font-bold text-xs mt-1">(Ký, ghi rõ họ tên)</p>
+            <DeptUserSelect users={users} excludeId={currentUser.id} value={gdId} onChange={setGdId} />
           </div>
-
           <div>
             <p className="font-bold">Ban Giám đốc KNI</p>
             <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
