@@ -4315,6 +4315,16 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [docTask, setDocTask] = useState<Task | null>(null)
   const [docStage, setDocStage] = useState<'phieu' | 'detail'>('detail')
+    // Vừa bấm "Tạo task" xong: tự mở thẳng trang chi tiết của task đó
+  const [openNewTaskId, setOpenNewTaskId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!openNewTaskId) return
+    const t = tasks.find(x => x.id === openNewTaskId)
+    if (!t) return                     // dữ liệu chưa tải về, effect sẽ chạy lại khi tasks đổi
+    setDocStage('detail')
+    setDocTask(t)
+    setOpenNewTaskId(null)
+  }, [openNewTaskId, tasks])
   const [openCommentsFor, setOpenCommentsFor] = useState<string | null>(null)
   const [openWorkNoteFor, setOpenWorkNoteFor] = useState<string | null>(null)
   const [openTicketFor, setOpenTicketFor] = useState<string | null>(null)
@@ -4821,6 +4831,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         drive_folder_name: (!creatingForSelf && form.driveFolderCreated) ? (form.driveFolderName.trim() || null) : null,
       }).select('id').single()
       const newTaskId = newTask?.id
+      if (newTaskId) setOpenNewTaskId(newTaskId)
 
       if (isManager && !selfMode) {
         const taskContent = form.description.trim() || form.title
