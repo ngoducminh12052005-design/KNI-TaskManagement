@@ -6915,10 +6915,12 @@ function DeptUserSelect({ users, excludeId, value, onChange }: {
         <option value="">-- Chọn phòng ban --</option>
         {TEAMS.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
       </select>
-      <select value={value} onChange={e => onChange(e.target.value)} disabled={!teamId} className={cls} style={{ color: '#111827' }}>
-        <option value="">{teamId ? '-- Chọn người ký --' : '(chọn phòng ban trước)'}</option>
-        {members.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
-      </select>
+      {teamId && (
+        <select value={value} onChange={e => onChange(e.target.value)} className={cls} style={{ color: '#111827' }}>
+          <option value="">-- Chọn người ký --</option>
+          {members.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+        </select>
+      )}
     </div>
   )
 }
