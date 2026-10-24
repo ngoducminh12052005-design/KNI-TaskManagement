@@ -6920,7 +6920,9 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
   const [files, setFiles] = useState<File[]>([])
   const [driveUrl, setDriveUrl] = useState('')
   const [recipientId, setRecipientId] = useState(myManagers[0]?.id ?? '')
-  const [extraApprovers, setExtraApprovers] = useState<string[]>([])
+  const [kttId, setKttId] = useState('')                 // Kế toán trưởng
+  const [gdId, setGdId] = useState('')                   // Giám đốc
+  const [bgdIds, setBgdIds] = useState<string[]>([])     // Ban Giám đốc KNI (chọn 1 hoặc nhiều người)
   const [priority, setPriority] = useState('P3')
   const approvalMode = docModeOf(priority)
   const [saving, setSaving] = useState(false)
@@ -6930,7 +6932,29 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
   const rowAmount = (r: DocCostRow) => toVnd((Number(r.qty) || 0) * (Number(r.price) || 0))
   const total = rows.reduce((s, r) => s + rowAmount(r), 0)
   const money = (n: number) => n.toLocaleString('vi-VN')
-  const approverIds = [recipientId, ...extraApprovers.filter(id => id !== recipientId)].filter(Boolean)
+  // Các ô ký cố định theo thứ tự duyệt. Ô nào chưa chọn người thì bỏ qua, trùng người thì giữ lần đầu.
+  const slots = [
+    { role: 'Trưởng bộ phận', id: recipientId },
+    { role: 'Kế toán trưởng', id: kttId },
+    { role: 'Giám đốc', id: gdId },
+    ...bgdIds.map(id => ({ role: 'Ban Giám đốc KNI', id })),
+  ].filter((s, i, arr) => s.id && arr.findIndex(x => x.id === s.id) === i)
+  const approverIds = slots.map(s => s.id)
+  const signRoles = slots.map(s => s.role)
+  const sel = 'mt-6 w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white'
+  const userOptions = () => (
+    <>
+      {TEAMS.map(t => {
+        const m = users.filter(u => u.id !== currentUser.id && u.teamId === t.id)
+        return m.length === 0 ? null : (
+          <optgroup key={t.id} label={`${t.emoji} ${t.name}`}>
+            {m.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+          </optgroup>
+        )
+      })}
+      {users.filter(u => u.id !== currentUser.id && !TEAMS.some(t => t.id === u.teamId)).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+    </>
+  )
 
   const line = 'w-full bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500 py-0.5'
   const ink = { color: '#111827' }
@@ -6982,7 +7006,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
       amount: rowAmount(r),
     }))
     const formData = {
-      priority, place, dateText, kinhGui: kinhGui.filter(s => s.trim()), canCu: canCu.filter(s => s.trim()),
+      priority, signRoles, place, dateText, kinhGui: kinhGui.filter(s => s.trim()), canCu: canCu.filter(s => s.trim()),
       intro: intro.trim(), noiDung: noiDung.trim(), costRows: cleanRows, bangChu: docSoThanhChu(total),
       thongTinKhac: thongTinKhac.trim(), deNghi: deNghi.trim(),
     }
@@ -7146,37 +7170,64 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
         )}
         <input value={driveUrl} onChange={e => setDriveUrl(e.target.value)} placeholder="Hoặc dán link Google Drive (file lớn)" className={`${line} mt-2 text-xs`} style={ink} />
 
-        <div className="grid gap-4 mt-8 text-center" style={{ gridTemplateColumns: `repeat(${Math.min(4, 1 + Math.max(approverIds.length, 1))}, minmax(0, 1fr))` }}>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-8 text-center">
           <div>
             <p className="font-bold">Người lập tờ trình</p>
             <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
             <p className="mt-10 text-xs text-gray-500">{currentUser.name}</p>
           </div>
-          {(approverIds.length > 0 ? approverIds : ['']).map((id, i) => (
-            <div key={i}>
-              <p className="font-bold">{docRoleLabel(i, approverIds.length)}</p>
-              <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
-              <p className="mt-10 text-xs text-gray-500">{id ? nameOf(id) : '—'}</p>
+
+          <div>
+            <p className="font-bold">Trưởng bộ phận</p>
+            <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+            <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className={sel} style={ink}>
+              {myManagers.length === 0 && <option value="">-- Chọn người ký --</option>}
+              {(myManagers.length > 0 ? myManagers : users.filter(u => u.id !== currentUser.id)).map(u => (
+                <option key={u.id} value={u.id}>{u.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <p className="font-bold">Kế toán trưởng</p>
+            <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+            <select value={kttId} onChange={e => setKttId(e.target.value)} className={sel} style={ink}>
+              <option value="">-- Chọn người ký --</option>
+              {userOptions()}
+            </select>
+          </div>
+
+          <div>
+            <p className="font-bold">Giám đốc</p>
+            <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+            <select value={gdId} onChange={e => setGdId(e.target.value)} className={sel} style={ink}>
+              <option value="">-- Chọn người ký --</option>
+              {userOptions()}
+            </select>
+          </div>
+
+          <div>
+            <p className="font-bold">Ban Giám đốc KNI</p>
+            <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+            <div className="mt-6 space-y-1">
+              {bgdIds.map(id => (
+                <div key={id} className="flex items-center justify-between gap-1 text-xs text-gray-700">
+                  <span className="truncate">{nameOf(id)}</span>
+                  <button type="button" onClick={() => setBgdIds(prev => prev.filter(x => x !== id))} className="text-red-500">✕</button>
+                </div>
+              ))}
+              <select value="" onChange={e => { if (e.target.value) setBgdIds(prev => [...prev, e.target.value]) }}
+                className="w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white" style={ink}>
+                <option value="">+ Chọn thêm người</option>
+                {userOptions()}
+              </select>
             </div>
-          ))}
+          </div>
+          </div>
         </div>
-      </div>
 
       <div className="max-w-[860px] mx-auto mb-4 bg-white shadow-xl p-6 text-[13px] space-y-4" style={ink}>
         <p className="font-bold">Luồng phê duyệt</p>
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">1. Trưởng bộ phận {myManagers.length > 0 ? '(quản lý phòng ban của bạn)' : ''} *</label>
-          <select value={recipientId} disabled={myManagers.length === 1} onChange={e => setRecipientId(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white disabled:bg-gray-100" style={ink}>
-            {myManagers.length === 0 && <option value="">-- Chọn người duyệt --</option>}
-            {(myManagers.length > 0 ? myManagers : users.filter(u => u.id !== currentUser.id)).map(u => (
-              <option key={u.id} value={u.id}>{u.name} — {u.department}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Người duyệt tiếp theo, chọn lần lượt: <b>Kế toán trưởng</b>, <b>Giám đốc</b>… Người cuối cùng là <b>Ban Giám đốc</b> (thứ tự trong danh sách là thứ tự ký)</label>
-          <ApproverPicker users={users} excludeIds={[currentUser.id, recipientId]} value={extraApprovers} onChange={setExtraApprovers} />
-        </div>
           <div>
           <label className="block text-xs text-gray-500 mb-1">Mức độ ưu tiên *</label>
           <select value={priority} onChange={e => setPriority(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
@@ -7366,7 +7417,7 @@ function ProposalDocView({ p, users, currentUserId, onClose, canAct, onApprove, 
             const mine = canAct && s.approverId === currentUserId && s.status === 'pending'
             return (
               <div key={s.id}>
-                <p className="font-bold">{docRoleLabel(i, flow.length)}</p>
+                <p className="font-bold">{(Array.isArray(f.signRoles) && f.signRoles[i]) || docRoleLabel(i, flow.length)}</p>
                 <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
                 <p className="mt-8 font-semibold">{nameOf(s.approverId)}</p>
                 <p className="text-[11px] font-semibold" style={{ color: STATUS_COLOR[s.status] ?? '#6b7280' }}>{STATUS[s.status] ?? s.status}</p>
