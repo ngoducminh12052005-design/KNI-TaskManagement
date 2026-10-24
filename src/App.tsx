@@ -6894,7 +6894,7 @@ function docSoThanhChu(value: number): string {
 }
 
 
-function ProposalDocForm({ currentUser, users, onClose }: { currentUser: User; users: User[]; onClose: () => void }) {
+function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void }) {
   const now = new Date()
   const dateText = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()}`
   const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)
@@ -7004,6 +7004,7 @@ function ProposalDocForm({ currentUser, users, onClose }: { currentUser: User; u
     }
     setSaving(false)
     if (insertError) { setError(insertError.message); return }
+    if (data?.id) onCreated?.(data.id)
 
     const notifyIds = approvalMode === 'par' ? approverIds : [recipientId]
     for (const id of notifyIds) {
@@ -7426,7 +7427,7 @@ function vnMoneyWords(input: number): string {
 type DnttRow = { desc: string; unit: string; qty: string; price: string; invoice: string }
 const DNTT_ROLES = ['Trưởng bộ phận/ OM/ Quản lý đơn vị', 'Kế toán trưởng', 'Ban Giám đốc/ Ban Giám Hiệu']
 
-function ProposalDnttForm({ currentUser, users, onClose }: { currentUser: User; users: User[]; onClose: () => void }) {
+function ProposalDnttForm({ currentUser, users, onClose, onCreated }: { currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void }) {
   const now = new Date()
   const dateText = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`
   const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)
@@ -7531,6 +7532,7 @@ function ProposalDnttForm({ currentUser, users, onClose }: { currentUser: User; 
     }
     setSaving(false)
     if (insertError) { setError(insertError.message); return }
+    if (data?.id) onCreated?.(data.id)
 
     const notifyIds = approvalMode === 'par' ? approverIds : [recipientId]
     for (const id of notifyIds) {
@@ -8099,7 +8101,7 @@ function FormDocBody({ tpl, f, set, ro, users, requester, code, dateText }: {
 }
 
 // ---------- Form tạo mới ----------
-function ProposalFormDocForm({ tpl, currentUser, users, onClose }: { tpl: FormTpl; currentUser: User; users: User[]; onClose: () => void }) {
+function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { tpl: FormTpl; currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void }) {
   const cfg = FORM_TPL[tpl]
   const now = new Date()
   const dateText = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`
@@ -8212,6 +8214,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose }: { tpl: FormTp
     }
     setSaving(false)
     if (insertError) { setError(insertError.message); return }
+    if (data?.id) onCreated?.(data.id)
 
     const notifyIds = approvalMode === 'par' ? approverIds : [recipientId]
     for (const id of notifyIds) {
@@ -9348,7 +9351,7 @@ async function generateProposalCode(userId: string): Promise<string> {
   return `${prefix}${String((count ?? 0) + 1).padStart(2, '0')}`
 }
 
-function ProposalModal({ currentUser, users, editingProposal, onClose, kind = 'dexuat', initialGroup = '' }: { currentUser: User; users: User[]; editingProposal?: Proposal | null; onClose: () => void; kind?: 'dexuat' | 'totrinh'; initialGroup?: string }) {
+function ProposalModal({ currentUser, users, editingProposal, onClose, onCreated, kind = 'dexuat', initialGroup = '' }: { currentUser: User; users: User[]; editingProposal?: Proposal | null; onClose: () => void; onCreated?: (id: string) => void; kind?: 'dexuat' | 'totrinh'; initialGroup?: string }) {
   const [title, setTitle] = useState(editingProposal?.title ?? '')
   const [description, setDescription] = useState(editingProposal?.description ?? '')
   const [driveUrl, setDriveUrl] = useState(editingProposal?.driveUrl ?? '')
@@ -9456,6 +9459,7 @@ function ProposalModal({ currentUser, users, editingProposal, onClose, kind = 'd
       }
       setSaving(false)
       if (insertError) { setError(insertError.message); return }
+      if (data?.id) onCreated?.(data.id)
 
       await supabase.from('notifications').insert({
         message: `📜 ${currentUser.name} vừa trình tờ trình "${title.trim()}" cho bạn`,
@@ -10095,8 +10099,17 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   onJoinDiscussion: (p: Proposal) => void
   highlightProposalId?: string | null; clearHighlightProposalId?: () => void
   openProposalId?: string | null; clearOpenProposalId?: () => void
-
 }) {
+    // Vừa tạo xong tờ trình / đề xuất: mở thẳng trang chi tiết của nó
+  const [openNewId, setOpenNewId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!openNewId) return
+    const target = proposals.find(x => x.id === openNewId)
+    if (!target) return   // dữ liệu chưa tải về, effect sẽ chạy lại khi proposals đổi
+    if (target.kind === 'totrinh' || target.kind === 'dntt' || isFormDoc(target)) { setDetailProposal(null); setDocProposal(target) }
+    else { setDocProposal(null); setDetailProposal(target) }
+    setOpenNewId(null)
+  }, [openNewId, proposals])
   const [showModal, setShowModal] = useState(false)
   const [forwardingProposal, setForwardingProposal] = useState<Proposal | null>(null)
   const [editingProposal, setEditingProposal] = useState<Proposal | null>(null)
@@ -10514,19 +10527,19 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
           onClose={() => { setShowModal(false); setCreateKind(null); setCreateGroup(null) }} />
       )}
       {showModal && createKind === 'dexuat' && createGroup && FORM_TPL_BY_GROUP[createGroup] && (
-        <ProposalFormDocForm tpl={FORM_TPL_BY_GROUP[createGroup]} currentUser={currentUser} users={users}
+          <ProposalFormDocForm tpl={FORM_TPL_BY_GROUP[createGroup]} currentUser={currentUser} users={users} onCreated={setOpenNewId}
           onClose={() => { setShowModal(false); setCreateKind(null); setCreateGroup(null) }} />
       )}
       {showModal && createKind === 'dexuat' && createGroup && createGroup !== 'Đề nghị thanh toán' && !FORM_TPL_BY_GROUP[createGroup] && (
-        <ProposalModal kind="dexuat" initialGroup={createGroup === 'Khác' ? '' : createGroup} currentUser={currentUser} users={users}
+          <ProposalModal kind="dexuat" initialGroup={createGroup === 'Khác' ? '' : createGroup} currentUser={currentUser} users={users} onCreated={setOpenNewId}
           onClose={() => { setShowModal(false); setCreateKind(null); setCreateGroup(null) }} />
       )}
       {showModal && createKind === 'dexuat' && createGroup === 'Đề nghị thanh toán' && (
-        <ProposalDnttForm currentUser={currentUser} users={users}
+          <ProposalDnttForm currentUser={currentUser} users={users} onCreated={setOpenNewId}
           onClose={() => { setShowModal(false); setCreateKind(null); setCreateGroup(null) }} />
       )}
       {showModal && createKind === 'totrinh' && (
-        <ProposalDocForm currentUser={currentUser} users={users}
+          <ProposalDocForm currentUser={currentUser} users={users} onCreated={setOpenNewId}
           onClose={() => { setShowModal(false); setCreateKind(null); setCreateGroup(null) }} />
       )}
               {detailProposal && (
@@ -10853,7 +10866,7 @@ function ProjectMemberPicker({ users, excludeIds, value, onChange }: {
 }
 
 function ProjectForm({ currentUser, users, onClose, onCreated }: {
-  currentUser: User; users: User[]; onClose: () => void; onCreated: () => void
+  currentUser: User; users: User[]; onClose: () => void; onCreated: (id: string) => void
 }) {
   const [name, setName] = useState('')
   const [company, setCompany] = useState('')
@@ -10923,7 +10936,7 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
     const memberIds = Array.from(new Set([managerId, ...(ownerId ? [ownerId] : []), ...members]))
     await supabase.from('project_members').insert(memberIds.map(uid => ({ project_id: created.id, user_id: uid, role: uid === managerId ? 'manager' : 'member' })))
     setSaving(false)
-    onCreated()
+    onCreated(created.id)
     onClose()
   }
 
@@ -11803,7 +11816,7 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
         : <ProjectListTable projects={visible} tasks={tasks} users={users} currentUser={currentUser}
             canSee={canSee} onOpen={p => setOpenId(p.id)} />}
 
-      {showForm && <ProjectForm currentUser={currentUser} users={users} onClose={() => setShowForm(false)} onCreated={load} />}
+      {showForm && <ProjectForm currentUser={currentUser} users={users} onClose={() => setShowForm(false)} onCreated={async (id) => { await load(); setOpenId(id) }} />}
       {open && <ProjectDetail project={open} users={users} tasks={tasks} proposals={proposals} currentUser={currentUser} canEdit={canEditProject(open)} onClose={() => setOpenId(null)} onChanged={load} onOpenTask={onOpenTask} onOpenProposal={onOpenProposal} />}
     </div>
   )
