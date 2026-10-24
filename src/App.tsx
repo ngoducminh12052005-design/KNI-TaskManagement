@@ -9154,8 +9154,8 @@ function ProposalPlanSection({ p, users, currentUser, flow }: {
     </section>
   )
 }
-function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revisions, onClose }: {
-  proposal: Proposal; users: User[]; currentUser: User; approvals: ProposalApproval[]; revisions: ProposalRevision[]; onClose: () => void
+function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revisions, onClose, onOpenDoc }: {
+  proposal: Proposal; users: User[]; currentUser: User; approvals: ProposalApproval[]; revisions: ProposalRevision[]; onClose: () => void; onOpenDoc?: () => void
 }) {
   const [steps, setSteps] = useState<{ id: string; approverId: string; order: number; status: string; note?: string; decidedAt?: string }[]>([])
   const userOf = (id?: string) => users.find(u => u.id === id)
@@ -9224,6 +9224,13 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
         <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
           {p.code ? `${p.code}: ` : ''}{p.title}
         </h2>
+        {onOpenDoc && (
+          <button type="button" onClick={onOpenDoc}
+            className="text-xs font-bold px-3 py-1.5 rounded-lg mb-2 mt-1"
+            style={{ background: '#05966922', color: '#059669', border: '1px solid #05966955' }}>
+            📄 Xem {p.kind === 'dntt' ? 'đề nghị thanh toán' : isFormDoc(p) ? 'văn bản' : 'tờ trình'}
+          </button>
+        )}
         <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>{p.kind === 'totrinh' ? 'Tờ trình' : (p.groupName ? `Đề xuất ${p.groupName.toLowerCase()}` : 'Đề xuất')}</p>
 
         <div className="grid md:grid-cols-3 gap-4">
@@ -10106,8 +10113,8 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
     if (!openNewId) return
     const target = proposals.find(x => x.id === openNewId)
     if (!target) return   // dữ liệu chưa tải về, effect sẽ chạy lại khi proposals đổi
-    if (target.kind === 'totrinh' || target.kind === 'dntt' || isFormDoc(target)) { setDetailProposal(null); setDocProposal(target) }
-    else { setDocProposal(null); setDetailProposal(target) }
+    setDocProposal(null)
+    setDetailProposal(target)   // luôn mở trang chi tiết; muốn xem giấy thì bấm "Xem tờ trình" trong đó
     setOpenNewId(null)
   }, [openNewId, proposals])
   const [showModal, setShowModal] = useState(false)
@@ -10546,6 +10553,9 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
         <ProposalDetailModal
           proposal={proposals.find(x => x.id === detailProposal.id) ?? detailProposal}
           users={users} currentUser={currentUser} approvals={proposalApprovals} revisions={proposalRevisions}
+          onOpenDoc={(detailProposal.kind === 'totrinh' || detailProposal.kind === 'dntt' || isFormDoc(detailProposal))
+            ? () => { const cur = proposals.find(x => x.id === detailProposal.id) ?? detailProposal; setDetailProposal(null); setDocProposal(cur) }
+            : undefined}
           onClose={() => setDetailProposal(null)} />
       )}
       {docProposal && (() => {
