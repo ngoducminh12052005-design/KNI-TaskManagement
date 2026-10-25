@@ -5845,7 +5845,7 @@ function RewardsView({ currentUser, redemptions, users }: { currentUser: User; r
         })}
       </div>
 
-      {currentUser.teamId === 't1c' && <RedemptionHistoryPanel users={users} refreshKey={redemptions.length} />}
+            {['t1c', 'hr', 'hr_main', 'it', 'it_main'].includes(currentUser.teamId) && <RedemptionHistoryPanel users={users} refreshKey={redemptions.length} />}
     </div>
   )
 }
