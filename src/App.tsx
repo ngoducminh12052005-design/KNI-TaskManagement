@@ -6927,8 +6927,9 @@ function DeptUserSelect({ users, excludeId, value, onChange }: {
   users: User[]; excludeId: string; value: string; onChange: (id: string) => void
 }) {
   const [teamId, setTeamId] = useState(() => users.find(u => u.id === value)?.teamId ?? '')
+  const deptIds = useDeptMemberIds(teamId)
   const members = users
-    .filter(u => u.id !== excludeId && u.teamId === teamId)
+    .filter(u => u.id !== excludeId && (u.teamId === teamId || deptIds.includes(u.id)))
     .sort((a, b) => (b.role === 'manager' ? 1 : 0) - (a.role === 'manager' ? 1 : 0))
   const cls = 'w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white disabled:bg-gray-100'
   return (
