@@ -1059,7 +1059,7 @@ const handleSignIn = async () => {
                 background: 'linear-gradient(135deg, #7c3aed, #f59e0b)',
                 boxShadow: '0 0 30px #7c3aed50',
               }}>
-              {loading ? 'ĐANG XỬ LÝ...' : 'VÀO GAME ⚡'}
+              {loading ? 'ĐANG XỬ LÝ...' : 'ĐĂNG NHẬP ⚡'}
             </button>
           </div>
         
@@ -1128,11 +1128,11 @@ const handleSignIn = async () => {
                 background: (name.trim() && email.trim() && password.trim() && agreedTerms) ? 'linear-gradient(135deg, #7c3aed, #f59e0b)' : '#1e1e3a',
                 boxShadow: (name.trim() && email.trim() && password.trim() && agreedTerms) ? '0 0 30px #7c3aed50' : 'none',
               }}>
-              {loading ? 'ĐANG XỬ LÝ...' : 'BẮT ĐẦU HÀNH TRÌNH ⚡'}
+              {loading ? 'ĐANG XỬ LÝ...' : 'TẠO TÀI KHOẢN ⚡'}
             </button>
           </div>
         )}
-        <p className="text-center text-gray-700 text-xs mt-4">WorkQuest v1.0 — Gamify Your Workday</p>
+        <p className="text-center text-gray-700 text-xs mt-4">KNI Task Management v1.0 — Hệ thống quản lý công việc nội bộ</p>
       </div>
     </div>
   )
