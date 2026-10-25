@@ -1733,12 +1733,13 @@ function DocPeoplePicker({ options, value, onChange, empty = 'Chưa chọn' }: {
   options: User[]; value: string[]; onChange: (v: string[]) => void; empty?: string
 }) {
   const [teamId, setTeamId] = useState('')
+  const deptIds = useDeptMemberIds(teamId)
   const [q, setQ] = useState('')
   const box = { background: '#ffffff', border: '1px solid #d1d5db', color: '#111827' }
   const nameOf = (id: string) => options.find(u => u.id === id)?.name ?? id
   const query = q.trim().toLowerCase()
   const pool = options.filter(u => !value.includes(u.id))
-  const shown = query ? pool.filter(u => u.name.toLowerCase().includes(query)) : teamId ? pool.filter(u => u.teamId === teamId) : []
+  const shown = query ? pool.filter(u => u.name.toLowerCase().includes(query)) : teamId ? pool.filter(u => u.teamId === teamId || deptIds.includes(u.id)) : []
   return (
     <div className="space-y-1.5">
       <div className="flex flex-wrap gap-1.5">
@@ -3204,6 +3205,7 @@ function MultiUserSelect({ label, options, selected, onToggle, placeholder = 'Ch
 }) {
   const [open, setOpen] = useState(false)
   const [teamId, setTeamId] = useState('')
+  const deptIds = useDeptMemberIds(teamId)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -3215,7 +3217,7 @@ function MultiUserSelect({ label, options, selected, onToggle, placeholder = 'Ch
   }, [])
 
   const teamsWithOptions = TEAMS.filter(t => options.some(u => u.teamId === t.id))
-  const visibleUsers = isDirector ? options.filter(u => u.teamId === teamId) : options
+  const visibleUsers = isDirector ? options.filter(u => u.teamId === teamId || deptIds.includes(u.id)) : options
 
   return (
     <div ref={ref} className="relative">
@@ -6908,6 +6910,18 @@ function docSoThanhChu(value: number): string {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
+// Lấy id những người được thêm vào phòng ban (kể cả phòng phụ như IT Main)
+function useDeptMemberIds(teamId: string): string[] {
+  const [ids, setIds] = useState<string[]>([])
+  useEffect(() => {
+    if (!teamId) { setIds([]); return }
+    let alive = true
+    supabase.from('department_members').select('user_id').eq('department_id', teamId)
+      .then(({ data }) => { if (alive) setIds((data ?? []).map((r: any) => r.user_id)) })
+    return () => { alive = false }
+  }, [teamId])
+  return ids
+}
 // Chọn người ký theo 2 bước: chọn phòng ban trước, rồi mới hiện người trong phòng đó
 function DeptUserSelect({ users, excludeId, value, onChange }: {
   users: User[]; excludeId: string; value: string; onChange: (id: string) => void
@@ -8807,6 +8821,7 @@ function ApproverPicker({ users, excludeIds, value, onChange, tone = 'light' }: 
   users: User[]; excludeIds: string[]; value: string[]; onChange: (v: string[]) => void; tone?: 'light' | 'dark'
 }) {
   const [teamId, setTeamId] = useState('')
+  const deptIds = useDeptMemberIds(teamId)
   const [q, setQ] = useState('')
   const dark = tone === 'dark'
   const box = dark
@@ -8818,7 +8833,7 @@ function ApproverPicker({ users, excludeIds, value, onChange, tone = 'light' }: 
   const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? ''
   const pool = users.filter(u => !excludeIds.includes(u.id) && !value.includes(u.id))
   const query = q.trim().toLowerCase()
-  const shown = (query ? pool.filter(u => u.name.toLowerCase().includes(query)) : teamId ? pool.filter(u => u.teamId === teamId) : [])
+  const shown = (query ? pool.filter(u => u.name.toLowerCase().includes(query)) : teamId ? pool.filter(u => u.teamId === teamId || deptIds.includes(u.id)) : [])
     .sort((a, b) => (b.role === 'manager' ? 1 : 0) - (a.role === 'manager' ? 1 : 0))
 
   const move = (i: number, dir: -1 | 1) => {
@@ -9847,6 +9862,7 @@ function ForwardApprovalModal({ proposal, currentUser, users, onClose }: {
   proposal: Proposal; currentUser: User; users: User[]; onClose: () => void
 }) {
   const [teamId, setTeamId] = useState('')
+  const deptIds = useDeptMemberIds(teamId)
   const [nextApproverId, setNextApproverId] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -9857,7 +9873,7 @@ function ForwardApprovalModal({ proposal, currentUser, users, onClose }: {
 
   // Sau khi chọn phòng ban, chỉ liệt kê quản lý của đúng phòng ban đó
   const managerCandidates = users.filter(u =>
-    u.role === 'manager' && u.teamId === teamId && u.id !== currentUser.id
+    u.role === 'manager' && (u.teamId === teamId || deptIds.includes(u.id)) && u.id !== currentUser.id
   )
 
   const handleTeamChange = (id: string) => {
@@ -10936,11 +10952,12 @@ function ProjectMemberPicker({ users, excludeIds, value, onChange }: {
   users: User[]; excludeIds: string[]; value: string[]; onChange: (v: string[]) => void
 }) {
   const [teamId, setTeamId] = useState('')
+  const deptIds = useDeptMemberIds(teamId)
   const [q, setQ] = useState('')
   const box = { background: '#ffffff', border: '1px solid #d1d5db', color: '#111827' }
   const pool = users.filter(u => !excludeIds.includes(u.id) && !value.includes(u.id))
   const query = q.trim().toLowerCase()
-  const shown = query ? pool.filter(u => u.name.toLowerCase().includes(query)) : teamId ? pool.filter(u => u.teamId === teamId) : []
+  const shown = query ? pool.filter(u => u.name.toLowerCase().includes(query)) : teamId ? pool.filter(u => u.teamId === teamId || deptIds.includes(u.id)) : []
   const teamName = (u?: User) => TEAMS.find(t => t.id === u?.teamId)?.name ?? u?.department ?? ''
   return (
     <div className="space-y-2">
