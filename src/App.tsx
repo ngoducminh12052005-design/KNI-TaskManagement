@@ -12326,6 +12326,14 @@ function UserAdminView({ currentUser, users }: { currentUser: User; users: User[
     position: u.position ?? '', line: u.internalLine ?? '', role: u.role, teamId: u.teamId, extra: extraOf(u.id),
   })
 
+  const removeUser = async (u: User) => {
+    if (u.id === currentUser.id) { setMsg('Bạn không thể tự xóa chính mình.'); return }
+    if (!window.confirm(`Xóa vĩnh viễn tài khoản của ${u.name} (${u.email ?? ''})? Không thể hoàn tác.`)) return
+    const res = await callAdminUsers({ action: 'delete', userId: u.id })
+    if (!res.ok) { setMsg(res.error ?? 'Không xóa được.'); return }
+    setMsg(''); load()
+  }
+
   const doReset = async () => {
     if (!resetFor) return
     if (resetPw.length < 8) { setResetMsg('Mật khẩu tạm tối thiểu 8 ký tự.'); return }
@@ -12410,6 +12418,9 @@ function UserAdminView({ currentUser, users }: { currentUser: User; users: User[
                     <td className={`${td} whitespace-nowrap`}>
                       <button type="button" onClick={() => openEdit(u)} className="text-xs font-semibold mr-3" style={{ color: '#2563eb' }}>Sửa</button>
                       <button type="button" onClick={() => { setResetFor(u); setResetPw(genTempPassword()); setResetMsg('') }} className="text-xs font-semibold" style={{ color: '#b45309' }}>Đặt lại MK</button>
+                      {u.id !== currentUser.id && (
+                        <button type="button" onClick={() => removeUser(u)} className="text-xs font-semibold ml-3" style={{ color: '#dc2626' }}>Xóa</button>
+                      )}
                     </td>
                   </tr>
                 ))}
