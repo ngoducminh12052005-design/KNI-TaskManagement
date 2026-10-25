@@ -1516,9 +1516,9 @@ function DashboardProjects({ currentUser, users, onOpen, onViewAll }: {
 
   const isDir = !!currentUser.isDirector
   const isMgr = currentUser.role === 'manager'
-  const canSee = (p: Project) =>
+  const canSee = (p: Project) => projectGateOk(p, currentUser) && (
     isDir || p.createdBy === currentUser.id || p.managerId === currentUser.id || p.ownerId === currentUser.id ||
-    p.memberIds.includes(currentUser.id) || (isMgr && p.teamId === currentUser.teamId)
+    p.memberIds.includes(currentUser.id) || (isMgr && p.teamId === currentUser.teamId))
   const visible = projects.filter(canSee)
   const countOf = (k: string) => visible.filter(p => p.status === k).length
   const filtered = visible.filter(p => statusFilter === 'all' || p.status === statusFilter)
@@ -10904,6 +10904,8 @@ interface Project {
   createdBy?: string
   createdAt: string
   memberIds: string[]
+  approvalStatus: string
+  approvalNote?: string
 }
 
 function mapDbProject(p: any, memberIds: string[]): Project {
@@ -10915,8 +10917,13 @@ function mapDbProject(p: any, memberIds: string[]): Project {
     plannedEnd: p.planned_end ?? undefined, budget: Number(p.budget) || 0, supplierName: p.supplier_name ?? undefined,
     supplierRef: p.supplier_ref ?? undefined, riskLevel: p.risk_level ?? 'medium', createdBy: p.created_by ?? undefined,
     createdAt: p.created_at, memberIds,
+    approvalStatus: p.approval_status ?? 'approved', approvalNote: p.approval_note ?? undefined,
   }
 }
+
+// Dự án chờ duyệt / bị từ chối chỉ người tạo, trưởng bộ phận cùng phòng và BOD nhìn thấy
+const projectGateOk = (p: Project, u: User) =>
+  p.approvalStatus === 'approved' || p.createdBy === u.id || !!u.isDirector || (u.role === 'manager' && p.teamId === u.teamId)
 
 function ProjectMemberPicker({ users, excludeIds, value, onChange }: {
   users: User[]; excludeIds: string[]; value: string[]; onChange: (v: string[]) => void
@@ -11004,7 +11011,7 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
       })}
     </>
   )
-
+  const needsApproval = !currentUser.isDirector && currentUser.role !== 'manager'
   const submit = async () => {
     if (!name.trim()) { setError('Vui lòng nhập tên dự án.'); return }
     if (!company) { setError('Vui lòng chọn công ty.'); return }
@@ -11023,10 +11030,11 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
       const res = await supabase.from('projects').insert({
         code, name: name.trim(), company, class: cls, status, priority,
         objective: objective.trim() || null, description: description.trim() || null,
-        owner_id: ownerId || null, manager_id: managerId, team_id: teamId || null,
+        owner_id: ownerId || null, manager_id: managerId, team_id: needsApproval ? currentUser.teamId : (teamId || null),
         affected: affected.trim() || null, planned_start: plannedStart || null, planned_end: plannedEnd || null,
         budget: Number(budget) || 0, supplier_name: supplierName.trim() || null, supplier_ref: supplierRef.trim() || null,
         risk_level: riskLevel, created_by: currentUser.id,
+        approval_status: needsApproval ? 'pending' : 'approved',
       }).select('id').single()
       created = res.data; insertError = res.error
       if (!insertError || insertError.code !== '23505') break
@@ -11034,6 +11042,15 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
     if (insertError || !created) { setSaving(false); setError(insertError?.message ?? 'Không tạo được dự án.'); return }
     const memberIds = Array.from(new Set([managerId, ...(ownerId ? [ownerId] : []), ...members]))
     await supabase.from('project_members').insert(memberIds.map(uid => ({ project_id: created.id, user_id: uid, role: uid === managerId ? 'manager' : 'member' })))
+        if (needsApproval) {
+      const approvers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)
+      if (approvers.length > 0) {
+        await supabase.from('notifications').insert(approvers.map(u => ({
+          message: `🗂️ ${currentUser.name} đề xuất dự án "${name.trim()}" và chờ bạn duyệt`,
+          target_user_id: u.id,
+        })))
+      }
+    }
     setSaving(false)
     onCreated(created.id)
     onClose()
@@ -11151,7 +11168,7 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
         <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600">Hủy</button>
         <button type="button" onClick={submit} disabled={saving}
           className="px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
-          {saving ? 'Đang lưu...' : 'Tạo dự án'}
+          {saving ? 'Đang lưu...' : needsApproval ? 'Gửi trưởng bộ phận duyệt' : 'Tạo dự án'}
         </button>
       </div>
     </div>
@@ -11550,7 +11567,12 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
   const pct = list.length ? Math.round((done / list.length) * 100) : 0
   const team = TEAMS.find(t => t.id === project.teamId)
   const canAssign = canEdit || currentUser.role === 'manager'
-  const projectOpen = project.status !== 'closed' && project.status !== 'done'
+    const approved = project.approvalStatus === 'approved'
+  const projectOpen = project.status !== 'closed' && project.status !== 'done' && approved
+  const creator = users.find(u => u.id === project.createdBy)
+  const approverIds = users.filter(u => u.role === 'manager' && u.teamId === (creator?.teamId ?? project.teamId) && u.id !== project.createdBy).map(u => u.id)
+  const canDecide = project.approvalStatus === 'pending' && (!!currentUser.isDirector || approverIds.includes(currentUser.id))
+  const isCreator = project.createdBy === currentUser.id
 
   const shown = list.filter(t =>
     taskFilter === 'all' ? true
@@ -11581,6 +11603,36 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
     if (error) { alert('Không đổi được trạng thái: ' + error.message); return }
     onChanged()
   }
+    const notifyUsers = async (ids: string[], message: string) => {
+    if (ids.length === 0) return
+    await supabase.from('notifications').insert(ids.map(id => ({ message, target_user_id: id })))
+  }
+  const approveProject = async () => {
+    const { error } = await supabase.from('projects')
+      .update({ approval_status: 'approved', approval_note: null, approved_by: currentUser.id })
+      .eq('id', project.id).eq('approval_status', 'pending')
+    if (error) { alert('Không duyệt được: ' + error.message); return }
+    if (project.createdBy) await notifyUsers([project.createdBy], `✅ ${currentUser.name} đã duyệt dự án "${project.name}". Bạn có thể bắt đầu làm.`)
+    onChanged()
+  }
+  const rejectProject = async () => {
+    const reason = (window.prompt('Lý do từ chối dự án:') ?? '').trim()
+    if (!reason) return
+    const { error } = await supabase.from('projects')
+      .update({ approval_status: 'rejected', approval_note: reason, approved_by: currentUser.id })
+      .eq('id', project.id).eq('approval_status', 'pending')
+    if (error) { alert('Không từ chối được: ' + error.message); return }
+    if (project.createdBy) await notifyUsers([project.createdBy], `❌ ${currentUser.name} đã từ chối dự án "${project.name}": ${reason}`)
+    onChanged()
+  }
+  const resubmitProject = async () => {
+    const { error } = await supabase.from('projects')
+      .update({ approval_status: 'pending', approval_note: null })
+      .eq('id', project.id).eq('approval_status', 'rejected')
+    if (error) { alert('Không gửi lại được: ' + error.message); return }
+    await notifyUsers(approverIds, `🗂️ ${currentUser.name} gửi lại dự án "${project.name}" và chờ bạn duyệt`)
+    onChanged()
+  }
   const card = { background: 'var(--bg-panel)', border: '1px solid var(--border)' }
   const tile = (label: string, value: number, color: string) => (
     <div className="rounded-lg px-3 py-2 text-center flex-1 min-w-[80px]" style={{ background: 'var(--bg-card-alt)' }}>
@@ -11604,13 +11656,40 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
           <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
           <span className="text-xs font-bold" style={{ color: 'var(--text-muted)' }}>{project.priority}</span>
           <span className="text-xs font-semibold" style={{ color: rk[1] }}>Rủi ro: {rk[0]}</span>
-          {canEdit && (
+          {canEdit &&  approved && (
             <select value={project.status} onChange={e => changeStatus(e.target.value)} className="ml-auto px-2 py-1 rounded-lg text-xs outline-none"
               style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
               {Object.entries(PROJECT_STATUS).map(([k, v]) => <option key={k} value={k}>{v[0]}</option>)}
             </select>
           )}
         </div>
+                {project.approvalStatus === 'pending' && (
+          <div className="rounded-xl p-4 mb-4 flex items-center justify-between gap-3 flex-wrap" style={{ background: '#f59e0b1a', border: '1px solid #f59e0b66' }}>
+            <div>
+              <p className="text-sm font-bold" style={{ color: '#b45309' }}>⏳ Dự án đang chờ trưởng bộ phận duyệt</p>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                {canDecide ? `${nameOf(project.createdBy)} đề xuất dự án này. Duyệt xong mới được thêm task và bắt đầu làm.` : 'Chưa thể thêm task cho đến khi được duyệt.'}
+              </p>
+            </div>
+            {canDecide && (
+              <div className="flex gap-2">
+                <button type="button" onClick={approveProject} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#059669' }}>✅ Duyệt dự án</button>
+                <button type="button" onClick={rejectProject} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#dc2626' }}>❌ Từ chối</button>
+              </div>
+            )}
+          </div>
+        )}
+        {project.approvalStatus === 'rejected' && (
+          <div className="rounded-xl p-4 mb-4 flex items-center justify-between gap-3 flex-wrap" style={{ background: '#dc26261a', border: '1px solid #dc262666' }}>
+            <div>
+              <p className="text-sm font-bold" style={{ color: '#dc2626' }}>❌ Dự án bị từ chối</p>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>Lý do: {project.approvalNote || '—'}</p>
+            </div>
+            {isCreator && (
+              <button type="button" onClick={resubmitProject} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#7c3aed' }}>📤 Gửi lại duyệt</button>
+            )}
+          </div>
+        )}
         <div className="grid md:grid-cols-3 gap-4">
           <div className="md:col-span-2 space-y-4">
             <section className="rounded-xl p-4" style={card}>
@@ -11629,7 +11708,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
                 {projectOpen ? (
                   <button type="button" onClick={() => setShowTaskForm(true)} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#7c3aed' }}>＋ Thêm task</button>
                 ) : (
-                  <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Dự án đã đóng, không thêm task mới</span>
+                  <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{approved ? 'Dự án đã đóng, không thêm task mới' : 'Dự án chưa được duyệt, chưa thêm task được'}</span>
                 )}
               </div>
               <div className="flex gap-2 mb-3 flex-wrap">
@@ -11777,7 +11856,11 @@ function ProjectListTable({ projects, tasks, users, currentUser, canSee, onOpen 
                   </p>
                 </td>
                 <td className={td}>
-                  <span className="inline-block px-2 py-1 rounded-lg font-semibold whitespace-nowrap" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
+                  {p.approvalStatus === 'pending'
+                    ? <span className="inline-block px-2 py-1 rounded-lg font-semibold whitespace-nowrap" style={{ background: '#f59e0b22', color: '#b45309' }}>⏳ Chờ duyệt</span>
+                    : p.approvalStatus === 'rejected'
+                    ? <span className="inline-block px-2 py-1 rounded-lg font-semibold whitespace-nowrap" style={{ background: '#dc262622', color: '#dc2626' }}>❌ Bị từ chối</span>
+                    : <span className="inline-block px-2 py-1 rounded-lg font-semibold whitespace-nowrap" style={{ background: st[1], color: st[2] }}>{st[0]}</span>}
                 </td>
                 <td className={td}>
                   <div className="font-bold">{p.priority}</div>
@@ -11856,9 +11939,9 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
 
   const isDir = !!currentUser.isDirector
   const isMgr = currentUser.role === 'manager'
-  const canSee = (p: Project) =>
+  const canSee = (p: Project) => projectGateOk(p, currentUser) && (
     isDir || p.createdBy === currentUser.id || p.managerId === currentUser.id || p.ownerId === currentUser.id ||
-    p.memberIds.includes(currentUser.id) || (isMgr && p.teamId === currentUser.teamId)
+    p.memberIds.includes(currentUser.id) || (isMgr && p.teamId === currentUser.teamId))
   const canEditProject = (p: Project) => isDir || p.managerId === currentUser.id || p.createdBy === currentUser.id
   const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
 
@@ -11880,10 +11963,8 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
           <h2 className="text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>🗂️ Dự án</h2>
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{visible.length} dự án</p>
         </div>
-        {(isMgr || isDir) && (
-          <button type="button" onClick={() => setShowForm(true)} className="px-4 py-2.5 rounded-xl font-bold text-white text-sm"
-            style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', boxShadow: '0 0 20px #7c3aed40' }}>+ Tạo dự án</button>
-        )}
+        <button type="button" onClick={() => setShowForm(true)} className="px-4 py-2.5 rounded-xl font-bold text-white text-sm"
+          style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', boxShadow: '0 0 20px #7c3aed40' }}>+ Tạo dự án</button>
       </div>
 
       <div className="flex flex-wrap gap-2 mb-3">
