@@ -5,7 +5,7 @@ import * as XLSX from 'xlsx'
 // ==================== TYPES ====================
 
 type Role = 'manager' | 'employee'
-type View = 'dashboard' | 'tasks' | 'projects' | 'leaderboard' | 'rewards' | 'social' | 'profile' | 'proposals' | 'bodlog'
+type View = 'dashboard' | 'tasks' | 'projects' | 'directory' | 'leaderboard' | 'rewards' | 'social' | 'profile' | 'proposals' | 'bodlog'
 type TaskStatus = 'open' | 'in-progress' | 'submitted' | 'completed'
 type TaskPriority = 'low' | 'medium' | 'high'
 type ChatChannel = 'general' | 'team' | 'announcements' | 'dm' | 'proposal'
@@ -12008,12 +12008,113 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
     </div>
   )
 }
+
+// ==================== DANH BẠ NHÂN SỰ ====================
+interface StaffRow {
+  id: number; company: string; dept: string; deptOrder: number; stt: number
+  empCode: string; fullName: string; position?: string; line?: string; email?: string
+}
+
+function StaffDirectoryView() {
+  const [rows, setRows] = useState<StaffRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
+  const [company, setCompany] = useState('')
+  const [q, setQ] = useState('')
+
+  useEffect(() => {
+    supabase.from('staff_directory').select('*').order('dept_order').order('stt').then(({ data, error }) => {
+      if (error) setErr(error.message)
+      setRows((data ?? []).map((r: any) => ({
+        id: r.id, company: r.company, dept: r.dept, deptOrder: r.dept_order, stt: r.stt, empCode: r.emp_code,
+        fullName: r.full_name, position: r.position ?? undefined, line: r.internal_line ?? undefined, email: r.email ?? undefined,
+      })))
+      setLoading(false)
+    })
+  }, [])
+
+  const companies = Array.from(new Set(rows.map(r => r.company)))
+  const query = q.trim().toLowerCase()
+  const shown = rows
+    .filter(r => !company || r.company === company)
+    .filter(r => !query || `${r.company}-${r.empCode} ${r.fullName} ${r.position ?? ''} ${r.email ?? ''} ${r.dept}`.toLowerCase().includes(query))
+  const depts = Array.from(new Set(shown.map(r => `${r.company}|${r.deptOrder}|${r.dept}`)))
+  const isLeadCode = (c: string) => /^[A-Z]+M-\d+$/.test(c)
+  const sel = { background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
+  const th = 'px-3 py-2.5 text-[10px] font-bold uppercase tracking-wide text-left'
+  const td = 'px-3 py-2.5 text-xs align-middle'
+
+  return (
+    <div className="p-6 max-w-7xl mx-auto">
+      <div className="mb-5">
+        <h2 className="text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>📇 Danh bạ nhân sự</h2>
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{shown.length} nhân sự · {depts.length} bộ phận</p>
+      </div>
+      <div className="flex flex-wrap gap-2 mb-4">
+        <div className="relative flex-1 min-w-[220px]">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--text-muted)' }}>🔍</span>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Tìm theo tên, mã NV, chức vụ, email..."
+            className="w-full pl-9 pr-3 py-2.5 rounded-lg text-sm outline-none" style={sel} />
+        </div>
+        {companies.length > 1 && (
+          <select value={company} onChange={e => setCompany(e.target.value)} className="px-3 py-2.5 rounded-lg text-sm outline-none" style={sel}>
+            <option value="">Tất cả công ty</option>
+            {companies.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        )}
+      </div>
+      {loading && <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Đang tải...</p>}
+      {err && <p className="text-sm" style={{ color: '#dc2626' }}>Không tải được danh bạ: {err}</p>}
+      {!loading && !err && shown.length === 0 && <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Không có nhân sự nào.</p>}
+      <div className="space-y-5">
+        {depts.map(key => {
+          const [co, , name] = key.split('|')
+          const list = shown.filter(r => `${r.company}|${r.deptOrder}|${r.dept}` === key)
+          return (
+            <div key={key} className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
+              <div className="px-4 py-2.5 flex items-center justify-between" style={{ background: 'var(--bg-card-alt)' }}>
+                <h3 className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>{name}</h3>
+                <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{co} · {list.length} người</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse" style={{ minWidth: 720 }}>
+                  <thead>
+                    <tr style={{ color: 'var(--text-muted)' }}>
+                      {['STT', 'Mã NV', 'Họ tên', 'Chức vụ', 'Line', 'Email'].map(h => <th key={h} className={th}>{h}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {list.map((r, i) => (
+                      <tr key={r.id} style={{ borderTop: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                        <td className={td} style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                        <td className={`${td} font-mono font-bold whitespace-nowrap`}>{r.company}-{r.empCode}</td>
+                        <td className={`${td} font-semibold`}>
+                          {r.fullName}
+                          {isLeadCode(r.empCode) && <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>QUẢN LÝ</span>}
+                        </td>
+                        <td className={td}>{r.position ?? '—'}</td>
+                        <td className={td}>{r.line ?? '—'}</td>
+                        <td className={td}>{r.email ? <a href={`mailto:${r.email}`} style={{ color: '#2563eb' }}>{r.email}</a> : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ==================== APP SHELL ====================
 
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: '🏠' },
   { id: 'tasks', label: 'Task', icon: '📋' },
   { id: 'projects', label: 'Dự án', icon: '🗂️' },
+  { id: 'directory', label: 'Danh bạ', icon: '📇' },
   { id: 'proposals', label: 'Tờ trình', icon: '📜' },
   { id: 'leaderboard', label: 'Xếp hạng', icon: '🏆' },
   { id: 'rewards', label: 'Quà', icon: '🎁' },
@@ -12023,7 +12124,7 @@ const NAV = [
 
 const NAV_GROUPS: { title: string; ids: string[] }[] = [
   { title: 'Tổng quan', ids: ['dashboard'] },
-  { title: 'Công việc', ids: ['tasks', 'projects', 'proposals'] },
+  { title: 'Công việc', ids: ['tasks', 'projects', 'proposals', 'directory'] },
   { title: 'Cộng đồng', ids: ['leaderboard', 'rewards', 'social'] },
   { title: 'Hệ thống', ids: ['bodlog', 'profile'] },
 ]
@@ -12256,6 +12357,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
         focusProjectId={projectFocusId} onFocusHandled={() => setProjectFocusId(null)}
         onOpenTask={id => { setView('tasks'); setHighlightTaskId(id) }}
         onOpenProposal={id => { setView('proposals'); setOpenProposalId(id) }} />
+      case 'directory': return <StaffDirectoryView />
       case 'leaderboard': return <LeaderboardView users={users} tasks={tasks} />
       case 'rewards': return <RewardsView currentUser={currentUser} redemptions={redemptions} users={users} />
       case 'social': return (
