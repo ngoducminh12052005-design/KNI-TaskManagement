@@ -1182,12 +1182,7 @@ const sectionFrame = (color: string) => ({
   border: `1px solid ${color}55`,
   borderTop: `4px solid ${color}`,
 })
-// Khung đậm: nền màu đặc cả khung, dùng cho Task / Tờ trình / Dự án
-const sectionFrameDark = (color: string) => ({
-  background: color,
-  border: `3px solid ${color}`,
-  boxShadow: '0 4px 14px rgba(0,0,0,0.18)',
-})
+
 function StatusStatCard({ icon, label, color, total, subs, active, onClick }: {
   icon: string; label: string; color: string; total: number
   subs?: { label: string; value: number; color: string }[]
@@ -1406,7 +1401,7 @@ function DashboardProposals({ proposals, currentUser, users, onOpen, onViewAll, 
           📜 Tờ trình / Đề xuất của tôi
           <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: 'var(--border)', color: 'var(--text-muted)' }}>{base.length}</span>
         </h3>
-        <button type="button" onClick={onViewAll} className="text-xs font-semibold" style={{ color: '#ffffff' }}>Xem tất cả →</button>
+        <button type="button" onClick={onViewAll} className="text-xs font-semibold" style={{ color: '#7c3aed' }}>Xem tất cả →</button>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 items-start mb-4">
@@ -1535,13 +1530,13 @@ function DashboardProjects({ currentUser, users, onOpen, onViewAll }: {
   const cols = [4, 13, 6, 22, 11, 9, 12, 7, 7, 9]
 
   return (
-    <div className="rounded-xl p-5" style={sectionFrameDark('#0f766e')}>
+    <div className="rounded-xl p-5" style={sectionFrame('#0d9488')}>
       <div className="flex items-center justify-between mb-3">
-        <h3 className="font-bold flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: '#ffffff' }}>
+        <h3 className="font-bold flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: '#0d9488' }}>
           🗂️ Dự án
           <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: 'var(--border)', color: 'var(--text-muted)' }}>{visible.length}</span>
         </h3>
-        <button type="button" onClick={onViewAll} className="text-xs font-semibold" style={{ color: '#ffffff' }}>Xem tất cả →</button>
+        <button type="button" onClick={onViewAll} className="text-xs font-semibold" style={{ color: '#0d9488' }}>Xem tất cả →</button>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 items-start mb-4">
         {([['planning', '📝'], ['active', '🚀'], ['on_hold', '⏸'], ['done', '✅'], ['closed', '🔒']] as const).map(([k, icon]) => (
@@ -2583,9 +2578,9 @@ const myTasks = tasks.filter(t =>
       <div className="grid grid-cols-1 gap-4 w-full min-w-0">
         <div className="space-y-4 w-full min-w-0">
                     {/* Task của tôi */}
-            <div className="rounded-xl p-5" style={sectionFrameDark('#0f766e')}>
+          <div className="rounded-xl p-5" style={sectionFrame('#2563eb')}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: '#ffffff' }}>
+              <h3 className="font-bold flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: '#2563eb' }}>
                 ⚡ Task của tôi
                 {bucketFilter === 'all'
                   ? <span className="text-xs font-normal px-2 py-0.5 rounded-full" style={{ background: 'var(--border)', color: 'var(--text-muted)' }}>{pending.length} chờ</span>
@@ -2595,7 +2590,7 @@ const myTasks = tasks.filter(t =>
                 {bucketFilter !== 'all' && (
                   <button type="button" onClick={() => setBucketFilter('all')} className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>✕ Bỏ lọc</button>
                 )}
-                <button type="button" onClick={() => setView('tasks')} className="text-xs font-semibold" style={{ color: '#ffffff' }}>Xem tất cả →</button>
+                <button type="button" onClick={() => setView('tasks')} className="text-xs font-semibold" style={{ color: '#2563eb' }}>Xem tất cả →</button>
               </div>
             </div>
 
