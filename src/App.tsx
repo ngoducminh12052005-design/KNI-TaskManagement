@@ -39,6 +39,7 @@ interface User {
   company?: string
   mustChangePassword?: boolean
   isItAdmin?: boolean
+  isActive?: boolean
 }
 
 interface Task {
@@ -12326,6 +12327,17 @@ function UserAdminView({ currentUser, users }: { currentUser: User; users: User[
     position: u.position ?? '', line: u.internalLine ?? '', role: u.role, teamId: u.teamId, extra: extraOf(u.id),
   })
 
+   const toggleActive = async (u: User) => {
+    if (u.id === currentUser.id) { setMsg('Bạn không thể tự khóa chính mình.'); return }
+    const off = u.isActive !== false
+    const ask = off
+      ? `Khóa tài khoản của ${u.name}? Họ sẽ bị đăng xuất, không đăng nhập được và biến mất khỏi các danh sách chọn. Dữ liệu cũ vẫn được giữ.`
+      : `Mở khóa tài khoản của ${u.name}?`
+    if (!window.confirm(ask)) return
+    const res = await callAdminUsers({ action: off ? 'deactivate' : 'reactivate', userId: u.id })
+    if (!res.ok) { setMsg(res.error ?? 'Không thực hiện được.'); return }
+    setMsg(''); load()
+  }
   const removeUser = async (u: User) => {
     if (u.id === currentUser.id) { setMsg('Bạn không thể tự xóa chính mình.'); return }
     if (!window.confirm(`Xóa vĩnh viễn tài khoản của ${u.name} (${u.email ?? ''})? Không thể hoàn tác.`)) return
@@ -12405,9 +12417,9 @@ function UserAdminView({ currentUser, users }: { currentUser: User; users: User[
               </tr></thead>
               <tbody>
                 {list.map(u => (
-                  <tr key={u.id} style={{ borderTop: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                    <tr key={u.id} style={{ borderTop: '1px solid var(--border)', color: 'var(--text-primary)', opacity: u.isActive === false ? 0.55 : 1 }}>
                     <td className={`${td} font-mono font-bold whitespace-nowrap`}>{u.empCode ? `${u.company ? u.company + '-' : ''}${u.empCode}` : '—'}</td>
-                    <td className={`${td} font-semibold`}>{u.name}{u.mustChangePassword && <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#f59e0b22', color: '#b45309' }}>CHƯA ĐỔI MK</span>}</td>
+                    <td className={`${td} font-semibold`}>{u.name}{u.mustChangePassword && <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#f59e0b22', color: '#b45309' }}>CHƯA ĐỔI MK</span>}{u.isActive === false && <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#dc262622', color: '#dc2626' }}>ĐÃ KHÓA</span>} </td>
                     <td className={td}>{u.email ?? '—'}</td>
                     <td className={td}>{u.position ?? '—'}</td>
                     <td className={td}>
@@ -12419,7 +12431,10 @@ function UserAdminView({ currentUser, users }: { currentUser: User; users: User[
                       <button type="button" onClick={() => openEdit(u)} className="text-xs font-semibold mr-3" style={{ color: '#2563eb' }}>Sửa</button>
                       <button type="button" onClick={() => { setResetFor(u); setResetPw(genTempPassword()); setResetMsg('') }} className="text-xs font-semibold" style={{ color: '#b45309' }}>Đặt lại MK</button>
                       {u.id !== currentUser.id && (
-                        <button type="button" onClick={() => removeUser(u)} className="text-xs font-semibold ml-3" style={{ color: '#dc2626' }}>Xóa</button>
+                        <>
+                          <button type="button" onClick={() => toggleActive(u)} className="text-xs font-semibold ml-3" style={{ color: u.isActive === false ? '#059669' : '#7c3aed' }}>{u.isActive === false ? 'Mở khóa' : 'Khóa'}</button>
+                          <button type="button" onClick={() => removeUser(u)} className="text-xs font-semibold ml-3" style={{ color: '#dc2626' }}>Xóa</button>
+                        </>
                       )}
                     </td>
                   </tr>
@@ -12738,9 +12753,10 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   }
 
   // Merge current user into users list (keeps their live exp/avatar updated)
-  const users = allUsers.some(u => u.id === currentUser.id)
+  const mergedUsers = allUsers.some(u => u.id === currentUser.id)
     ? allUsers.map(u => u.id === currentUser.id ? currentUser : u)
     : [...allUsers, currentUser]
+  const users = mergedUsers.filter(u => u.isActive !== false)
 
   const mentionCount = messages.filter(m =>
     m.userId !== currentUser.id &&
@@ -12780,7 +12796,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
       case 'proposals': return <ProposalsView currentUser={currentUser} users={users} proposals={proposals} proposalApprovals={proposalApprovals} proposalRevisions={proposalRevisions} onJoinDiscussion={handleJoinProposal}
           highlightProposalId={highlightProposalId} clearHighlightProposalId={() => setHighlightProposalId(null)}
           openProposalId={openProposalId} clearOpenProposalId={() => setOpenProposalId(null)} />
-          case 'useradmin': return currentUser.isItAdmin ? <UserAdminView currentUser={currentUser} users={users} /> : <DashboardView {...sharedProps} proposals={proposals} />
+          case 'useradmin': return currentUser.isItAdmin ? <UserAdminView currentUser={currentUser} users={mergedUsers} /> : <DashboardView {...sharedProps} proposals={proposals} />
           case 'bodlog': return currentUser.isDirector ? <BodLogView tasks={tasks} users={users} /> : <DashboardView {...sharedProps} proposals={proposals} />
     }
   }
@@ -12976,7 +12992,7 @@ export default function App() {
   const [proposalRevisions, setProposalRevisions] = useState<ProposalRevision[]>([])
 
   function mapProfileToUser(p: any): User {
-  return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email, isDirector: p.is_director ?? false, driveFolderUrl: p.drive_folder_url ?? undefined, signatureUrl: p.signature_url ?? undefined, empCode: p.emp_code ?? undefined, position: p.position ?? undefined, internalLine: p.internal_line ?? undefined, company: p.company ?? undefined, mustChangePassword: p.must_change_password ?? false, isItAdmin: p.is_it_admin ?? false }
+  return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email, isDirector: p.is_director ?? false, driveFolderUrl: p.drive_folder_url ?? undefined, signatureUrl: p.signature_url ?? undefined, empCode: p.emp_code ?? undefined, position: p.position ?? undefined, internalLine: p.internal_line ?? undefined, company: p.company ?? undefined, mustChangePassword: p.must_change_password ?? false, isItAdmin: p.is_it_admin ?? false, isActive: p.is_active ?? true }
 }
 
   function mapDbMessage(m: any): Message {
@@ -13199,6 +13215,11 @@ useEffect(() => {
       .subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [session])
+
+  // Tài khoản bị khóa thì tự đăng xuất ngay
+  useEffect(() => {
+    if (currentProfile && currentProfile.isActive === false) supabase.auth.signOut()
+  }, [currentProfile])
 
   // 👇 ĐOẠN MỚI THÊM — nạp tin nhắn + lắng nghe realtime
   useEffect(() => {
