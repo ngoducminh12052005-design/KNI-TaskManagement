@@ -11951,8 +11951,11 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
     .filter(p => !fCompany || p.company === fCompany)
     .filter(p => !q.trim() || `${p.code} ${p.name}`.toLowerCase().includes(q.trim().toLowerCase()))
   const dated = base.filter(p => matchDateFilter(projDay(p), dateFilter))
-  const countOf = (k: string) => dated.filter(p => p.status === k).length
-  const visible = dated.filter(p => !fStatus || p.status === fStatus)
+  const needMine = (p: Project) =>
+    p.approvalStatus === 'pending' && p.createdBy !== currentUser.id && (isDir || (isMgr && p.teamId === currentUser.teamId))
+  const countOf = (k: string) => dated.filter(p => p.approvalStatus === 'approved' && p.status === k).length
+  const approvalCount = dated.filter(needMine).length
+  const visible = dated.filter(p => fStatus === 'need_approval' ? needMine(p) : (!fStatus || (p.approvalStatus === 'approved' && p.status === fStatus)))
   const open = projects.find(p => p.id === openId)
   const sel = { background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
@@ -11982,7 +11985,11 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
         </select>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 items-start mb-5">
+      <div className={`grid grid-cols-2 ${isMgr || isDir ? 'sm:grid-cols-6' : 'sm:grid-cols-5'} gap-4 items-start mb-5`}>
+        {(isMgr || isDir) && (
+          <StatusStatCard icon="🔔" label="Cần bạn duyệt" color="#ea580c" total={approvalCount}
+            active={fStatus === 'need_approval'} onClick={() => setFStatus(f => (f === 'need_approval' ? '' : 'need_approval'))} />
+        )}
         {Object.entries(PROJECT_STATUS).map(([k, v]) => (
           <StatusStatCard key={k} icon={PROJECT_STATUS_ICON[k] ?? '📁'} label={v[0]} color={v[2]} total={countOf(k)}
             active={fStatus === k} onClick={() => setFStatus(f => (f === k ? '' : k))} />
