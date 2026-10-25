@@ -5,7 +5,7 @@ import * as XLSX from 'xlsx'
 // ==================== TYPES ====================
 
 type Role = 'manager' | 'employee'
-type View = 'dashboard' | 'tasks' | 'projects' | 'directory' | 'leaderboard' | 'rewards' | 'social' | 'profile' | 'proposals' | 'bodlog'
+type View = 'dashboard' | 'tasks' | 'projects' | 'directory' | 'useradmin' | 'leaderboard' | 'rewards' | 'social' | 'profile' | 'proposals' | 'bodlog'
 type TaskStatus = 'open' | 'in-progress' | 'submitted' | 'completed'
 type TaskPriority = 'low' | 'medium' | 'high'
 type ChatChannel = 'general' | 'team' | 'announcements' | 'dm' | 'proposal'
@@ -33,6 +33,12 @@ interface User {
   isDirector?: boolean
   driveFolderUrl?: string
   signatureUrl?: string
+  empCode?: string
+  position?: string
+  internalLine?: string
+  company?: string
+  mustChangePassword?: boolean
+  isItAdmin?: boolean
 }
 
 interface Task {
@@ -12108,6 +12114,395 @@ function StaffDirectoryView() {
   )
 }
 
+// ==================== QUẢN LÝ NGƯỜI DÙNG & PHÒNG BAN (chỉ phòng IT) ====================
+// Phòng ban lấy từ bảng `departments`; TEAMS được nạp lại mỗi khi bảng đổi.
+async function reloadTeams(): Promise<void> {
+  const { data } = await supabase.from('departments').select('*').order('sort').order('name')
+  if (data && data.length > 0) {
+    TEAMS.splice(0, TEAMS.length, ...data.map((d: any) => ({ id: d.id as string, name: d.name as string, emoji: (d.emoji ?? '🏢') as string })))
+  }
+}
+
+async function callAdminUsers(body: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+  const { data, error } = await supabase.functions.invoke('admin-users', { body })
+  if (error) {
+    let msg = error.message
+    try { const j = await (error as any).context?.json?.(); if (j?.error) msg = j.error } catch { /* giữ message mặc định */ }
+    return { ok: false, error: msg }
+  }
+  if ((data as any)?.error) return { ok: false, error: (data as any).error }
+  return { ok: true }
+}
+
+const genTempPassword = () => {
+  const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789'
+  const arr = new Uint32Array(10)
+  crypto.getRandomValues(arr)
+  return Array.from(arr, n => chars[n % chars.length]).join('')
+}
+
+function ForcePasswordScreen({ user, onDone }: { user: User; onDone: () => void }) {
+  const [pw, setPw] = useState('')
+  const [pw2, setPw2] = useState('')
+  const [err, setErr] = useState('')
+  const [saving, setSaving] = useState(false)
+  const submit = async () => {
+    if (pw.length < 8) { setErr('Mật khẩu mới tối thiểu 8 ký tự.'); return }
+    if (pw !== pw2) { setErr('Hai mật khẩu chưa giống nhau.'); return }
+    setSaving(true); setErr('')
+    const { error } = await supabase.auth.updateUser({ password: pw })
+    if (error) { setSaving(false); setErr(error.message); return }
+    const { error: e2 } = await supabase.from('profiles').update({ must_change_password: false }).eq('id', user.id)
+    setSaving(false)
+    if (e2) { setErr(e2.message); return }
+    onDone()
+  }
+  const inp = 'w-full rounded-lg px-3 py-2.5 text-sm outline-none'
+  const st = { background: '#14143a', border: '1px solid #2a2a5a', color: '#e2e8f0' }
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'linear-gradient(160deg, #0a0a16 0%, #050509 100%)', fontFamily: 'Inter, sans-serif' }}>
+      <div className="w-full max-w-md rounded-2xl p-6 space-y-4" style={{ background: '#0f0f2a', border: '1px solid #2a2a5a' }}>
+        <div>
+          <h1 className="text-xl font-black tracking-wide" style={{ fontFamily: 'Rajdhani, sans-serif', color: '#e2e8f0' }}>🔐 Đổi mật khẩu lần đầu</h1>
+          <p className="text-sm mt-1" style={{ color: '#9ca3af' }}>Xin chào {user.name}. Mật khẩu hiện tại là mật khẩu tạm do phòng IT cấp. Hãy đặt mật khẩu mới của riêng bạn để vào hệ thống.</p>
+        </div>
+        <input type="password" value={pw} onChange={e => setPw(e.target.value)} placeholder="Mật khẩu mới (tối thiểu 8 ký tự)" className={inp} style={st} />
+        <input type="password" value={pw2} onChange={e => setPw2(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') submit() }} placeholder="Nhập lại mật khẩu mới" className={inp} style={st} />
+        {err && <p className="text-xs" style={{ color: '#f87171' }}>{err}</p>}
+        <button type="button" onClick={submit} disabled={saving} className="w-full py-2.5 rounded-lg font-bold text-white text-sm disabled:opacity-50"
+          style={{ background: 'linear-gradient(135deg,#7c3aed,#f59e0b)' }}>{saving ? 'Đang lưu...' : 'Đổi mật khẩu và vào hệ thống'}</button>
+        <button type="button" onClick={() => supabase.auth.signOut()} className="w-full text-xs" style={{ color: '#6b7280' }}>Đăng xuất</button>
+      </div>
+    </div>
+  )
+}
+
+type UserFormState = {
+  userId?: string; name: string; email: string; password: string; company: string; empCode: string
+  position: string; line: string; role: Role; teamId: string; extra: string[]
+}
+
+function UserAdminForm({ initial, onClose, onSaved }: { initial: UserFormState; onClose: () => void; onSaved: () => void }) {
+  const editing = !!initial.userId
+  const [f, setF] = useState<UserFormState>(initial)
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+  const [done, setDone] = useState<{ email: string; password: string } | null>(null)
+  const set = (patch: Partial<UserFormState>) => setF(prev => ({ ...prev, ...patch }))
+  const box = 'w-full border border-gray-300 rounded px-2 py-1.5 bg-white text-sm outline-none focus:border-blue-500'
+  const label = 'block text-xs font-semibold text-gray-600 mb-1'
+  const ink = { color: '#111827' }
+
+  const submit = async () => {
+    if (!f.name.trim()) { setErr('Vui lòng nhập họ tên.'); return }
+    if (!editing && !f.email.trim()) { setErr('Vui lòng nhập email.'); return }
+    if (!editing && f.password.length < 8) { setErr('Mật khẩu tạm tối thiểu 8 ký tự.'); return }
+    if (!f.teamId) { setErr('Vui lòng chọn phòng ban chính.'); return }
+    setSaving(true); setErr('')
+    const res = await callAdminUsers({
+      action: editing ? 'update' : 'create', userId: f.userId, name: f.name, email: f.email, password: f.password,
+      role: f.role, company: f.company, empCode: f.empCode, position: f.position, line: f.line,
+      teamId: f.teamId, extraTeamIds: f.extra.filter(x => x !== f.teamId), avatar: DEFAULT_AVATAR,
+    })
+    setSaving(false)
+    if (!res.ok) { setErr(res.error ?? 'Có lỗi xảy ra.'); return }
+    onSaved()
+    if (editing) onClose()
+    else setDone({ email: f.email.trim().toLowerCase(), password: f.password })
+  }
+  const copy = (t: string) => { try { navigator.clipboard.writeText(t) } catch { /* bỏ qua */ } }
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.55)' }}>
+      <div className="bg-white rounded-xl w-full max-w-xl max-h-[92vh] overflow-y-auto p-5 space-y-3 text-[13px]" style={ink}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-base">{editing ? '✏️ Sửa người dùng' : '➕ Tạo người dùng mới'}</h3>
+          <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
+        </div>
+        {done ? (
+          <div className="space-y-3">
+            <div className="rounded-lg p-3" style={{ background: '#ecfdf5', border: '1px solid #6ee7b7' }}>
+              <p className="font-bold text-sm" style={{ color: '#047857' }}>✅ Đã tạo tài khoản</p>
+              <p className="text-xs mt-1 text-gray-700">Gửi thông tin này cho nhân viên. Lần đăng nhập đầu họ sẽ bị yêu cầu đổi mật khẩu.</p>
+              <p className="mt-2 text-sm">Email: <b>{done.email}</b> <button type="button" onClick={() => copy(done.email)} className="text-xs text-blue-600 ml-1">Sao chép</button></p>
+              <p className="text-sm">Mật khẩu tạm: <b className="font-mono">{done.password}</b> <button type="button" onClick={() => copy(done.password)} className="text-xs text-blue-600 ml-1">Sao chép</button></p>
+            </div>
+            <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-bold text-white" style={{ background: '#7c3aed' }}>Xong</button>
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2"><label className={label}>Họ tên *</label><input value={f.name} onChange={e => set({ name: e.target.value })} className={box} style={ink} /></div>
+              <div className="col-span-2"><label className={label}>Email đăng nhập *</label>
+                <input value={f.email} onChange={e => set({ email: e.target.value })} disabled={editing} className={`${box} disabled:bg-gray-100`} style={ink} /></div>
+              {!editing && (
+                <div className="col-span-2"><label className={label}>Mật khẩu tạm * (người dùng sẽ phải đổi khi đăng nhập lần đầu)</label>
+                  <div className="flex gap-2">
+                    <input value={f.password} onChange={e => set({ password: e.target.value })} className={`${box} font-mono`} style={ink} />
+                    <button type="button" onClick={() => set({ password: genTempPassword() })} className="px-3 rounded border border-gray-300 text-xs whitespace-nowrap">Tạo ngẫu nhiên</button>
+                  </div></div>
+              )}
+              <div><label className={label}>Công ty</label>
+                <select value={f.company} onChange={e => set({ company: e.target.value })} className={box} style={ink}>
+                  <option value="">-- Chọn --</option>
+                  {PROJECT_COMPANIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select></div>
+              <div><label className={label}>Mã NV (không gồm công ty, ví dụ ITM-01)</label><input value={f.empCode} onChange={e => set({ empCode: e.target.value })} className={box} style={ink} /></div>
+              <div><label className={label}>Chức vụ</label><input value={f.position} onChange={e => set({ position: e.target.value })} className={box} style={ink} /></div>
+              <div><label className={label}>Line nội bộ</label><input value={f.line} onChange={e => set({ line: e.target.value })} className={box} style={ink} /></div>
+              <div><label className={label}>Vai trò</label>
+                <select value={f.role} onChange={e => set({ role: e.target.value as Role })} className={box} style={ink}>
+                  <option value="employee">Nhân viên</option>
+                  <option value="manager">Quản lý</option>
+                </select></div>
+              <div><label className={label}>Phòng ban chính *</label>
+                <select value={f.teamId} onChange={e => set({ teamId: e.target.value })} className={box} style={ink}>
+                  <option value="">-- Chọn --</option>
+                  {TEAMS.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
+                </select></div>
+            </div>
+            <div>
+              <label className={label}>Thêm vào các phòng ban khác (ví dụ quản lý IT thuộc cả IT Main và IT)</label>
+              <div className="max-h-40 overflow-y-auto border border-gray-200 rounded p-2 grid grid-cols-1 sm:grid-cols-2 gap-1">
+                {TEAMS.filter(t => t.id !== f.teamId).map(t => (
+                  <label key={t.id} className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input type="checkbox" checked={f.extra.includes(t.id)}
+                      onChange={e => set({ extra: e.target.checked ? [...f.extra, t.id] : f.extra.filter(x => x !== t.id) })} />
+                    {t.emoji} {t.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+            {err && <p className="text-xs text-red-600">{err}</p>}
+            <div className="flex justify-end gap-2 pt-1">
+              <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600">Hủy</button>
+              <button type="button" onClick={submit} disabled={saving} className="px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40" style={{ background: '#7c3aed' }}>
+                {saving ? 'Đang lưu...' : editing ? 'Lưu thay đổi' : 'Tạo tài khoản'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function UserAdminView({ currentUser, users }: { currentUser: User; users: User[] }) {
+  const [tab, setTab] = useState<'users' | 'depts'>('users')
+  const [depts, setDepts] = useState<any[]>([])
+  const [members, setMembers] = useState<{ department_id: string; user_id: string; is_primary: boolean }[]>([])
+  const [q, setQ] = useState('')
+  const [form, setForm] = useState<UserFormState | null>(null)
+  const [resetFor, setResetFor] = useState<User | null>(null)
+  const [resetPw, setResetPw] = useState('')
+  const [resetMsg, setResetMsg] = useState('')
+  const [newDept, setNewDept] = useState({ name: '', emoji: '🏢', company: '' })
+  const [editDept, setEditDept] = useState<{ id: string; name: string; emoji: string; company: string } | null>(null)
+  const [msg, setMsg] = useState('')
+
+  const load = async () => {
+    const [d, m] = await Promise.all([
+      supabase.from('departments').select('*').order('sort').order('name'),
+      supabase.from('department_members').select('department_id, user_id, is_primary'),
+    ])
+    setDepts(d.data ?? []); setMembers((m.data ?? []) as any)
+    await reloadTeams()
+  }
+  useEffect(() => { load() }, [])
+
+  const deptName = (id?: string) => depts.find(d => d.id === id)?.name ?? TEAMS.find(t => t.id === id)?.name ?? '—'
+  const extraOf = (uid: string) => members.filter(m => m.user_id === uid && !m.is_primary).map(m => m.department_id)
+  const sel = { background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
+  const th = 'px-3 py-2.5 text-[10px] font-bold uppercase tracking-wide text-left'
+  const td = 'px-3 py-2.5 text-xs align-middle'
+  const query = q.trim().toLowerCase()
+  const list = users
+    .filter(u => !query || `${u.name} ${u.email ?? ''} ${u.empCode ?? ''} ${u.position ?? ''}`.toLowerCase().includes(query))
+    .sort((a, b) => (a.company ?? '').localeCompare(b.company ?? '') || (a.empCode ?? 'zzz').localeCompare(b.empCode ?? 'zzz') || a.name.localeCompare(b.name, 'vi'))
+
+  const openCreate = () => setForm({ name: '', email: '', password: genTempPassword(), company: 'KNI', empCode: '', position: '', line: '', role: 'employee', teamId: '', extra: [] })
+  const openEdit = (u: User) => setForm({
+    userId: u.id, name: u.name, email: u.email ?? '', password: '', company: u.company ?? '', empCode: u.empCode ?? '',
+    position: u.position ?? '', line: u.internalLine ?? '', role: u.role, teamId: u.teamId, extra: extraOf(u.id),
+  })
+
+  const doReset = async () => {
+    if (!resetFor) return
+    if (resetPw.length < 8) { setResetMsg('Mật khẩu tạm tối thiểu 8 ký tự.'); return }
+    const res = await callAdminUsers({ action: 'reset_password', userId: resetFor.id, password: resetPw })
+    setResetMsg(res.ok ? `✅ Đã đặt lại. Gửi mật khẩu tạm "${resetPw}" cho ${resetFor.name}; họ sẽ phải đổi khi đăng nhập.` : (res.error ?? 'Lỗi'))
+  }
+
+  const addDept = async () => {
+    if (!newDept.name.trim()) { setMsg('Nhập tên phòng ban.'); return }
+    const id = 'd_' + Date.now().toString(36)
+    const { error } = await supabase.from('departments').insert({
+      id, name: newDept.name.trim(), emoji: newDept.emoji.trim() || '🏢', company: newDept.company || null, sort: 100 + depts.length,
+    })
+    if (error) { setMsg(error.message); return }
+    setNewDept({ name: '', emoji: '🏢', company: '' }); setMsg(''); load()
+  }
+  const saveDept = async () => {
+    if (!editDept || !editDept.name.trim()) return
+    const { error } = await supabase.from('departments')
+      .update({ name: editDept.name.trim(), emoji: editDept.emoji.trim() || '🏢', company: editDept.company || null }).eq('id', editDept.id)
+    if (error) { setMsg(error.message); return }
+    await supabase.from('profiles').update({ department: editDept.name.trim() }).eq('team_id', editDept.id)
+    setEditDept(null); setMsg(''); load()
+  }
+  const removeDept = async (d: any) => {
+    const used = users.filter(u => u.teamId === d.id).length
+    if (used > 0) { setMsg(`Phòng "${d.name}" còn ${used} người có phòng chính ở đây, hãy chuyển họ sang phòng khác trước.`); return }
+    if (!window.confirm(`Xóa phòng ban "${d.name}"?`)) return
+    const { error } = await supabase.from('departments').delete().eq('id', d.id)
+    if (error) { setMsg(error.message); return }
+    setMsg(''); load()
+  }
+  const addMember = async (deptId: string, userId: string) => {
+    if (!userId) return
+    const { error } = await supabase.from('department_members').insert({ department_id: deptId, user_id: userId, is_primary: false })
+    if (error) { setMsg(error.message); return }
+    setMsg(''); load()
+  }
+  const removeMember = async (deptId: string, userId: string) => {
+    const { error } = await supabase.from('department_members').delete().eq('department_id', deptId).eq('user_id', userId)
+    if (error) { setMsg(error.message); return }
+    setMsg(''); load()
+  }
+  const tabBtn = (id: 'users' | 'depts', text: string) => (
+    <button type="button" onClick={() => setTab(id)} className="px-4 py-2 rounded-lg text-sm font-bold"
+      style={{ background: tab === id ? '#7c3aed' : 'var(--bg-card-alt)', color: tab === id ? '#fff' : 'var(--text-muted)' }}>{text}</button>
+  )
+
+  return (
+    <div className="p-6 max-w-7xl mx-auto">
+      <div className="mb-5">
+        <h2 className="text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>🛠️ Quản lý người dùng</h2>
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Chỉ phòng IT thấy trang này. Đang đăng nhập: {currentUser.name}</p>
+      </div>
+      <div className="flex gap-2 mb-4">{tabBtn('users', `👤 Người dùng (${users.length})`)}{tabBtn('depts', `🏢 Phòng ban (${depts.length})`)}</div>
+      {msg && <p className="text-sm mb-3" style={{ color: '#dc2626' }}>{msg}</p>}
+
+      {tab === 'users' && (
+        <>
+          <div className="flex flex-wrap gap-2 mb-4">
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Tìm theo tên, email, mã NV, chức vụ..."
+              className="flex-1 min-w-[220px] px-3 py-2.5 rounded-lg text-sm outline-none" style={sel} />
+            <button type="button" onClick={openCreate} className="px-4 py-2.5 rounded-xl font-bold text-white text-sm" style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>+ Tạo người dùng</button>
+          </div>
+          <div className="rounded-2xl overflow-x-auto" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
+            <table className="w-full border-collapse" style={{ minWidth: 900 }}>
+              <thead><tr style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
+                {['Mã NV', 'Họ tên', 'Email', 'Chức vụ', 'Phòng ban', 'Vai trò', ''].map(h => <th key={h} className={th}>{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {list.map(u => (
+                  <tr key={u.id} style={{ borderTop: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                    <td className={`${td} font-mono font-bold whitespace-nowrap`}>{u.empCode ? `${u.company ? u.company + '-' : ''}${u.empCode}` : '—'}</td>
+                    <td className={`${td} font-semibold`}>{u.name}{u.mustChangePassword && <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#f59e0b22', color: '#b45309' }}>CHƯA ĐỔI MK</span>}</td>
+                    <td className={td}>{u.email ?? '—'}</td>
+                    <td className={td}>{u.position ?? '—'}</td>
+                    <td className={td}>
+                      {deptName(u.teamId)}
+                      {extraOf(u.id).length > 0 && <span style={{ color: 'var(--text-muted)' }}> + {extraOf(u.id).map(deptName).join(', ')}</span>}
+                    </td>
+                    <td className={td}>{u.role === 'manager' ? 'Quản lý' : 'Nhân viên'}</td>
+                    <td className={`${td} whitespace-nowrap`}>
+                      <button type="button" onClick={() => openEdit(u)} className="text-xs font-semibold mr-3" style={{ color: '#2563eb' }}>Sửa</button>
+                      <button type="button" onClick={() => { setResetFor(u); setResetPw(genTempPassword()); setResetMsg('') }} className="text-xs font-semibold" style={{ color: '#b45309' }}>Đặt lại MK</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {tab === 'depts' && (
+        <>
+          <div className="flex flex-wrap gap-2 mb-4 items-center">
+            <input value={newDept.emoji} onChange={e => setNewDept({ ...newDept, emoji: e.target.value })} className="w-14 px-2 py-2.5 rounded-lg text-sm text-center outline-none" style={sel} />
+            <input value={newDept.name} onChange={e => setNewDept({ ...newDept, name: e.target.value })} placeholder="Tên phòng ban mới (ví dụ IT Main)" className="flex-1 min-w-[200px] px-3 py-2.5 rounded-lg text-sm outline-none" style={sel} />
+            <select value={newDept.company} onChange={e => setNewDept({ ...newDept, company: e.target.value })} className="px-3 py-2.5 rounded-lg text-sm outline-none" style={sel}>
+              <option value="">Công ty</option>{PROJECT_COMPANIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <button type="button" onClick={addDept} className="px-4 py-2.5 rounded-xl font-bold text-white text-sm" style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>+ Thêm phòng ban</button>
+          </div>
+          <div className="space-y-3">
+            {depts.map(d => {
+              const ms = members.filter(m => m.department_id === d.id)
+              const candidates = users.filter(u => !ms.some(m => m.user_id === u.id))
+              const editing = editDept?.id === d.id
+              return (
+                <div key={d.id} className="rounded-2xl p-4" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
+                  <div className="flex items-center gap-2 flex-wrap mb-2">
+                    {editing ? (
+                      <>
+                        <input value={editDept!.emoji} onChange={e => setEditDept({ ...editDept!, emoji: e.target.value })} className="w-14 px-2 py-1.5 rounded text-sm text-center outline-none" style={sel} />
+                        <input value={editDept!.name} onChange={e => setEditDept({ ...editDept!, name: e.target.value })} className="flex-1 min-w-[160px] px-2 py-1.5 rounded text-sm outline-none" style={sel} />
+                        <select value={editDept!.company} onChange={e => setEditDept({ ...editDept!, company: e.target.value })} className="px-2 py-1.5 rounded text-sm outline-none" style={sel}>
+                          <option value="">Công ty</option>{PROJECT_COMPANIES.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                        <button type="button" onClick={saveDept} className="text-xs font-bold" style={{ color: '#059669' }}>Lưu</button>
+                        <button type="button" onClick={() => setEditDept(null)} className="text-xs" style={{ color: 'var(--text-muted)' }}>Hủy</button>
+                      </>
+                    ) : (
+                      <>
+                        <h3 className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>{d.emoji} {d.name}</h3>
+                        {d.company && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>{d.company}</span>}
+                        {d.manages_users && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#7c3aed22', color: '#7c3aed' }}>QUẢN LÝ NGƯỜI DÙNG</span>}
+                        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{ms.length} người</span>
+                        <button type="button" onClick={() => setEditDept({ id: d.id, name: d.name, emoji: d.emoji, company: d.company ?? '' })} className="text-xs font-semibold ml-auto" style={{ color: '#2563eb' }}>Sửa</button>
+                        {!d.manages_users && <button type="button" onClick={() => removeDept(d)} className="text-xs font-semibold" style={{ color: '#dc2626' }}>Xóa</button>}
+                      </>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 items-center">
+                    {ms.map(m => {
+                      const u = users.find(x => x.id === m.user_id)
+                      return (
+                        <span key={m.user_id} className="text-xs px-2.5 py-1 rounded-full flex items-center gap-1.5" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-primary)' }}>
+                          {u?.name ?? m.user_id}{u?.role === 'manager' ? ' (QL)' : ''}{m.is_primary && <span style={{ color: 'var(--text-muted)' }}> · chính</span>}
+                          {!m.is_primary && <button type="button" onClick={() => removeMember(d.id, m.user_id)} style={{ color: '#dc2626' }}>✕</button>}
+                        </span>
+                      )
+                    })}
+                    <select value="" onChange={e => addMember(d.id, e.target.value)} className="text-xs px-2 py-1 rounded-full outline-none" style={sel}>
+                      <option value="">＋ Thêm người vào phòng</option>
+                      {candidates.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+                    </select>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+
+      {form && <UserAdminForm initial={form} onClose={() => setForm(null)} onSaved={load} />}
+      {resetFor && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.55)' }}>
+          <div className="bg-white rounded-xl w-full max-w-md p-5 space-y-3 text-[13px]" style={{ color: '#111827' }}>
+            <h3 className="font-bold text-base">🔑 Đặt lại mật khẩu cho {resetFor.name}</h3>
+            <p className="text-xs text-gray-600">Mật khẩu tạm mới. Người dùng sẽ phải đổi lại khi đăng nhập.</p>
+            <div className="flex gap-2">
+              <input value={resetPw} onChange={e => setResetPw(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm font-mono outline-none" style={{ color: '#111827' }} />
+              <button type="button" onClick={() => setResetPw(genTempPassword())} className="px-3 rounded border border-gray-300 text-xs whitespace-nowrap">Ngẫu nhiên</button>
+            </div>
+            {resetMsg && <p className="text-xs" style={{ color: resetMsg.startsWith('✅') ? '#047857' : '#dc2626' }}>{resetMsg}</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setResetFor(null)} className="px-4 py-2 rounded-lg text-sm text-gray-600">Đóng</button>
+              <button type="button" onClick={doReset} className="px-5 py-2 rounded-lg text-sm font-bold text-white" style={{ background: '#b45309' }}>Đặt lại</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 // ==================== APP SHELL ====================
 
 const NAV = [
@@ -12126,7 +12521,7 @@ const NAV_GROUPS: { title: string; ids: string[] }[] = [
   { title: 'Tổng quan', ids: ['dashboard'] },
   { title: 'Công việc', ids: ['tasks', 'projects', 'proposals', 'directory'] },
   { title: 'Cộng đồng', ids: ['leaderboard', 'rewards', 'social'] },
-  { title: 'Hệ thống', ids: ['bodlog', 'profile'] },
+  { title: 'Hệ thống', ids: ['bodlog', 'useradmin', 'profile'] },
 ]
 // ===== Menu "Nhân viên phòng ban" ngay dưới Dashboard (chỉ quản lý / BOD thấy) =====
 function SidebarStaffMenu({ currentUser, users, onPick }: { currentUser: User; users: User[]; onPick: (u: User) => void }) {
@@ -12298,7 +12693,11 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
     setShowMentions(false)
     setSocialTarget({ channel: 'proposal', proposalId: proposal.id })
   }
-  const navItems = currentUser.isDirector ? [...NAV, { id: 'bodlog', icon: '📊', label: 'Log BOD' }] : NAV
+    const navItems = [
+    ...NAV,
+    ...(currentUser.isDirector ? [{ id: 'bodlog', icon: '📊', label: 'Log BOD' }] : []),
+    ...(currentUser.isItAdmin ? [{ id: 'useradmin', icon: '🛠️', label: 'Quản lý người dùng' }] : []),
+  ]
 
   const handleNotificationClick = (n: { linkChannel?: string; linkDmUserId?: string; linkTaskId?: string; linkProposalId?: string }) => {
     if (n.linkProposalId) {
@@ -12370,6 +12769,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
       case 'proposals': return <ProposalsView currentUser={currentUser} users={users} proposals={proposals} proposalApprovals={proposalApprovals} proposalRevisions={proposalRevisions} onJoinDiscussion={handleJoinProposal}
           highlightProposalId={highlightProposalId} clearHighlightProposalId={() => setHighlightProposalId(null)}
           openProposalId={openProposalId} clearOpenProposalId={() => setOpenProposalId(null)} />
+          case 'useradmin': return currentUser.isItAdmin ? <UserAdminView currentUser={currentUser} users={users} /> : <DashboardView {...sharedProps} proposals={proposals} />
           case 'bodlog': return currentUser.isDirector ? <BodLogView tasks={tasks} users={users} /> : <DashboardView {...sharedProps} proposals={proposals} />
     }
   }
@@ -12565,7 +12965,7 @@ export default function App() {
   const [proposalRevisions, setProposalRevisions] = useState<ProposalRevision[]>([])
 
   function mapProfileToUser(p: any): User {
-  return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email, isDirector: p.is_director ?? false, driveFolderUrl: p.drive_folder_url ?? undefined, signatureUrl: p.signature_url ?? undefined }
+  return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email, isDirector: p.is_director ?? false, driveFolderUrl: p.drive_folder_url ?? undefined, signatureUrl: p.signature_url ?? undefined, empCode: p.emp_code ?? undefined, position: p.position ?? undefined, internalLine: p.internal_line ?? undefined, company: p.company ?? undefined, mustChangePassword: p.must_change_password ?? false, isItAdmin: p.is_it_admin ?? false }
 }
 
   function mapDbMessage(m: any): Message {
@@ -12777,6 +13177,18 @@ useEffect(() => {
   }, [session])
 
 
+    // Nạp danh sách phòng ban từ database vào TEAMS (đổi phòng ban là app cập nhật ngay)
+  const [, setTeamsVer] = useState(0)
+  useEffect(() => {
+    if (!session) return
+    const run = async () => { await reloadTeams(); setTeamsVer(v => v + 1) }
+    run()
+    const ch = supabase.channel('departments-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'departments' }, run)
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [session])
+
   // 👇 ĐOẠN MỚI THÊM — nạp tin nhắn + lắng nghe realtime
   useEffect(() => {
     if (!session) return
@@ -12925,6 +13337,7 @@ useEffect(() => {
 
   if (checkingSession) return <div style={{ background: '#060610', minHeight: '100vh' }} />
   if (!session || !currentProfile) return <LoginScreen onLoggedIn={() => {}} />
+    if (currentProfile.mustChangePassword) return <ForcePasswordScreen user={currentProfile} onDone={() => setCurrentProfile({ ...currentProfile, mustChangePassword: false })} />
 
   return (
     <AppShell
