@@ -12190,6 +12190,47 @@ function UserAdminForm({ initial, onClose, onSaved }: { initial: UserFormState; 
   const [err, setErr] = useState('')
   const [done, setDone] = useState<{ email: string; password: string } | null>(null)
   const set = (patch: Partial<UserFormState>) => setF(prev => ({ ...prev, ...patch }))
+    const [hint, setHint] = useState('')
+      const [codeTouched, setCodeTouched] = useState(false)
+  // Tự sinh Mã NV theo phòng ban: IT-01, IT-02... (quản lý thêm chữ M: ITM-01)
+  const genCode = async () => {
+    if (!f.teamId) return
+    const { data: dep } = await supabase.from('departments').select('code_prefix').eq('id', f.teamId).maybeSingle()
+    const base = String(dep?.code_prefix ?? '').trim().toUpperCase()
+    if (!base) { set({ empCode: '' }); return }
+    const prefix = f.role === 'manager' && !['BOD', 'QT'].includes(base) ? `${base}M` : base
+    const [a, b] = await Promise.all([
+      supabase.from('profiles').select('emp_code').like('emp_code', `${prefix}-%`),
+      supabase.from('staff_directory').select('emp_code').like('emp_code', `${prefix}-%`),
+    ])
+    const re = new RegExp(`^${prefix}-(\\d+)$`)
+    const max = [...(a.data ?? []), ...(b.data ?? [])].reduce((m: number, r: any) => {
+      const x = re.exec(String(r.emp_code ?? ''))
+      return x ? Math.max(m, parseInt(x[1], 10)) : m
+    }, 0)
+    set({ empCode: `${prefix}-${String(max + 1).padStart(2, '0')}` })
+  }
+  useEffect(() => { if (!editing && !codeTouched) genCode() }, [f.teamId, f.role])
+  const DIR_DEPT: Record<string, string> = { BOD: 'bod', QT: 'vphdqt', FS: 'fs', FSM: 'fs', AC: 'ac', ACM: 'ac', HR: 'hr', HRM: 'hr', IT: 'it', ITM: 'it', PR: 'pr', PRM: 'pr' }
+  // Gõ email xong thì tra danh bạ Excel và điền sẵn các ô còn lại
+  const lookupEmail = async () => {
+    if (editing) return
+    const email = f.email.trim().toLowerCase()
+    if (!email) { setHint(''); return }
+    const { data } = await supabase.from('staff_directory').select('*').eq('email', email).maybeSingle()
+    if (!data) { setHint('Email này không có trong danh bạ Excel, hãy nhập tay các thông tin bên dưới.'); return }
+    const pre = String(data.emp_code).split('-')[0]
+    const dept = DIR_DEPT[pre] ?? ''
+    const isMgr = /^[A-Z]+M$/.test(pre)
+    setCodeTouched(true)
+    set({
+      name: data.full_name, company: data.company ?? 'KNI', empCode: data.emp_code, position: data.position ?? '', line: data.internal_line ?? '',
+      role: isMgr ? 'manager' : 'employee',
+      teamId: TEAMS.some(t => t.id === dept) ? dept : f.teamId,
+      extra: isMgr && TEAMS.some(t => t.id === dept + '_main') ? [dept + '_main'] : [],
+    })
+    setHint(`✅ Đã điền sẵn từ danh bạ: ${data.full_name} (${data.company}-${data.emp_code}). Kiểm tra lại rồi bấm Tạo tài khoản.`)
+  }
   const box = 'w-full border border-gray-300 rounded px-2 py-1.5 bg-white text-sm outline-none focus:border-blue-500'
   const label = 'block text-xs font-semibold text-gray-600 mb-1'
   const ink = { color: '#111827' }
@@ -12235,7 +12276,8 @@ function UserAdminForm({ initial, onClose, onSaved }: { initial: UserFormState; 
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2"><label className={label}>Họ tên *</label><input value={f.name} onChange={e => set({ name: e.target.value })} className={box} style={ink} /></div>
               <div className="col-span-2"><label className={label}>Email đăng nhập *</label>
-                <input value={f.email} onChange={e => set({ email: e.target.value })} disabled={editing} className={`${box} disabled:bg-gray-100`} style={ink} /></div>
+                <input value={f.email} onChange={e => set({ email: e.target.value })} onBlur={lookupEmail} disabled={editing} className={`${box} disabled:bg-gray-100`} style={ink} />
+                {hint && <p className="text-xs mt-1" style={{ color: hint.startsWith('✅') ? '#047857' : '#b45309' }}>{hint}</p>}</div>
               {!editing && (
                 <div className="col-span-2"><label className={label}>Mật khẩu tạm * (người dùng sẽ phải đổi khi đăng nhập lần đầu)</label>
                   <div className="flex gap-2">
@@ -12248,7 +12290,7 @@ function UserAdminForm({ initial, onClose, onSaved }: { initial: UserFormState; 
                   <option value="">-- Chọn --</option>
                   {PROJECT_COMPANIES.map(c => <option key={c} value={c}>{c}</option>)}
                 </select></div>
-              <div><label className={label}>Mã NV (không gồm công ty, ví dụ ITM-01)</label><input value={f.empCode} onChange={e => set({ empCode: e.target.value })} className={box} style={ink} /></div>
+              <div><label className={label}>Mã NV (tự sinh theo phòng ban, có thể sửa) <button type="button" onClick={() => { setCodeTouched(false); genCode() }} className="text-blue-600 font-normal ml-1">Sinh lại</button></label><input value={f.empCode} onChange={e => { setCodeTouched(true); set({ empCode: e.target.value }) }} className={box} style={ink} /></div>
               <div><label className={label}>Chức vụ</label><input value={f.position} onChange={e => set({ position: e.target.value })} className={box} style={ink} /></div>
               <div><label className={label}>Line nội bộ</label><input value={f.line} onChange={e => set({ line: e.target.value })} className={box} style={ink} /></div>
               <div><label className={label}>Vai trò</label>
@@ -12297,8 +12339,8 @@ function UserAdminView({ currentUser, users }: { currentUser: User; users: User[
   const [resetFor, setResetFor] = useState<User | null>(null)
   const [resetPw, setResetPw] = useState('')
   const [resetMsg, setResetMsg] = useState('')
-  const [newDept, setNewDept] = useState({ name: '', emoji: '🏢', company: '' })
-  const [editDept, setEditDept] = useState<{ id: string; name: string; emoji: string; company: string } | null>(null)
+  const [newDept, setNewDept] = useState({ name: '', emoji: '🏢', company: '', codePrefix: '' })
+  const [editDept, setEditDept] = useState<{ id: string; name: string; emoji: string; company: string; codePrefix: string } | null>(null)
   const [msg, setMsg] = useState('')
 
   const load = async () => {
@@ -12358,14 +12400,15 @@ function UserAdminView({ currentUser, users }: { currentUser: User; users: User[
     const id = 'd_' + Date.now().toString(36)
     const { error } = await supabase.from('departments').insert({
       id, name: newDept.name.trim(), emoji: newDept.emoji.trim() || '🏢', company: newDept.company || null, sort: 100 + depts.length,
+      code_prefix: newDept.codePrefix.trim().toUpperCase() || null,
     })
     if (error) { setMsg(error.message); return }
-    setNewDept({ name: '', emoji: '🏢', company: '' }); setMsg(''); load()
+    setNewDept({ name: '', emoji: '🏢', company: '', codePrefix: '' }); setMsg(''); load()
   }
   const saveDept = async () => {
     if (!editDept || !editDept.name.trim()) return
     const { error } = await supabase.from('departments')
-      .update({ name: editDept.name.trim(), emoji: editDept.emoji.trim() || '🏢', company: editDept.company || null }).eq('id', editDept.id)
+      .update({ name: editDept.name.trim(), emoji: editDept.emoji.trim() || '🏢', company: editDept.company || null, code_prefix: editDept.codePrefix.trim().toUpperCase() || null }).eq('id', editDept.id)
     if (error) { setMsg(error.message); return }
     await supabase.from('profiles').update({ department: editDept.name.trim() }).eq('team_id', editDept.id)
     setEditDept(null); setMsg(''); load()
@@ -12453,6 +12496,7 @@ function UserAdminView({ currentUser, users }: { currentUser: User; users: User[
             <select value={newDept.company} onChange={e => setNewDept({ ...newDept, company: e.target.value })} className="px-3 py-2.5 rounded-lg text-sm outline-none" style={sel}>
               <option value="">Công ty</option>{PROJECT_COMPANIES.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
+            <input value={newDept.codePrefix} onChange={e => setNewDept({ ...newDept, codePrefix: e.target.value })} placeholder="Mã (IT)" maxLength={6} className="w-24 px-3 py-2.5 rounded-lg text-sm outline-none uppercase" style={sel} />
             <button type="button" onClick={addDept} className="px-4 py-2.5 rounded-xl font-bold text-white text-sm" style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>+ Thêm phòng ban</button>
           </div>
           <div className="space-y-3">
@@ -12470,6 +12514,7 @@ function UserAdminView({ currentUser, users }: { currentUser: User; users: User[
                         <select value={editDept!.company} onChange={e => setEditDept({ ...editDept!, company: e.target.value })} className="px-2 py-1.5 rounded text-sm outline-none" style={sel}>
                           <option value="">Công ty</option>{PROJECT_COMPANIES.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
+                        <input value={editDept!.codePrefix} onChange={e => setEditDept({ ...editDept!, codePrefix: e.target.value })} placeholder="Mã" maxLength={6} className="w-20 px-2 py-1.5 rounded text-sm outline-none uppercase" style={sel} />
                         <button type="button" onClick={saveDept} className="text-xs font-bold" style={{ color: '#059669' }}>Lưu</button>
                         <button type="button" onClick={() => setEditDept(null)} className="text-xs" style={{ color: 'var(--text-muted)' }}>Hủy</button>
                       </>
@@ -12477,9 +12522,10 @@ function UserAdminView({ currentUser, users }: { currentUser: User; users: User[
                       <>
                         <h3 className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>{d.emoji} {d.name}</h3>
                         {d.company && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>{d.company}</span>}
+                        {d.code_prefix && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold font-mono" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>Mã {d.code_prefix}</span>}
                         {d.manages_users && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#7c3aed22', color: '#7c3aed' }}>QUẢN LÝ NGƯỜI DÙNG</span>}
                         <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{ms.length} người</span>
-                        <button type="button" onClick={() => setEditDept({ id: d.id, name: d.name, emoji: d.emoji, company: d.company ?? '' })} className="text-xs font-semibold ml-auto" style={{ color: '#2563eb' }}>Sửa</button>
+                        <button type="button" onClick={() => setEditDept({ id: d.id, name: d.name, emoji: d.emoji, company: d.company ?? '', codePrefix: d.code_prefix ?? '' })} className="text-xs font-semibold ml-auto" style={{ color: '#2563eb' }}>Sửa</button>
                         {!d.manages_users && <button type="button" onClick={() => removeDept(d)} className="text-xs font-semibold" style={{ color: '#dc2626' }}>Xóa</button>}
                       </>
                     )}
