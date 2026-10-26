@@ -4215,7 +4215,48 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
 
   return (
     <div className="w-full min-w-0 rounded-2xl overflow-x-auto" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
-      <table className="border-collapse table-fixed" style={{ width: '100%', minWidth: 960, tableLayout: 'fixed' }}>
+            <div className="md:hidden">
+        {tasks.length === 0 && (
+          <p className="px-4 py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Không có task nào trong khoảng này.</p>
+        )}
+        {tasks.map((t, i) => {
+          const over = isSlaOverdue(t) || !!t.isLocked
+          const st: [string, string, string] = isTaskGated(t)
+            ? ['⏳ Chờ duyệt', '#fbbf2422', '#d97706']
+            : (TRACKER_STATUS[toTracker[statusBucket(t)]] ?? TRACKER_STATUS.received)
+          const pics = t.assignedTo.map(userOf).filter(Boolean) as User[]
+          const pri = PRIORITY_CONFIG[t.priority]
+          return (
+            <div key={t.id} onClick={() => onOpen(t)} className="px-4 py-3 cursor-pointer"
+              style={{ borderTop: i === 0 ? undefined : '1px solid var(--border)', background: over ? '#dc262612' : undefined, color: 'var(--text-primary)' }}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-mono text-[11px] font-bold break-all" style={{ color: 'var(--text-muted)' }}>
+                    {t.taskCode ?? '—'}{t.urgent && ' ⏰'}{t.important && ' 🔥'}
+                  </p>
+                  <p className="text-sm font-semibold leading-snug break-words mt-0.5">{withCompanyPrefix(t.title, t.company)}</p>
+                </div>
+                <span className="px-2 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap shrink-0" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs">
+                <span className="font-bold" style={{ color: pri.color }}>{pri.label}</span>
+                <span style={{ color: 'var(--text-muted)' }}>{fmtShort(t.startDate)} → {fmtShort(t.dueDate)}</span>
+                {pics.slice(0, 2).map(u => (
+                  <span key={u.id} className="flex items-center gap-1"><CharAvatar user={u} size={18} />{u.name}</span>
+                ))}
+                {pics.length > 2 && <span style={{ color: 'var(--text-muted)' }}>+{pics.length - 2}</span>}
+              </div>
+              <div className="mt-1.5 text-xs"><SlaCell task={t} compact /></div>
+              <div className="mt-2">
+                <button type="button" onClick={e => { e.stopPropagation(); setUpdateTask(t) }}
+                  className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>📝 Work Note</button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <table className="hidden md:table border-collapse table-fixed" style={{ width: '100%', minWidth: 960, tableLayout: 'fixed' }}>
         <colgroup>{cols.map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup>
         <thead>
           <tr style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
@@ -10147,7 +10188,44 @@ function ProposalListTable({ proposals, users, currentUser, isMyTurn, onOpen }: 
 
   return (
     <div className="w-full min-w-0 rounded-2xl overflow-x-auto" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
-      <table className="border-collapse" style={{ width: '100%', minWidth: 960, tableLayout: 'fixed' }}>
+            <div className="md:hidden">
+        {proposals.length === 0 && (
+          <p className="px-4 py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Không có tờ trình / đề xuất nào trong bộ lọc này.</p>
+        )}
+        {proposals.map((p, i) => {
+          const meta = PROPOSAL_BUCKET_META[proposalBucket(p)]
+          const need = isMyTurn(p) && p.status === 'pending'
+          const sender = userOf(p.submittedBy)
+          const recv = userOf(p.recipientId)
+          return (
+            <div key={p.id} onClick={() => onOpen(p)} className="px-4 py-3 cursor-pointer"
+              style={{ borderTop: i === 0 ? undefined : '1px solid var(--border)', background: need ? '#7c3aed12' : undefined, color: 'var(--text-primary)' }}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-mono text-[11px] font-bold break-all" style={{ color: 'var(--text-muted)' }}>{p.code ?? '—'}</p>
+                  <p className="text-sm font-semibold leading-snug break-words mt-0.5">{withCompanyPrefix(p.title, p.company)}</p>
+                  <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                    {p.groupName ?? (p.kind === 'totrinh' ? 'Tờ trình' : p.kind === 'dntt' ? 'Đề nghị thanh toán' : 'Đề xuất')}
+                  </p>
+                </div>
+                <span className="px-2 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap shrink-0" style={{ background: meta.bg, color: meta.color }}>{meta.icon} {meta.label}</span>
+              </div>
+              {need && <p className="text-[11px] font-bold mt-1" style={{ color: '#7c3aed' }}>📥 Cần bạn duyệt</p>}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs">
+                {sender && <span className="flex items-center gap-1"><CharAvatar user={sender} size={18} />{sender.name}</span>}
+                {recv && <span className="flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>→ <CharAvatar user={recv} size={18} />{recv.name}</span>}
+                <span style={{ color: 'var(--text-muted)' }}>{fmtShort(p.createdAt)} → {fmtShort(p.dueDate)}</span>
+              </div>
+              <div className="mt-2">
+                <button type="button" onClick={e => { e.stopPropagation(); setNoteFor(p) }}
+                  className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>📝 Work Note</button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <table className="hidden md:table border-collapse" style={{ width: '100%', minWidth: 960, tableLayout: 'fixed' }}>
         <colgroup>{cols.map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup>
         <thead>
           <tr style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
@@ -11843,7 +11921,60 @@ function ProjectListTable({ projects, tasks, users, currentUser, canSee, onOpen 
 
   return (
     <div className="w-full min-w-0 rounded-2xl overflow-x-auto" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
-      <table className="border-collapse" style={{ width: '100%', minWidth: 960, tableLayout: 'fixed' }}>
+            <div className="md:hidden">
+        {projects.length === 0 && (
+          <p className="px-4 py-8 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Không có dự án nào trong bộ lọc này.</p>
+        )}
+        {projects.map((p, i) => {
+          const st = PROJECT_STATUS[p.status] ?? PROJECT_STATUS.planning
+          const rk = PROJECT_RISK[p.riskLevel] ?? PROJECT_RISK.medium
+          const list = tasks.filter(t => t.projectId === p.id)
+          const done = list.filter(t => t.status === 'completed').length
+          const pct = list.length ? Math.round((done / list.length) * 100) : 0
+          const late = list.filter(t => t.status !== 'completed' && t.dueDate && t.dueDate < today).length
+          const waiting = list.filter(t => t.status === 'submitted').length
+          const pm = userOf(p.managerId)
+          return (
+            <div key={p.id} onClick={() => onOpen(p)} className="px-4 py-3 cursor-pointer"
+              style={{ borderTop: i === 0 ? undefined : '1px solid var(--border)', background: late > 0 ? '#dc262612' : undefined, color: 'var(--text-primary)' }}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-mono text-[11px] font-bold break-all" style={{ color: 'var(--text-muted)' }}>{p.code || '—'}</p>
+                  <p className="text-sm font-semibold leading-snug break-words mt-0.5">{p.name}</p>
+                </div>
+                {p.approvalStatus === 'pending'
+                  ? <span className="px-2 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap shrink-0" style={{ background: '#f59e0b22', color: '#b45309' }}>⏳ Chờ duyệt</span>
+                  : p.approvalStatus === 'rejected'
+                  ? <span className="px-2 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap shrink-0" style={{ background: '#dc262622', color: '#dc2626' }}>❌ Bị từ chối</span>
+                  : <span className="px-2 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap shrink-0" style={{ background: st[1], color: st[2] }}>{st[0]}</span>}
+              </div>
+              <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                {p.company ? (COMPANY_CODES[p.company] ?? p.company) : '—'} · {p.memberIds.length} thành viên · {list.length} task
+                {waiting > 0 && <span style={{ color: '#7c3aed' }}> · 📤 {waiting} chờ duyệt</span>}
+                {late > 0 && <span style={{ color: '#dc2626' }}> · ⚠️ {late} quá hạn</span>}
+              </p>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs">
+                <span className="font-bold">{p.priority}</span>
+                <span className="font-semibold" style={{ color: rk[1] }}>● {rk[0]}</span>
+                <span style={{ color: 'var(--text-muted)' }}>{fmtShort(p.plannedStart)} → {fmtShort(p.plannedEnd)}</span>
+                {pm && <span className="flex items-center gap-1"><CharAvatar user={pm} size={18} />{pm.name}</span>}
+              </div>
+              <div className="mt-2">
+                <div className="h-1.5 rounded-full overflow-hidden mb-1" style={{ background: 'var(--bg-card-alt)' }}>
+                  <div className="h-full" style={{ width: `${pct}%`, background: '#059669' }} />
+                </div>
+                <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{pct}% · {done}/{list.length}</span>
+              </div>
+              <div className="mt-2">
+                <button type="button" onClick={e => { e.stopPropagation(); setNoteFor(p) }}
+                  className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>📝 Work Note</button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <table className="hidden md:table border-collapse" style={{ width: '100%', minWidth: 960, tableLayout: 'fixed' }}>
         <colgroup>{cols.map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup>
         <thead>
           <tr style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
