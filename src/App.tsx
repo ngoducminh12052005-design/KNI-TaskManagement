@@ -12345,21 +12345,41 @@ function UserAdminForm({ initial, onClose, onSaved }: { initial: UserFormState; 
   const genCode = async () => {
     if (!f.teamId) return
     const { data: dep } = await supabase.from('departments').select('code_prefix').eq('id', f.teamId).maybeSingle()
-    const base = String(dep?.code_prefix ?? '').trim().toUpperCase()
-    if (!base) { set({ empCode: '' }); return }
+    let base = String(dep?.code_prefix ?? '').trim().toUpperCase()
+
+    // Phòng ban chưa đặt "Mã": suy ra tiền tố từ mã của những người đã có trong phòng ban này
+    if (!base) {
+      const { data: mates } = await supabase.from('profiles').select('emp_code, role').eq('team_id', f.teamId).not('emp_code', 'is', null)
+      const count: Record<string, number> = {}
+      ;(mates ?? []).forEach((r: any) => {
+        const m = /^([A-Z]+)-\d+$/.exec(String(r.emp_code ?? '').toUpperCase())
+        if (!m) return
+        let p = m[1]
+        if (r.role === 'manager' && p.length > 2 && p.endsWith('M') && p !== 'BOD') p = p.slice(0, -1)
+        count[p] = (count[p] ?? 0) + 1
+      })
+      base = Object.entries(count).sort((x, y) => y[1] - x[1])[0]?.[0] ?? ''
+    }
+    if (!base) {
+      set({ empCode: '' })
+      setHint('⚠️ Phòng ban này chưa có "Mã" (ví dụ IT) và chưa có ai mang mã NV. Vào Quản lý phòng ban đặt Mã rồi bấm "Sinh lại".')
+      return
+    }
+
     const prefix = f.role === 'manager' && !['BOD', 'QT'].includes(base) ? `${base}M` : base
-    const [a, b] = await Promise.all([
-      supabase.from('profiles').select('emp_code').like('emp_code', `${prefix}-%`),
-      supabase.from('staff_directory').select('emp_code').like('emp_code', `${prefix}-%`),
-    ])
+    // Đếm trong cùng công ty (nếu đã chọn) ở cả hồ sơ lẫn danh bạ
+    let qa = supabase.from('profiles').select('emp_code').like('emp_code', `${prefix}-%`)
+    let qb = supabase.from('staff_directory').select('emp_code').like('emp_code', `${prefix}-%`)
+    if (f.company) { qa = qa.eq('company', f.company); qb = qb.eq('company', f.company) }
+    const [a, b] = await Promise.all([qa, qb])
     const re = new RegExp(`^${prefix}-(\\d+)$`)
     const max = [...(a.data ?? []), ...(b.data ?? [])].reduce((m: number, r: any) => {
-      const x = re.exec(String(r.emp_code ?? ''))
+      const x = re.exec(String(r.emp_code ?? '').toUpperCase())
       return x ? Math.max(m, parseInt(x[1], 10)) : m
     }, 0)
     set({ empCode: `${prefix}-${String(max + 1).padStart(2, '0')}` })
   }
-  useEffect(() => { if (!editing && !codeTouched) genCode() }, [f.teamId, f.role])
+  useEffect(() => { if (!editing && !codeTouched) genCode() }, [f.teamId, f.role, f.company])
   const DIR_DEPT: Record<string, string> = { BOD: 'bod', QT: 'vphdqt', FS: 'fs', FSM: 'fs', AC: 'ac', ACM: 'ac', HR: 'hr', HRM: 'hr', IT: 'it', ITM: 'it', PR: 'pr', PRM: 'pr' }
   // Gõ email xong thì tra danh bạ Excel và điền sẵn các ô còn lại
   const lookupEmail = async () => {
