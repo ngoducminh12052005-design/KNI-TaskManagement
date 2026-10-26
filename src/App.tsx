@@ -12070,7 +12070,7 @@ function StaffDirectoryView() {
   const td = 'px-3 py-2.5 text-xs align-middle'
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-3 sm:p-6 max-w-7xl mx-auto">
       <div className="mb-5">
         <h2 className="text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>📇 Danh bạ nhân sự</h2>
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{shown.length} nhân sự · {depts.length} bộ phận</p>
@@ -12291,13 +12291,13 @@ function UserAdminForm({ initial, onClose, onSaved }: { initial: UserFormState; 
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2"><label className={label}>Họ tên *</label><input value={f.name} onChange={e => set({ name: e.target.value })} className={box} style={ink} /></div>
-              <div className="col-span-2"><label className={label}>Email đăng nhập *</label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="sm:col-span-2"><label className={label}>Họ tên *</label><input value={f.name} onChange={e => set({ name: e.target.value })} className={box} style={ink} /></div>
+              <div className="sm:col-span-2"><label className={label}>Email đăng nhập *</label>
                 <input value={f.email} onChange={e => set({ email: e.target.value })} onBlur={lookupEmail} disabled={editing} className={`${box} disabled:bg-gray-100`} style={ink} />
                 {hint && <p className="text-xs mt-1" style={{ color: hint.startsWith('✅') ? '#047857' : '#b45309' }}>{hint}</p>}</div>
               {!editing && (
-                <div className="col-span-2"><label className={label}>Mật khẩu tạm * (người dùng sẽ phải đổi khi đăng nhập lần đầu)</label>
+                <div className="sm:col-span-2"><label className={label}>Mật khẩu tạm * (người dùng sẽ phải đổi khi đăng nhập lần đầu)</label>
                   <div className="flex gap-2">
                     <input value={f.password} onChange={e => set({ password: e.target.value })} className={`${box} font-mono`} style={ink} />
                     <button type="button" onClick={() => set({ password: genTempPassword() })} className="px-3 rounded border border-gray-300 text-xs whitespace-nowrap">Tạo ngẫu nhiên</button>
@@ -12456,12 +12456,12 @@ function UserAdminView({ currentUser, users }: { currentUser: User; users: User[
   )
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
+    <div className="p-3 sm:p-6 max-w-7xl mx-auto">
       <div className="mb-5">
         <h2 className="text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>🛠️ Quản lý người dùng</h2>
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Chỉ phòng IT thấy trang này. Đang đăng nhập: {currentUser.name}</p>
       </div>
-      <div className="flex gap-2 mb-4">{tabBtn('users', `👤 Người dùng (${users.length})`)}{tabBtn('depts', `🏢 Phòng ban (${depts.length})`)}</div>
+      <div className="flex flex-wrap gap-2 mb-4">{tabBtn('users', `👤 Người dùng (${users.length})`)}{tabBtn('depts', `🏢 Phòng ban (${depts.length})`)}</div>
       {msg && <p className="text-sm mb-3" style={{ color: '#dc2626' }}>{msg}</p>}
 
       {tab === 'users' && (
@@ -12471,7 +12471,7 @@ function UserAdminView({ currentUser, users }: { currentUser: User; users: User[
               className="flex-1 min-w-[220px] px-3 py-2.5 rounded-lg text-sm outline-none" style={sel} />
             <button type="button" onClick={openCreate} className="px-4 py-2.5 rounded-xl font-bold text-white text-sm" style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>+ Tạo người dùng</button>
           </div>
-          <div className="rounded-2xl overflow-x-auto" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
+          <div className="hidden md:block rounded-2xl overflow-x-auto" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
             <table className="w-full border-collapse" style={{ minWidth: 900 }}>
               <thead><tr style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
                 {['Mã NV', 'Họ tên', 'Email', 'Chức vụ', 'Phòng ban', 'Vai trò', ''].map(h => <th key={h} className={th}>{h}</th>)}
@@ -12502,6 +12502,41 @@ function UserAdminView({ currentUser, users }: { currentUser: User; users: User[
                 ))}
               </tbody>
             </table>
+          </div>
+                    <div className="md:hidden space-y-3">
+            {list.map(u => (
+              <div key={u.id} className="rounded-2xl p-4" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)', color: 'var(--text-primary)', opacity: u.isActive === false ? 0.55 : 1 }}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-bold text-sm break-words">{u.name}</p>
+                    <p className="text-[11px] font-mono font-bold" style={{ color: 'var(--text-muted)' }}>{u.empCode ? `${u.company ? u.company + '-' : ''}${u.empCode}` : 'Chưa có mã NV'}</p>
+                  </div>
+                  <span className="text-[10px] px-2 py-0.5 rounded font-bold shrink-0" style={{ background: u.role === 'manager' ? '#a78bfa22' : 'var(--bg-card-alt)', color: u.role === 'manager' ? '#8b5cf6' : 'var(--text-muted)' }}>{u.role === 'manager' ? 'QUẢN LÝ' : 'NHÂN VIÊN'}</span>
+                </div>
+                {(u.mustChangePassword || u.isActive === false) && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {u.mustChangePassword && <span className="text-[9px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#f59e0b22', color: '#b45309' }}>CHƯA ĐỔI MK</span>}
+                    {u.isActive === false && <span className="text-[9px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#dc262622', color: '#dc2626' }}>ĐÃ KHÓA</span>}
+                  </div>
+                )}
+                <p className="text-xs mt-2 break-all">{u.email ?? '—'}</p>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{u.position ?? '—'}</p>
+                <p className="text-xs mt-0.5">
+                  {deptName(u.teamId)}
+                  {extraOf(u.id).length > 0 && <span style={{ color: 'var(--text-muted)' }}> + {extraOf(u.id).map(deptName).join(', ')}</span>}
+                </p>
+                <div className="flex flex-wrap gap-x-4 gap-y-2 mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+                  <button type="button" onClick={() => openEdit(u)} className="text-xs font-semibold" style={{ color: '#2563eb' }}>Sửa</button>
+                  <button type="button" onClick={() => { setResetFor(u); setResetPw(genTempPassword()); setResetMsg('') }} className="text-xs font-semibold" style={{ color: '#b45309' }}>Đặt lại MK</button>
+                  {u.id !== currentUser.id && (
+                    <>
+                      <button type="button" onClick={() => toggleActive(u)} className="text-xs font-semibold" style={{ color: u.isActive === false ? '#059669' : '#7c3aed' }}>{u.isActive === false ? 'Mở khóa' : 'Khóa'}</button>
+                      <button type="button" onClick={() => removeUser(u)} className="text-xs font-semibold" style={{ color: '#dc2626' }}>Xóa</button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         </>
       )}
