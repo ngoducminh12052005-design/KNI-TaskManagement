@@ -12239,7 +12239,7 @@ function UserAdminForm({ initial, onClose, onSaved }: { initial: UserFormState; 
     if (!data) { setHint('Email này không có trong danh bạ Excel, hãy nhập tay các thông tin bên dưới.'); return }
     const pre = String(data.emp_code).split('-')[0]
     const dept = DIR_DEPT[pre] ?? ''
-    const isMgr = /^[A-Z]+M$/.test(pre)
+    const isMgr = /^[A-Z]+M$/.test(pre) || pre === 'BOD'
     setCodeTouched(true)
     set({
       name: data.full_name, company: data.company ?? 'KNI', empCode: data.emp_code, position: data.position ?? '', line: data.internal_line ?? '',
