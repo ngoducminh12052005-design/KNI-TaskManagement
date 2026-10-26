@@ -1430,7 +1430,7 @@ function DashboardProposals({ proposals, currentUser, users, onOpen, onViewAll, 
         </p>
       ) : (
         <div className="w-full min-w-0 rounded-2xl overflow-x-auto" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
-          <table className="border-collapse" style={{ width: '100%', tableLayout: 'fixed' }}>
+          <table className="border-collapse" style={{ width: '100%', minWidth: 960, tableLayout: 'fixed' }}>
             <colgroup>{cols.map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup>
             <thead>
               <tr style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
@@ -1559,7 +1559,7 @@ function DashboardProjects({ currentUser, users, onOpen, onViewAll }: {
         <p className="text-xs py-3 text-center" style={{ color: 'var(--text-muted)' }}>Không có dự án nào ở trạng thái này.</p>
       ) : (
         <div className="w-full min-w-0 rounded-2xl overflow-x-auto" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
-          <table className="border-collapse" style={{ width: '100%', tableLayout: 'fixed' }}>
+          <table className="border-collapse" style={{ width: '100%', minWidth: 960, tableLayout: 'fixed' }}>
             <colgroup>{cols.map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup>
             <thead>
               <tr style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
@@ -4215,7 +4215,7 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
 
   return (
     <div className="w-full min-w-0 rounded-2xl overflow-x-auto" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
-      <table className="border-collapse table-fixed" style={{ width: '100%', tableLayout: 'fixed' }}>
+      <table className="border-collapse table-fixed" style={{ width: '100%', minWidth: 960, tableLayout: 'fixed' }}>
         <colgroup>{cols.map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup>
         <thead>
           <tr style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
@@ -10147,7 +10147,7 @@ function ProposalListTable({ proposals, users, currentUser, isMyTurn, onOpen }: 
 
   return (
     <div className="w-full min-w-0 rounded-2xl overflow-x-auto" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
-      <table className="border-collapse" style={{ width: '100%', tableLayout: 'fixed' }}>
+      <table className="border-collapse" style={{ width: '100%', minWidth: 960, tableLayout: 'fixed' }}>
         <colgroup>{cols.map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup>
         <thead>
           <tr style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
@@ -11843,7 +11843,7 @@ function ProjectListTable({ projects, tasks, users, currentUser, canSee, onOpen 
 
   return (
     <div className="w-full min-w-0 rounded-2xl overflow-x-auto" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
-      <table className="border-collapse" style={{ width: '100%', tableLayout: 'fixed' }}>
+      <table className="border-collapse" style={{ width: '100%', minWidth: 960, tableLayout: 'fixed' }}>
         <colgroup>{cols.map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup>
         <thead>
           <tr style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
