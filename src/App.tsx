@@ -12974,7 +12974,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
             onClose={() => setViewingEmployee(null)} />
         )}
         {/* Bottom nav — chỉ hiện trên mobile */}
-      <div className="flex md:hidden items-center justify-around py-2 flex-shrink-0"
+      <div className="flex md:hidden items-center py-2 flex-shrink-0 overflow-x-auto"
         style={{ background: 'var(--bg-sidebar)', borderTop: '1px solid var(--border)' }}>
         {navItems.map(item => (
           <button key={item.id}
@@ -12982,10 +12982,10 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
               setView(item.id as View)
               if (item.id === 'social' && mentionCount > 0) setShowMentions(true)
             }}
-            className="relative flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-lg"
+            className="relative flex flex-col items-center justify-center gap-0.5 px-1 py-1 rounded-lg flex-shrink-0 w-14"
             style={{ color: view === item.id ? '#6d5ae6' : 'var(--text-muted)' }}>
             <span className="text-lg">{item.icon}</span>
-            <span className="text-[9px]">{item.label}</span>
+            <span className="text-[9px] text-center leading-tight">{item.label === 'Quản lý người dùng' ? 'Người dùng' : item.label}</span>
             {item.id === 'social' && mentionCount > 0 && (
               <span className="absolute top-0 right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center font-bold">
                 {mentionCount > 9 ? '9+' : mentionCount}
