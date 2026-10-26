@@ -12179,12 +12179,31 @@ function StaffDirectoryView() {
   const [q, setQ] = useState('')
 
   useEffect(() => {
-    supabase.from('staff_directory').select('*').order('dept_order').order('stt').then(({ data, error }) => {
-      if (error) setErr(error.message)
-      setRows((data ?? []).map((r: any) => ({
+    Promise.all([
+      supabase.from('staff_directory').select('*').order('dept_order').order('stt'),
+      supabase.from('profiles').select('id, name, email, emp_code, company, position, internal_line, department, is_active'),
+    ]).then(([d, p]) => {
+      if (d.error) setErr(d.error.message)
+      const dir: StaffRow[] = (d.data ?? []).map((r: any) => ({
         id: r.id, company: r.company, dept: r.dept, deptOrder: r.dept_order, stt: r.stt, empCode: r.emp_code,
         fullName: r.full_name, position: r.position ?? undefined, line: r.internal_line ?? undefined, email: r.email ?? undefined,
-      })))
+      }))
+      // Người tạo trong "Quản lý người dùng" chưa có trong danh bạ Excel: gộp thêm (so theo email hoặc mã NV)
+      const emails = new Set(dir.map(r => (r.email ?? '').toLowerCase()).filter(Boolean))
+      const codes = new Set(dir.map(r => `${r.company}-${r.empCode}`.toUpperCase()))
+      const extra: StaffRow[] = (p.data ?? [])
+        .filter((u: any) => u.is_active !== false
+          && !emails.has(String(u.email ?? '').toLowerCase())
+          && !(u.emp_code && codes.has(`${u.company ?? 'KNI'}-${u.emp_code}`.toUpperCase())))
+        .map((u: any, i: number) => {
+          const dept = u.department ?? 'Chưa phân bộ phận'
+          const known = dir.find(r => r.dept === dept && (!u.company || r.company === u.company))
+          return {
+            id: -(i + 1), company: u.company ?? 'KNI', dept: known?.dept ?? dept, deptOrder: known?.deptOrder ?? 900, stt: 900 + i,
+            empCode: u.emp_code ?? '', fullName: u.name, position: u.position ?? undefined, line: u.internal_line ?? undefined, email: u.email ?? undefined,
+          }
+        })
+      setRows([...dir, ...extra].sort((a, b) => a.deptOrder - b.deptOrder || a.stt - b.stt))
       setLoading(false)
     })
   }, [])
@@ -12243,7 +12262,7 @@ function StaffDirectoryView() {
                     {list.map((r, i) => (
                       <tr key={r.id} style={{ borderTop: '1px solid var(--border)', color: 'var(--text-primary)' }}>
                         <td className={td} style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
-                        <td className={`${td} font-mono font-bold whitespace-nowrap`}>{r.company}-{r.empCode}</td>
+                        <td className={`${td} font-mono font-bold whitespace-nowrap`}>{r.empCode ? `${r.company}-${r.empCode}` : '—'}</td>
                         <td className={`${td} font-semibold`}>
                           {r.fullName}
                           {isLeadCode(r.empCode) && <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>QUẢN LÝ</span>}
@@ -12359,6 +12378,10 @@ function UserAdminForm({ initial, onClose, onSaved }: { initial: UserFormState; 
         count[p] = (count[p] ?? 0) + 1
       })
       base = Object.entries(count).sort((x, y) => y[1] - x[1])[0]?.[0] ?? ''
+    }
+    if (!base) {
+      // Phòng ban chính chưa đặt Mã: dùng bảng quy ước (it → IT, hr → HR, ...)
+      base = Object.entries(DIR_DEPT).find(([p, d]) => d === f.teamId && !p.endsWith('M'))?.[0] ?? ''
     }
     if (!base) {
       set({ empCode: '' })
