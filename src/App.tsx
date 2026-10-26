@@ -1429,7 +1429,7 @@ function DashboardProposals({ proposals, currentUser, users, onOpen, onViewAll, 
             : 'Không có tờ trình / đề xuất nào trong bộ lọc này.'}
         </p>
       ) : (
-        <div className="w-full min-w-0 rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
+        <div className="w-full min-w-0 rounded-2xl overflow-x-auto" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
           <table className="border-collapse" style={{ width: '100%', tableLayout: 'fixed' }}>
             <colgroup>{cols.map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup>
             <thead>
@@ -1558,7 +1558,7 @@ function DashboardProjects({ currentUser, users, onOpen, onViewAll }: {
       ) : filtered.length === 0 ? (
         <p className="text-xs py-3 text-center" style={{ color: 'var(--text-muted)' }}>Không có dự án nào ở trạng thái này.</p>
       ) : (
-        <div className="w-full min-w-0 rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
+        <div className="w-full min-w-0 rounded-2xl overflow-x-auto" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
           <table className="border-collapse" style={{ width: '100%', tableLayout: 'fixed' }}>
             <colgroup>{cols.map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup>
             <thead>
@@ -4214,7 +4214,7 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
   const toTracker: Record<TaskBucket, string> = { new: 'received', received: 'received', processing: 'processing', pending: 'pending', completed: 'complete', closed: 'closed' }
 
   return (
-    <div className="w-full min-w-0 rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
+    <div className="w-full min-w-0 rounded-2xl overflow-x-auto" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
       <table className="border-collapse table-fixed" style={{ width: '100%', tableLayout: 'fixed' }}>
         <colgroup>{cols.map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup>
         <thead>
@@ -10146,7 +10146,7 @@ function ProposalListTable({ proposals, users, currentUser, isMyTurn, onOpen }: 
     : <span>—</span>
 
   return (
-    <div className="w-full min-w-0 rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
+    <div className="w-full min-w-0 rounded-2xl overflow-x-auto" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
       <table className="border-collapse" style={{ width: '100%', tableLayout: 'fixed' }}>
         <colgroup>{cols.map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup>
         <thead>
@@ -11842,7 +11842,7 @@ function ProjectListTable({ projects, tasks, users, currentUser, canSee, onOpen 
   const today = new Date().toISOString().split('T')[0]
 
   return (
-    <div className="w-full min-w-0 rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
+    <div className="w-full min-w-0 rounded-2xl overflow-x-auto" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
       <table className="border-collapse" style={{ width: '100%', tableLayout: 'fixed' }}>
         <colgroup>{cols.map((w, i) => <col key={i} style={{ width: `${w}%` }} />)}</colgroup>
         <thead>
