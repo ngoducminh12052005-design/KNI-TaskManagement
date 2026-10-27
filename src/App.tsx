@@ -109,6 +109,8 @@ interface Task {
   completeIssue?: string
   closeResult?: 'successful' | 'with_issue'
   closeNote?: string
+  submissionAttachments?: { name: string; path: string; size: number; type: string }[]
+  closeAttachments?: { name: string; path: string; size: number; type: string }[]
 }
 
 interface Message {
@@ -2128,6 +2130,11 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   task: Task; users: User[]; currentUser: User; canApprove: boolean; canEdit: boolean; canSend?: boolean
   onClose: () => void; onOpenPhieu: () => void; onEdit?: () => void; onOpenInTasks?: () => void
 }) {
+  const [showComplete, setShowComplete] = useState(false)
+  const [showClose, setShowClose] = useState(false)
+  const isAssignee = task.assignedTo.includes(currentUser.id)
+  const canComplete = isAssignee && task.status === 'in-progress' && task.workStatus !== 'pending' && !task.pendingRequestedAt && !task.isLocked && !isTaskGated(task)
+  const canClose = currentUser.role === 'manager' && !isAssignee && task.status === 'submitted'
   const f: any = task.formData ?? {}
   const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
   const names = (ids: string[]) => (ids.length ? ids.map(nameOf).join(', ') : '—')
@@ -2257,6 +2264,12 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
                 <button type="button" onClick={() => approveSelfTask(task, currentUser)} className={`${btn} text-white`} style={{ background: '#059669' }}>✓ Duyệt cho làm</button>
               </>
             )}
+            {canComplete && (
+              <button type="button" onClick={() => setShowComplete(true)} className={`${btn} text-white`} style={{ background: '#059669' }}>✓ Complete</button>
+            )}
+            {canClose && (
+              <button type="button" onClick={() => setShowClose(true)} className={`${btn} text-white`} style={{ background: '#7c3aed' }}>🔒 Close</button>
+            )}
             {onOpenInTasks && (
               <button type="button" onClick={onOpenInTasks} className={`${btn} text-white`} style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>🗂 Mở thẻ thao tác</button>
             )}
@@ -2347,6 +2360,31 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
               </section>
             )}
 
+            {(task.submittedAt || task.status === 'completed') && (
+              <section className="rounded-xl p-5" style={card}>
+                <h3 className={h3} style={{ color: 'var(--text-primary)' }}>📦 Kết quả</h3>
+                {task.submittedAt && (
+                  <div className="mb-3">
+                    <p className="text-sm font-semibold" style={{ color: task.completeIssue ? '#dc2626' : '#059669' }}>
+                      {task.completeIssue ? '⚠️ Complete with issue' : '✅ Complete successful'} · {names(task.assignedTo)} · {fmtDT(task.submittedAt)}
+                    </p>
+                    {task.completeIssue && <p className="text-xs mt-0.5" style={{ color: '#dc2626' }}>Issue: {task.completeIssue}</p>}
+                    {task.submissionNote && <p className="text-sm whitespace-pre-wrap mt-1" style={{ color: 'var(--text-primary)' }}>{task.submissionNote}</p>}
+                    <AttachmentList items={task.submissionAttachments} link={task.submissionFileUrl} />
+                  </div>
+                )}
+                {task.status === 'completed' && (
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: task.closeResult === 'with_issue' ? '#b45309' : '#059669' }}>
+                      {task.closeResult === 'with_issue' ? '🔒 Close with issue' : '🔒 Close successful'} · {task.approvedBy ? nameOf(task.approvedBy) : names(task.assignedTo)} · {fmtDT(task.approvedAt)}
+                    </p>
+                    {task.closeNote && <p className="text-sm whitespace-pre-wrap mt-1" style={{ color: 'var(--text-primary)' }}>{task.closeNote}</p>}
+                    <AttachmentList items={task.closeAttachments} />
+                  </div>
+                )}
+              </section>
+            )}
+
             <section className="rounded-xl p-5" style={card}>
               <h3 className={h3} style={{ color: 'var(--text-primary)' }}>📝 Work Note</h3>
               <TaskWorkNotePanel taskId={task.id} currentUser={currentUser} users={users} />
@@ -2389,6 +2427,8 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
           </div>
         </div>
       </div>
+      {showComplete && <SubmitTaskModal task={task} currentUser={currentUser} users={users} onClose={() => setShowComplete(false)} />}
+      {showClose && <CloseTaskModal task={task} currentUser={currentUser} users={users} onClose={() => setShowClose(false)} />}
     </div>
   )
 }
@@ -2502,6 +2542,16 @@ function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, canSen
           {f.thongTinKhac && <>{heading('THÔNG TIN KHÁC')}{para(f.thongTinKhac)}</>}
           {f.yeuCau && <>{heading('YÊU CẦU THỰC HIỆN')}{para(f.yeuCau)}</>}
           {(task.creationApproval === 'rejected' || task.creationApproval === 'draft') && task.creationRejectedReason && <p className="text-xs text-red-600 mb-4">Lý do từ chối: {task.creationRejectedReason}</p>}
+
+          {task.submittedAt && (<>
+            {heading('KẾT QUẢ COMPLETE')}
+            <p className="mb-1">{task.completeIssue ? `Complete with issue: ${task.completeIssue}` : 'Complete successful'}</p>
+            {para(task.submissionNote)}
+          </>)}
+          {task.status === 'completed' && (<>
+            {heading('KẾT QUẢ CLOSE')}
+            <p className="mb-4">{task.closeResult === 'with_issue' ? 'Close with issue' : 'Close successful'}{task.closeNote ? `: ${task.closeNote}` : ''}</p>
+          </>)}
 
           <div className="grid grid-cols-3 gap-4 mt-8 text-center">
             <div><p className="font-bold">Người giao task</p><p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p><p className="mt-8 font-semibold">{nameOf(task.createdBy)}{task.selfCreated ? ' (tự tạo)' : ''}</p></div>
@@ -2678,6 +2728,43 @@ const myTasks = tasks.filter(t =>
   )
 }
 
+function FilePicker({ files, setFiles }: { files: File[]; setFiles: (f: File[]) => void }) {
+  const add = (list: FileList | null) => {
+    if (!list) return
+    const next = [...files, ...Array.from(list)]
+    if (next.length > MAX_FILES) { alert(`Tối đa ${MAX_FILES} file. Nhiều hơn thì bỏ vào Drive rồi dán link.`); return }
+    if (next.some(f => f.size > MAX_FILE_MB * 1024 * 1024)) { alert(`Mỗi file tối đa ${MAX_FILE_MB}MB. File lớn hơn thì bỏ vào Drive rồi dán link.`); return }
+    setFiles(next)
+  }
+  return (
+    <div className="mb-4">
+      <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Ảnh / file đính kèm</label>
+      <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+        onChange={e => { add(e.target.files); e.target.value = '' }}
+        className="text-xs w-full" style={{ color: 'var(--text-muted)' }} />
+      {files.map((f, i) => (
+        <div key={i} className="flex items-center justify-between text-xs mt-1" style={{ color: 'var(--text-primary)' }}>
+          <span className="truncate">📎 {f.name}</span>
+          <button type="button" onClick={() => setFiles(files.filter((_, j) => j !== i))} style={{ color: '#dc2626' }}>✕</button>
+        </div>
+      ))}
+      <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>💡 Nhiều file hoặc hình ảnh: bỏ vào Drive (bật quyền xem) rồi dán link ở ô bên dưới.</p>
+    </div>
+  )
+}
+
+function AttachmentList({ items, link }: { items?: { name: string; path: string }[]; link?: string }) {
+  if (!(items?.length) && !link) return null
+  return (
+    <div className="flex flex-col gap-1 mt-1">
+      {(items ?? []).map((a, i) => (
+        <button key={i} type="button" onClick={() => openProposalFile(a.path)} className="text-xs underline text-left" style={{ color: '#3b82f6' }}>📎 {a.name}</button>
+      ))}
+      {link && <a href={link} target="_blank" rel="noopener noreferrer" className="text-xs underline" style={{ color: '#3b82f6' }}>📁 Link Drive</a>}
+    </div>
+  )
+}
+
 function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; currentUser: User; users: User[]; onClose: () => void }) {
   const [driveLink, setDriveLink] = useState('')
   const [ownFolderUrl, setOwnFolderUrl] = useState('')
@@ -2685,6 +2772,7 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
   const [note, setNote] = useState('')
   const [hasIssue, setHasIssue] = useState(false)
   const [issueText, setIssueText] = useState('')
+  const [files, setFiles] = useState<File[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -2705,15 +2793,18 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
       setError('Link folder không hợp lệ, vui lòng dán đúng đường dẫn Google Drive.')
       return
     }
-    if (needsOwnFolderName && !folderName.trim()) {
+    if (needsOwnFolderName && driveLink.trim() && !folderName.trim()) {
       setError('Vui lòng ghi tên folder bạn đã tự tạo trước khi nộp.')
       return
     }
-    if (!driveLink.trim()) { setError('Vui lòng dán link Google Drive chứa file/folder kết quả trước khi nộp.'); return }
-    if (!/^https?:\/\//i.test(driveLink.trim())) { setError('Link không hợp lệ, vui lòng dán đúng đường dẫn Google Drive.'); return }
+    if (files.length === 0 && !driveLink.trim() && !note.trim()) { setError('Vui lòng đính kèm ảnh/file, dán link Drive hoặc ghi chú kết quả.'); return }
+    if (driveLink.trim() && !/^https?:\/\//i.test(driveLink.trim())) { setError('Link không hợp lệ, vui lòng dán đúng đường dẫn Google Drive.'); return }
     if (hasIssue && !issueText.trim()) { setError('Bạn chọn "Complete with issue", vui lòng ghi rõ issue là gì.'); return }
     setError('')
     setSaving(true)
+    let uploaded: { name: string; path: string; size: number; type: string }[] = []
+    try { uploaded = await uploadProposalFiles(currentUser.id, files) }
+    catch (e: any) { setSaving(false); setError('Upload file lỗi: ' + (e?.message ?? '')); return }
 
     // Dừng đồng hồ xử lý, cộng dồn thời gian đã chạy
     const elapsed = task.processingStartedAt
@@ -2731,9 +2822,10 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
       processing_started_at: null,
       total_processing_seconds: (task.totalProcessingSeconds ?? 0) + elapsed,
       complete_issue: hasIssue ? issueText.trim() : null,
-      submission_file_url: driveLink.trim(),
+      submission_file_url: driveLink.trim() || null,
+      submission_attachments: uploaded,
       submission_own_folder_url: task.selfCreated ? ownFolderUrl.trim() : null,
-      submission_folder_name: needsOwnFolderName ? folderName.trim() : null,
+      submission_folder_name: needsOwnFolderName && folderName.trim() ? folderName.trim() : null,
       submission_note: note.trim() || null,
       submitted_at: new Date().toISOString(),
       rejected_reason: null,
@@ -2779,6 +2871,30 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
       <div className="w-full max-w-md rounded-2xl p-6 max-h-[90vh] overflow-y-auto" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
         <h3 className="font-bold text-lg mb-1" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>Complete task</h3>
         <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>{task.title}</p>
+
+        <div className="mb-4 p-3 rounded-lg" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
+          <p className="text-xs uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Kết quả Complete *</p>
+          <div className="flex gap-2 mb-2">
+            <button type="button" onClick={() => setHasIssue(false)}
+              className="flex-1 py-2 rounded-lg text-xs font-bold"
+              style={{ background: !hasIssue ? '#34d39922' : 'transparent', color: !hasIssue ? '#059669' : 'var(--text-muted)', border: `1px solid ${!hasIssue ? '#059669' : 'var(--border)'}` }}>
+              ✅ Complete successful
+            </button>
+            <button type="button" onClick={() => setHasIssue(true)}
+              className="flex-1 py-2 rounded-lg text-xs font-bold"
+              style={{ background: hasIssue ? '#f8717122' : 'transparent', color: hasIssue ? '#dc2626' : 'var(--text-muted)', border: `1px solid ${hasIssue ? '#dc2626' : 'var(--border)'}` }}>
+              ⚠️ Complete with issue
+            </button>
+          </div>
+          {hasIssue && (
+            <textarea value={issueText} onChange={e => setIssueText(e.target.value)} rows={2}
+              placeholder="Ghi rõ issue là gì (VD: trễ do chờ nhà cung cấp, thiếu dữ liệu đầu vào...)"
+              className="w-full px-3 py-2 rounded-lg text-xs outline-none resize-none placeholder-[color:var(--text-muted)]"
+              style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+          )}
+        </div>
+
+        <FilePicker files={files} setFiles={setFiles} />
 
         {task.selfCreated ? (
           <div className="mb-4 p-3 rounded-lg" style={{ background: '#fbbf2414', border: '1px solid #fbbf2440' }}>
@@ -2829,7 +2945,7 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
 
         {needsOwnFolderName && (
           <>
-            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Tên folder bạn đã tự tạo *</label>
+            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Tên folder bạn đã tự tạo (khi có dán link Drive)</label>
             <input value={folderName} onChange={e => setFolderName(e.target.value)}
               placeholder="VD: Nộp task - Nguyễn Văn A"
               className="w-full px-3 py-2.5 rounded-lg text-sm outline-none mb-4 placeholder-[color:var(--text-muted)]"
@@ -2837,7 +2953,7 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
           </>
         )}
 
-        <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Dán link file/folder đã nộp *</label>
+        <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Dán link Google Drive (nếu có nhiều file / hình ảnh)</label>
         <input value={driveLink} onChange={e => setDriveLink(e.target.value)}
           placeholder="https://drive.google.com/file/d/... hoặc /folders/..."
           className="w-full px-3 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
@@ -2845,27 +2961,6 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
         <p className="text-[10px] mt-1.5 mb-4 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
           💡 Bấm chuột phải vào file/folder → "Chia sẻ" → bật quyền <b>"Bất kỳ ai có link đều xem và chỉnh sửa được"</b> → "Sao chép đường liên kết", rồi dán vào đây.
         </p>
-                <div className="mb-4 p-3 rounded-lg" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
-          <p className="text-xs uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Kết quả Complete *</p>
-          <div className="flex gap-2 mb-2">
-            <button type="button" onClick={() => setHasIssue(false)}
-              className="flex-1 py-2 rounded-lg text-xs font-bold"
-              style={{ background: !hasIssue ? '#34d39922' : 'transparent', color: !hasIssue ? '#059669' : 'var(--text-muted)', border: `1px solid ${!hasIssue ? '#059669' : 'var(--border)'}` }}>
-              ✅ Complete successful
-            </button>
-            <button type="button" onClick={() => setHasIssue(true)}
-              className="flex-1 py-2 rounded-lg text-xs font-bold"
-              style={{ background: hasIssue ? '#f8717122' : 'transparent', color: hasIssue ? '#dc2626' : 'var(--text-muted)', border: `1px solid ${hasIssue ? '#dc2626' : 'var(--border)'}` }}>
-              ⚠️ Complete with issue
-            </button>
-          </div>
-          {hasIssue && (
-            <textarea value={issueText} onChange={e => setIssueText(e.target.value)} rows={2}
-              placeholder="Ghi rõ issue là gì (VD: trễ do chờ nhà cung cấp, thiếu dữ liệu đầu vào...)"
-              className="w-full px-3 py-2 rounded-lg text-xs outline-none resize-none placeholder-[color:var(--text-muted)]"
-              style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
-          )}
-        </div>
         <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Ghi chú (không bắt buộc)</label>
         <textarea value={note} onChange={e => setNote(e.target.value)} rows={3}
           placeholder="Mô tả ngắn gọn kết quả đã làm..."
@@ -2888,6 +2983,173 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
     </div>
   )
 }
+
+async function closeTask(
+  task: Task, result: 'successful' | 'with_issue', closeNote: string,
+  attachments: { name: string; path: string; size: number; type: string }[],
+  currentUser: User, users: User[],
+): Promise<boolean> {
+  const closeLabel = result === 'with_issue' ? 'Close with issue' : 'Close successful'
+  const approvedAt = new Date().toISOString()
+
+  const { error: approveError } = await supabase.from('tasks').update({
+    status: 'completed',
+    approved_by: currentUser.id,
+    approved_at: approvedAt,
+    close_result: result,
+    close_note: closeNote.trim() || null,
+    close_attachments: attachments,
+  }).eq('id', task.id)
+
+  if (approveError) {
+    alert('Không thể đóng task: ' + approveError.message)
+    return false
+  }
+
+  const isTeamwork = task.isTeamProject || task.assignedTo.length > 1 || task.supporters.length > 0
+  const supportExp = Math.round(task.expReward * SUPPORTER_EXP_PERCENT)
+
+  const bodUsers = users.filter(u => u.isDirector && u.id !== currentUser.id)
+  const taskOwnerIds = Array.from(new Set([
+    ...task.assignedTo,
+    task.createdBy,
+  ])).filter(Boolean)
+
+  const taskOwnerNames = taskOwnerIds
+    .map(uid => users.find(u => u.id === uid)?.name)
+    .filter(Boolean)
+    .join(', ')
+
+  const taskTypeLabel = task.selfCreated ? 'task tự tạo' : 'task được giao'
+  const departmentName = TEAMS.find(t => t.id === currentUser.teamId)?.name ?? currentUser.department
+
+  for (const bod of bodUsers) {
+    await supabase.from('notifications').insert({
+      message: `📢 ${currentUser.name} (${departmentName}) đã ${closeLabel} ${taskTypeLabel}: "${task.title}"${taskOwnerNames ? ` — Nhân sự: ${taskOwnerNames}` : ''}`,
+      target_user_id: bod.id,
+      link_task_id: task.id,
+    })
+  }
+
+  const rewardedIds = Array.from(new Set([...task.assignedTo, ...task.supporters]))
+    .filter(uid => uid && uid !== currentUser.id)
+  for (const uid of rewardedIds) {
+    const isSupporter = task.supporters.includes(uid) && !task.assignedTo.includes(uid)
+    const earnedExp = isSupporter ? supportExp : task.expReward
+    await supabase.from('notifications').insert({
+      message: `✅ ${currentUser.name} đã ${closeLabel} task: "${task.title}" — bạn nhận được +${earnedExp} EXP`,
+      target_user_id: uid,
+      link_task_id: task.id,
+    })
+  }
+
+  const pmIds = task.projectManager.filter(uid => uid && uid !== currentUser.id)
+  for (const uid of pmIds) {
+    const pm = users.find(u => u.id === uid)
+    const eligibleForExp = pm?.role === 'employee' || task.selfCreated || isTeamwork
+    await supabase.from('notifications').insert({
+      message: eligibleForExp
+        ? `✅ ${currentUser.name} đã ${closeLabel} task: "${task.title}" — bạn nhận được +${task.expReward} EXP`
+        : `✅ ${currentUser.name} đã duyệt task: "${task.title}" (task cá nhân, không cộng EXP cho PM)`,
+      target_user_id: uid,
+      link_task_id: task.id,
+    })
+  }
+
+  for (const uid of task.assignedTo) {
+    const assignee = users.find(u => u.id === uid)
+    if (assignee) {
+      await supabase.from('profiles').update({ exp: assignee.exp + task.expReward }).eq('id', assignee.id)
+    }
+  }
+
+  for (const uid of task.projectManager) {
+    const pm = users.find(u => u.id === uid)
+    if (!pm) continue
+    const eligibleForExp = pm.role === 'employee' || task.selfCreated || isTeamwork
+    if (eligibleForExp) {
+      await supabase.from('profiles').update({ exp: pm.exp + task.expReward }).eq('id', pm.id)
+    }
+  }
+
+  for (const uid of task.supporters) {
+    const supporter = users.find(u => u.id === uid)
+    if (supporter) {
+      await supabase.from('profiles').update({ exp: supporter.exp + supportExp }).eq('id', supporter.id)
+    }
+  }
+
+  return true
+}
+
+function CloseTaskModal({ task, currentUser, users, onClose }: { task: Task; currentUser: User; users: User[]; onClose: () => void }) {
+  const [hasIssue, setHasIssue] = useState(!!task.completeIssue)
+  const [issueText, setIssueText] = useState('')
+  const [note, setNote] = useState('')
+  const [files, setFiles] = useState<File[]>([])
+  const [driveLink, setDriveLink] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleSubmit = async () => {
+    if (hasIssue && !issueText.trim()) { setError('Bạn chọn "Close with issue", vui lòng ghi rõ issue là gì.'); return }
+    if (driveLink.trim() && !/^https?:\/\//i.test(driveLink.trim())) { setError('Link không hợp lệ, vui lòng dán đúng đường dẫn Google Drive.'); return }
+    setError(''); setSaving(true)
+    let uploaded: { name: string; path: string; size: number; type: string }[] = []
+    try { uploaded = await uploadProposalFiles(currentUser.id, files) }
+    catch (e: any) { setSaving(false); setError('Upload file lỗi: ' + (e?.message ?? '')); return }
+    const text = [hasIssue ? issueText.trim() : '', note.trim(), driveLink.trim() ? `Link: ${driveLink.trim()}` : ''].filter(Boolean).join(' · ')
+    const ok = await closeTask(task, hasIssue ? 'with_issue' : 'successful', text, uploaded, currentUser, users)
+    setSaving(false)
+    if (ok) onClose()
+  }
+
+  const field = { background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
+  return (
+    <div className="fixed inset-0 flex items-center justify-center z-50 px-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
+      <div className="w-full max-w-md rounded-2xl p-6 max-h-[90vh] overflow-y-auto" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+        <h3 className="font-bold text-lg mb-1" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>Close task</h3>
+        <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>{task.title}</p>
+
+        <div className="mb-4 p-3 rounded-lg" style={field}>
+          <p className="text-xs uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Kết quả Close *</p>
+          <div className="flex gap-2 mb-2">
+            <button type="button" onClick={() => setHasIssue(false)} className="flex-1 py-2 rounded-lg text-xs font-bold"
+              style={{ background: !hasIssue ? '#34d39922' : 'transparent', color: !hasIssue ? '#059669' : 'var(--text-muted)', border: `1px solid ${!hasIssue ? '#059669' : 'var(--border)'}` }}>
+              🔒 Close successful
+            </button>
+            <button type="button" onClick={() => setHasIssue(true)} className="flex-1 py-2 rounded-lg text-xs font-bold"
+              style={{ background: hasIssue ? '#f8717122' : 'transparent', color: hasIssue ? '#dc2626' : 'var(--text-muted)', border: `1px solid ${hasIssue ? '#dc2626' : 'var(--border)'}` }}>
+              ⚠️ Close with issue
+            </button>
+          </div>
+          {hasIssue && (
+            <textarea value={issueText} onChange={e => setIssueText(e.target.value)} rows={2} placeholder="Ghi rõ issue là gì..."
+              className="w-full px-3 py-2 rounded-lg text-xs outline-none resize-none" style={field} />
+          )}
+        </div>
+
+        <FilePicker files={files} setFiles={setFiles} />
+
+        <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Dán link Google Drive (nếu có nhiều file / hình ảnh)</label>
+        <input value={driveLink} onChange={e => setDriveLink(e.target.value)} placeholder="https://drive.google.com/..."
+          className="w-full px-3 py-2.5 rounded-lg text-sm outline-none mb-4" style={field} />
+
+        <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Ghi chú (không bắt buộc)</label>
+        <textarea value={note} onChange={e => setNote(e.target.value)} rows={3}
+          className="w-full px-4 py-2.5 mb-4 rounded-xl text-sm outline-none resize-none" style={field} />
+
+        {error && <p className="text-xs mb-3" style={{ color: '#dc2626' }}>{error}</p>}
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl font-semibold text-sm" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>Hủy</button>
+          <button onClick={handleSubmit} disabled={saving} className="flex-1 py-2.5 rounded-xl font-bold text-sm disabled:opacity-40"
+            style={{ background: 'linear-gradient(135deg,#7c3aed,#5b21b6)', color: '#fff' }}>{saving ? 'Đang lưu...' : 'Close'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 
 //====================CollaborationRequestModal======================
 function CollaborationRequestModal({ currentUser, users, onClose }: {
@@ -4441,6 +4703,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   const [openWorkNoteFor, setOpenWorkNoteFor] = useState<string | null>(null)
   const [openTicketFor, setOpenTicketFor] = useState<string | null>(null)
   const [submittingTask, setSubmittingTask] = useState<Task | null>(null)
+  const [closingTask, setClosingTask] = useState<Task | null>(null)
   const [selfMode, setSelfMode] = useState(false)
   const taskRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [flashTaskId, setFlashTaskId] = useState<string | null>(null)
@@ -4584,101 +4847,6 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
     if (error) { alert('Không bắt đầu được task: ' + error.message); return }
   }
 
-  const handleApprove = async (task: Task, result: 'successful' | 'with_issue') => {
-    let closeNote = ''
-    if (result === 'with_issue') {
-      closeNote = window.prompt('Ghi rõ issue của task này (bắt buộc):', task.completeIssue ?? '') ?? ''
-      if (!closeNote.trim()) return   // không ghi issue thì không đóng
-    }
-    const closeLabel = result === 'with_issue' ? 'Close with issue' : 'Close successful'
-    const approvedAt = new Date().toISOString()
-
-    const { error: approveError } = await supabase.from('tasks').update({
-      status: 'completed',
-      approved_by: currentUser.id,
-      approved_at: approvedAt,
-      close_result: result,
-      close_note: closeNote.trim() || null,
-    }).eq('id', task.id)
-
-    if (approveError) {
-      alert('Không thể duyệt task: ' + approveError.message)
-      return
-    }
-
-    const isTeamwork = task.isTeamProject || task.assignedTo.length > 1 || task.supporters.length > 0
-    const supportExp = Math.round(task.expReward * SUPPORTER_EXP_PERCENT)
-
-    const bodUsers = users.filter(u => u.isDirector && u.id !== currentUser.id)
-    const taskOwnerIds = Array.from(new Set([
-      ...task.assignedTo,
-      task.createdBy,
-    ])).filter(Boolean)
-
-    const taskOwnerNames = taskOwnerIds
-      .map(uid => users.find(u => u.id === uid)?.name)
-      .filter(Boolean)
-      .join(', ')
-
-    const taskTypeLabel = task.selfCreated ? 'task tự tạo' : 'task được giao'
-    const departmentName = TEAMS.find(t => t.id === currentUser.teamId)?.name ?? currentUser.department
-
-    for (const bod of bodUsers) {
-      await supabase.from('notifications').insert({
-        message: `📢 ${currentUser.name} (${departmentName}) đã ${closeLabel} ${taskTypeLabel}: "${task.title}"${taskOwnerNames ? ` — Nhân sự: ${taskOwnerNames}` : ''}`,
-        target_user_id: bod.id,
-        link_task_id: task.id,
-      })
-    }
-
-    const rewardedIds = Array.from(new Set([...task.assignedTo, ...task.supporters]))
-      .filter(uid => uid && uid !== currentUser.id)
-    for (const uid of rewardedIds) {
-      const isSupporter = task.supporters.includes(uid) && !task.assignedTo.includes(uid)
-      const earnedExp = isSupporter ? supportExp : task.expReward
-      await supabase.from('notifications').insert({
-        message: `✅ ${currentUser.name} đã ${closeLabel} task: "${task.title}" — bạn nhận được +${earnedExp} EXP`,
-        target_user_id: uid,
-        link_task_id: task.id,
-      })
-    }
-
-    const pmIds = task.projectManager.filter(uid => uid && uid !== currentUser.id)
-    for (const uid of pmIds) {
-      const pm = users.find(u => u.id === uid)
-      const eligibleForExp = pm?.role === 'employee' || task.selfCreated || isTeamwork
-      await supabase.from('notifications').insert({
-        message: eligibleForExp
-          ? `✅ ${currentUser.name} đã ${closeLabel} task: "${task.title}" — bạn nhận được +${task.expReward} EXP`
-          : `✅ ${currentUser.name} đã duyệt task: "${task.title}" (task cá nhân, không cộng EXP cho PM)`,
-        target_user_id: uid,
-        link_task_id: task.id,
-      })
-    }
-
-    for (const uid of task.assignedTo) {
-      const assignee = users.find(u => u.id === uid)
-      if (assignee) {
-        await supabase.from('profiles').update({ exp: assignee.exp + task.expReward }).eq('id', assignee.id)
-      }
-    }
-
-    for (const uid of task.projectManager) {
-      const pm = users.find(u => u.id === uid)
-      if (!pm) continue
-      const eligibleForExp = pm.role === 'employee' || task.selfCreated || isTeamwork
-      if (eligibleForExp) {
-        await supabase.from('profiles').update({ exp: pm.exp + task.expReward }).eq('id', pm.id)
-      }
-    }
-
-    for (const uid of task.supporters) {
-      const supporter = users.find(u => u.id === uid)
-      if (supporter) {
-        await supabase.from('profiles').update({ exp: supporter.exp + supportExp }).eq('id', supporter.id)
-      }
-    }
-  }
 
   const handleReject = async (task: Task) => {
     const reason = window.prompt('Lý do từ chối (nhân viên sẽ thấy để sửa lại):') ?? ''
@@ -5407,13 +5575,9 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                           className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>
                           Làm lại
                         </button>
-                        <button onClick={() => handleApprove(task, 'with_issue')}
-                          className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#fbbf2433', color: '#b45309' }}>
-                          🔒 Close with issue
-                        </button>
-                        <button onClick={() => handleApprove(task, 'successful')}
+                        <button onClick={() => setClosingTask(task)}
                           className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#34d39922', color: '#059669' }}>
-                          🔒 Close successful
+                          🔒 Close
                         </button>
                       </div>
                     </div>
@@ -5531,6 +5695,9 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
           onClose={() => setDocTask(null)}
           onEdit={() => { const t = tasks.find(x => x.id === docTask.id) ?? docTask; setDocTask(null); openEditModal(t) }}
           onOpenInTasks={viewMode === 'list' ? () => { const id = docTask.id; setDocTask(null); setExpandedRow(id) } : undefined} />
+      )}
+      {closingTask && (
+        <CloseTaskModal task={closingTask} currentUser={currentUser} users={users} onClose={() => setClosingTask(null)} />
       )}
       {submittingTask && (
         <SubmitTaskModal task={submittingTask} currentUser={currentUser} users={users} onClose={() => setSubmittingTask(null)} />
@@ -13451,6 +13618,8 @@ export default function App() {
     ticketReceivedAt: t.ticket_received_at ?? undefined,
     ticketInProcessAt: t.ticket_in_process_at ?? undefined,
     ticketCompletedAt: t.ticket_completed_at ?? undefined,
+    submissionAttachments: t.submission_attachments ?? [],
+    closeAttachments: t.close_attachments ?? [],
     taskCode: t.task_code ?? undefined,
     company: t.company ?? undefined,
     projectId: t.project_id ?? undefined,
