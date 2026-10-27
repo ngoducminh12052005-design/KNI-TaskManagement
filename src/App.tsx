@@ -1789,6 +1789,15 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, editingT
   const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? ''
 
   // Mặc định PM = trưởng bộ phận của mình (vẫn đổi được). Chỉ áp khi tạo mới và chưa chọn PM.
+    // Quản lý của phòng mình (quản lý 1, 2...) để bấm chọn ngay ở ô chữ ký
+  const teamManagers = users
+    .filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)
+    .sort((a, b) => (a.empCode ?? 'zzz').localeCompare(b.empCode ?? 'zzz') || a.name.localeCompare(b.name, 'vi'))
+  const otherManagers = users.filter(u => u.role === 'manager' && u.teamId !== currentUser.teamId)
+  const togglePm = (id: string) => setForm((f: any) => ({
+    ...f,
+    projectManager: f.projectManager.includes(id) ? f.projectManager.filter((x: string) => x !== id) : [...f.projectManager, id],
+  }))
   useEffect(() => {
     if (editingTask || form.projectManager.length > 0) return
     // Chỉ chọn sẵn 1 quản lý (quản lý 1: mã NV nhỏ nhất, rồi theo tên). Muốn thêm quản lý khác thì chọn tiếp ở ô PM.
@@ -2053,7 +2062,25 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, editingT
           </div>
           <div>
             <p className="font-bold">Quản lý (PM)</p><p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
-            <p className="mt-10 text-xs text-gray-500">{form.projectManager.map(nameOf).join(', ') || '—'}</p>
+            <div className="mt-4 flex flex-wrap justify-center gap-1.5">
+              {teamManagers.map(m => {
+                const on = form.projectManager.includes(m.id)
+                return (
+                  <button key={m.id} type="button" onClick={() => togglePm(m.id)} className="text-xs px-2.5 py-1 rounded-full"
+                    style={{ background: on ? '#ede9fe' : '#ffffff', color: on ? '#5b21b6' : '#6b7280', border: `1px solid ${on ? '#a78bfa' : '#d1d5db'}` }}>
+                    {on ? '✓ ' : '＋ '}{m.name}
+                  </button>
+                )
+              })}
+            </div>
+            {otherManagers.length > 0 && (
+              <div className="mt-2 text-left">
+                <p className="text-[11px] text-gray-500 mb-1 text-center">Quản lý phòng khác</p>
+                <DocPeoplePicker options={otherManagers} value={form.projectManager.filter((id: string) => otherManagers.some(u => u.id === id))}
+                  onChange={v => patchForm({ projectManager: [...form.projectManager.filter((id: string) => !otherManagers.some(u => u.id === id)), ...v] })} empty="Chưa chọn" />
+              </div>
+            )}
+            <p className="mt-2 text-xs text-gray-500">{form.projectManager.map(nameOf).join(', ') || '—'}</p>
           </div>
         </div>
       </div>
