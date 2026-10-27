@@ -1791,8 +1791,11 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, editingT
   // Mặc định PM = trưởng bộ phận của mình (vẫn đổi được). Chỉ áp khi tạo mới và chưa chọn PM.
   useEffect(() => {
     if (editingTask || form.projectManager.length > 0) return
-    const heads = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId).map(u => u.id)
-    if (heads.length > 0) setForm((f: any) => ({ ...f, projectManager: heads }))
+    // Chỉ chọn sẵn 1 quản lý (quản lý 1: mã NV nhỏ nhất, rồi theo tên). Muốn thêm quản lý khác thì chọn tiếp ở ô PM.
+    const heads = users
+      .filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)
+      .sort((a, b) => (a.empCode ?? 'zzz').localeCompare(b.empCode ?? 'zzz') || a.name.localeCompare(b.name, 'vi'))
+    if (heads.length > 0) setForm((f: any) => ({ ...f, projectManager: [heads[0].id] }))
   }, [])
 
   const line = 'w-full bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500 py-0.5'
