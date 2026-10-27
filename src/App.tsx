@@ -5971,21 +5971,37 @@ function RedemptionHistoryPanel({ users, refreshKey }: { users: User[]; refreshK
 
 function BodLogView({ tasks, users }: { tasks: Task[]; users: User[] }) {
   const [tab, setTab] = useState<'tasks' | 'rewards'>('tasks')
+  const [result, setResult] = useState<'all' | 'successful' | 'with_issue'>('all')
+  const [q, setQ] = useState('')
   const getUserById = (id?: string) => users.find(u => u.id === id)
 
-  const approvedTasks = [...tasks]
+  // Tất cả task đã Close (Close successful hoặc Close with issue), mới nhất lên đầu
+  const closedTasks = [...tasks]
     .filter(t => t.status === 'completed')
     .sort((a, b) => (b.approvedAt ?? '').localeCompare(a.approvedAt ?? ''))
+  const nIssue = closedTasks.filter(taskHadIssue).length
+  const nOk = closedTasks.length - nIssue
+  const keyword = q.trim().toLowerCase()
+  const shown = closedTasks.filter(t => {
+    if (result === 'with_issue' && !taskHadIssue(t)) return false
+    if (result === 'successful' && taskHadIssue(t)) return false
+    if (!keyword) return true
+    const hay = [t.taskCode, t.title, ...t.assignedTo.map(id => getUserById(id)?.name), getUserById(t.approvedBy)?.name].filter(Boolean).join(' ').toLowerCase()
+    return hay.includes(keyword)
+  })
+
+  const th = 'py-2.5 px-3 text-[11px] font-bold uppercase tracking-wide'
+  const td = 'py-2.5 px-3 align-top'
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="p-6 max-w-7xl mx-auto">
       <div className="text-center mb-6">
         <h2 className="text-3xl font-black mb-1" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>📊 Nhật ký BOD</h2>
-        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Theo dõi task đã duyệt và phần thưởng đã đổi toàn công ty</p>
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Theo dõi tất cả task đã Close và phần thưởng đã đổi toàn công ty</p>
       </div>
 
       <div className="flex p-1 rounded-xl mb-6 max-w-md mx-auto" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
-        {[['tasks', '📋 Task đã duyệt'], ['rewards', '🎁 Phần thưởng đã đổi']].map(([id, lbl]) => (
+        {[['tasks', '🔒 Task đã Close'], ['rewards', '🎁 Phần thưởng đã đổi']].map(([id, lbl]) => (
           <button key={id} onClick={() => setTab(id as typeof tab)}
             className="flex-1 py-2 rounded-lg text-sm font-medium transition-all"
             style={{ background: tab === id ? '#7c3aed' : 'transparent', color: tab === id ? '#fff' : 'var(--text-muted)' }}>
@@ -5995,47 +6011,88 @@ function BodLogView({ tasks, users }: { tasks: Task[]; users: User[] }) {
       </div>
 
       {tab === 'tasks' ? (
-        <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
-          {approvedTasks.length === 0 ? (
-            <p className="text-sm text-center py-10" style={{ color: 'var(--text-muted)' }}>Chưa có task nào được duyệt.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left" style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-                    <th className="py-2.5 px-4">Task</th>
-                    <th className="py-2.5 px-4">Người phụ trách</th>
-                    <th className="py-2.5 px-4">Phòng ban</th>
-                    <th className="py-2.5 px-4">Duyệt bởi</th>
-                    <th className="py-2.5 px-4">Ngày duyệt</th>
-                    <th className="py-2.5 px-4">EXP</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {approvedTasks.map(t => {
-                    const assignee = getUserById(t.assignedTo[0])
-                    const approver = getUserById(t.approvedBy)
-                    const team = TEAMS.find(team => team.id === assignee?.teamId)
-                    return (
-                      <tr key={t.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td className="py-2.5 px-4 font-medium" style={{ color: 'var(--text-primary)' }}>{t.title}</td>
-                        <td className="py-2.5 px-4" style={{ color: 'var(--text-primary)' }}>
-                          {t.assignedTo.map(id => getUserById(id)?.name).filter(Boolean).join(', ') || '—'}
-                        </td>
-                        <td className="py-2.5 px-4 text-xs" style={{ color: 'var(--text-muted)' }}>{team?.name ?? '—'}</td>
-                        <td className="py-2.5 px-4" style={{ color: 'var(--text-primary)' }}>{approver?.name ?? '—'}</td>
-                        <td className="py-2.5 px-4 text-xs" style={{ color: 'var(--text-muted)' }}>
-                          {t.approvedAt ? new Date(t.approvedAt).toLocaleString('vi-VN') : '—'}
-                        </td>
-                        <td className="py-2.5 px-4 font-bold text-amber-500">+{t.expReward}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+        <>
+          <div className="flex items-center gap-2 flex-wrap mb-3">
+            {([
+              ['all', `Tất cả Close (${closedTasks.length})`, '#7c3aed'],
+              ['successful', `✅ Close successful (${nOk})`, '#059669'],
+              ['with_issue', `⚠️ Close with issue (${nIssue})`, '#b45309'],
+            ] as const).map(([k, label, color]) => (
+              <button key={k} type="button" onClick={() => setResult(k)}
+                className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
+                style={{
+                  background: result === k ? `${color}22` : 'var(--bg-panel)',
+                  color: result === k ? color : 'var(--text-muted)',
+                  border: `1px solid ${result === k ? color : 'var(--border)'}`,
+                }}>
+                {label}
+              </button>
+            ))}
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 Tìm mã task, tên task, người..."
+              className="ml-auto w-full sm:w-72 px-3 py-1.5 rounded-lg text-sm outline-none"
+              style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+          </div>
+
+          <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+            {shown.length === 0 ? (
+              <p className="text-sm text-center py-10" style={{ color: 'var(--text-muted)' }}>
+                {closedTasks.length === 0 ? 'Chưa có task nào được Close.' : 'Không có task nào khớp bộ lọc.'}
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs" style={{ minWidth: 960 }}>
+                  <thead>
+                    <tr className="text-left" style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', background: 'var(--bg-card-alt)' }}>
+                      <th className={th}>No.</th>
+                      <th className={th}>Task</th>
+                      <th className={th}>Co.</th>
+                      <th className={th}>Details</th>
+                      <th className={th}>Kết quả Close</th>
+                      <th className={th}>Người phụ trách</th>
+                      <th className={th}>Phòng ban</th>
+                      <th className={th}>Close bởi</th>
+                      <th className={th}>Ngày Close</th>
+                      <th className={th}>EXP</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shown.map((t, i) => {
+                      const assignee = getUserById(t.assignedTo[0])
+                      const closer = getUserById(t.approvedBy)
+                      const team = TEAMS.find(team => team.id === assignee?.teamId)
+                      const issue = taskHadIssue(t)
+                      const note = t.closeNote || t.completeIssue
+                      return (
+                        <tr key={t.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td className={td} style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
+                          <td className={td}><div className="font-mono font-bold break-all" style={{ color: 'var(--text-primary)' }}>{t.taskCode ?? '—'}</div></td>
+                          <td className={`${td} font-bold`} style={{ color: 'var(--text-primary)' }}>{t.company ? (COMPANY_CODES[t.company] ?? t.company) : '—'}</td>
+                          <td className={`${td} text-sm font-semibold break-words`} style={{ color: 'var(--text-primary)', maxWidth: 260 }}>{withCompanyPrefix(t.title, t.company)}</td>
+                          <td className={td}>
+                            <span className="px-2 py-1 rounded-lg font-semibold whitespace-nowrap"
+                              style={{ background: issue ? '#f59e0b22' : '#34d39922', color: issue ? '#b45309' : '#059669' }}>
+                              {issue ? '⚠️ Close with issue' : '✅ Close successful'}
+                            </span>
+                            {note && <p className="mt-1 text-[11px] break-words" style={{ color: 'var(--text-muted)', maxWidth: 200 }}>Issue: {note}</p>}
+                          </td>
+                          <td className={td} style={{ color: 'var(--text-primary)' }}>
+                            {t.assignedTo.map(id => getUserById(id)?.name).filter(Boolean).join(', ') || '—'}
+                          </td>
+                          <td className={td} style={{ color: 'var(--text-muted)' }}>{team?.name ?? '—'}</td>
+                          <td className={td} style={{ color: 'var(--text-primary)' }}>{closer?.name ?? '—'}</td>
+                          <td className={`${td} whitespace-nowrap`} style={{ color: 'var(--text-muted)' }}>
+                            {t.approvedAt ? new Date(t.approvedAt).toLocaleString('vi-VN') : '—'}
+                          </td>
+                          <td className={`${td} font-bold text-amber-500`}>+{t.expReward}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
       ) : (
         <RedemptionHistoryPanel users={users} />
       )}
