@@ -2275,6 +2275,26 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
     })
     return () => { alive = false }
   }, [task.id, task.assignedTo.join(','), task.crossDeptPending, task.dueDate, task.title])
+  const [wnotes, setWnotes] = useState<{ id: string; userId: string; note: string; createdAt: string }[]>([])
+  const [wdraft, setWdraft] = useState('')
+  useEffect(() => {
+    let alive = true
+    const load = () => supabase.from('task_work_notes').select('*').eq('task_id', task.id).order('created_at').then(({ data }: any) => {
+      if (alive) setWnotes((data ?? []).map((n: any) => ({ id: n.id, userId: n.user_id, note: n.note, createdAt: n.created_at })))
+    })
+    load()
+    const ch = supabase.channel(`task-detail-notes-${task.id}-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_work_notes', filter: `task_id=eq.${task.id}` }, () => { load() }).subscribe()
+    return () => { alive = false; supabase.removeChannel(ch) }
+  }, [task.id])
+  const canWriteNote = task.assignedTo.includes(currentUser.id) || task.supporters.includes(currentUser.id) || task.projectManager.includes(currentUser.id) || task.createdBy === currentUser.id || currentUser.role === 'manager'
+  const sendWorkNote = async () => {
+    const note = wdraft.trim()
+    if (!note) return
+    setWdraft('')
+    const { error } = await supabase.from('task_work_notes').insert({ task_id: task.id, user_id: currentUser.id, note })
+    if (error) { alert('Không ghi được Work Note: ' + error.message); setWdraft(note) }
+  }
   const isAssignee = task.assignedTo.includes(currentUser.id)
   const canComplete = isAssignee && task.status === 'in-progress' && task.workStatus !== 'pending' && !task.pendingRequestedAt && !task.isLocked && !isTaskGated(task)
   const canClose = currentUser.role === 'manager' && !isAssignee && task.status === 'submitted'
@@ -2351,6 +2371,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   const add = (at: string | undefined, text: string) => { if (at) events.push({ at, text }) }
   add(task.createdAt, `${nameOf(task.createdBy)} ${task.selfCreated ? 'tự tạo task' : task.onBehalfOf ? `giao task (giao thay ${task.onBehalfOf})` : 'giao task'}`)
   hist.forEach(h => add(h.at, `📝 ${nameOf(h.actor)}: ${h.detail}`))
+  wnotes.forEach(n => add(n.createdAt, `🗒 Work Note · ${nameOf(n.userId)}: ${n.note}`))
   if (task.creationApproval === 'approved' && task.creationApprovedBy) add(task.creationApprovedAt, `${nameOf(task.creationApprovedBy)} duyệt cho làm`)
   if (task.creationApproval === 'rejected' || (task.creationApproval === 'draft' && task.creationRejectedReason)) add(task.creationApprovedAt, `${nameOf(task.creationApprovedBy)} từ chối task${task.creationRejectedReason ? `: ${task.creationRejectedReason}` : ''}`)
   add(task.ticketReceivedAt, `🔧 Ticket Received: ${task.ticketReceivedText ?? ''}`)
@@ -2529,10 +2550,6 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
               </section>
             )}
 
-            <section className="rounded-xl p-5" style={card}>
-              <h3 className={h3} style={{ color: 'var(--text-primary)' }}>📝 Work Note</h3>
-              <TaskWorkNotePanel taskId={task.id} currentUser={currentUser} users={users} />
-            </section>
           </div>
 
           {/* Cột phải */}
@@ -2558,6 +2575,16 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
 
             <section className="rounded-xl p-5" style={card}>
               <h3 className={h3} style={{ color: 'var(--text-primary)' }}>Lịch sử</h3>
+              {canWriteNote && (
+                <div className="flex gap-1.5 mb-4">
+                  <input value={wdraft} onChange={e => setWdraft(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendWorkNote()}
+                    placeholder="Thêm Work Note: hôm nay đã làm tới đâu..."
+                    className="flex-1 min-w-0 px-3 py-1.5 rounded-lg text-xs outline-none"
+                    style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+                  <button type="button" onClick={sendWorkNote} disabled={!wdraft.trim()}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold text-white disabled:opacity-40 shrink-0" style={{ background: '#0891b2' }}>Ghi lại</button>
+                </div>
+              )}
               {events.length === 0 && <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Chưa có lịch sử.</p>}
               <div className="space-y-3">
                 {events.map((e, i) => (
@@ -4671,7 +4698,34 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
   const fmtShort = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '—')
   const th = 'px-2 py-2.5 text-[10px] font-bold uppercase tracking-wide text-left'
   const td = 'px-2 py-3 text-xs align-middle'
-  const cols = [3, 11, 4, 20, 10, 6, 17, 9, 5, 5, 10]  // % của khung: vừa khung, không cuộn ngang
+  const cols = [3, 9, 4, 17, 10, 6, 14, 8, 5, 5, 19]  // % của khung: vừa khung, không cuộn ngang
+  // Chỉ hiện 2 Work Note mới nhất ở ngoài bảng; ghi cái mới thì cái cũ nhất tự rớt khỏi bảng (vẫn xem đủ trong Lịch sử)
+  const [recent, setRecent] = useState<Record<string, { id: string; note: string; createdAt: string }[]>>({})
+  const listIdsKey = tasks.map(t => t.id).join(',')
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      const ids = tasks.map(t => t.id)
+      if (ids.length === 0) { setRecent({}); return }
+      const { data } = await supabase.from('task_work_notes').select('id, task_id, note, created_at').in('task_id', ids).order('created_at', { ascending: false }).limit(2000)
+      if (!alive) return
+      const m: Record<string, { id: string; note: string; createdAt: string }[]> = {}
+      for (const x of (data ?? []) as any[]) {
+        if (!m[x.task_id]) m[x.task_id] = []
+        if (m[x.task_id].length < 2) m[x.task_id].push({ id: x.id, note: x.note, createdAt: x.created_at })
+      }
+      setRecent(m)
+    }
+    load()
+    const ch = supabase.channel(`tasklist-notes-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_work_notes' }, () => { load() }).subscribe()
+    return () => { alive = false; supabase.removeChannel(ch) }
+  }, [listIdsKey])
+  const recentNotes = (id: string) => (recent[id] ?? []).map(n => (
+    <p key={n.id} className="text-[11px] leading-snug mb-0.5 line-clamp-2 break-words" title={n.note} style={{ color: 'var(--text-muted)' }}>
+      <b style={{ color: 'var(--text-primary)' }}>{new Date(n.createdAt).toLocaleDateString('vi-VN')}</b>: {n.note}
+    </p>
+  ))
   // Trạng thái dùng cùng nhóm với các thẻ lọc (Received, In-process, Pending, Completed, Close)
   const toTracker: Record<TaskBucket, string> = { new: 'received', received: 'received', processing: 'processing', pending: 'pending', completed: 'complete', closed: 'closed' }
 
@@ -4710,6 +4764,7 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
               </div>
               <div className="mt-1.5 text-xs"><SlaCell task={t} compact /></div>
               <div className="mt-2">
+                {recentNotes(t.id)}
                 <button type="button" onClick={e => { e.stopPropagation(); setUpdateTask(t) }}
                   className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold"
                   style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>📝 Work Note</button>
@@ -4785,6 +4840,7 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
                 <td className={td}>{fmtShort(t.startDate)}</td>
                 <td className={td}>{fmtShort(t.dueDate)}</td>
                 <td className={td}>
+                  {recentNotes(t.id)}
                   <button type="button" onClick={e => { e.stopPropagation(); setUpdateTask(t) }}
                     className="px-2 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap"
                     style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>
@@ -9652,38 +9708,23 @@ function ProposalRiskSection({ p, users, currentUser, canEdit }: { p: Proposal; 
   )
 }
 
-function ProposalCommentsSection({ p, users, currentUser }: { p: Proposal; users: User[]; currentUser: User }) {
-  const [comments, setComments] = useState<{ id: string; userId: string; content: string; createdAt: string }[]>([])
+function ProposalCommentsSection({ p, currentUser, onSent }: { p: Proposal; users: User[]; currentUser: User; onSent?: () => void }) {
   const [text, setText] = useState('')
-  const load = async () => {
-    const { data } = await supabase.from('proposal_comments').select('*').eq('proposal_id', p.id).order('created_at')
-    setComments((data ?? []).map((c: any) => ({ id: c.id, userId: c.user_id, content: c.content, createdAt: c.created_at })))
-  }
-  useEffect(() => { load() }, [p.id])
   const send = async () => {
     const t = text.trim()
     if (!t) return
     const { error } = await supabase.from('proposal_comments').insert({ proposal_id: p.id, user_id: currentUser.id, content: t })
-    if (error) { alert('Không gửi được bình luận: ' + error.message); return }
+    if (error) { alert('Không gửi được trao đổi: ' + error.message); return }
     setText('')
-    load()
+    onSent?.()
   }
   return (
     <section className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
-      <h3 className="text-sm font-bold mb-3" style={{ color: 'var(--text-primary)' }}>Trao đổi</h3>
-      {comments.length === 0 && <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Chưa có trao đổi nào.</p>}
-      <div className="space-y-2 mb-3">
-        {comments.map(c => (
-          <div key={c.id} className="text-xs">
-            <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{users.find(u => u.id === c.userId)?.name}</span>
-            <span className="ml-2" style={{ color: 'var(--text-muted)' }}>{new Date(c.createdAt).toLocaleString('vi-VN')}</span>
-            <p style={{ color: 'var(--text-primary)' }}>{c.content}</p>
-          </div>
-        ))}
-      </div>
+      <h3 className="text-sm font-bold mb-1" style={{ color: 'var(--text-primary)' }}>Trao đổi</h3>
+      <p className="text-[11px] mb-2" style={{ color: 'var(--text-muted)' }}>Nội dung bạn gửi sẽ hiện trong mục Lịch sử.</p>
       <div className="flex gap-2">
         <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') send() }}
-          placeholder="Viết bình luận..." className="flex-1 px-2 py-1.5 rounded-lg text-xs outline-none"
+          placeholder="Viết trao đổi..." className="flex-1 px-2 py-1.5 rounded-lg text-xs outline-none"
           style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
         <button type="button" onClick={send} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#0891b2' }}>Gửi</button>
       </div>
@@ -9862,7 +9903,26 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
     </div>
   )
 
+  const [bump, setBump] = useState(0)
+  const [talk, setTalk] = useState<{ at: string; text: string }[]>([])
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      const [c, w] = await Promise.all([
+        supabase.from('proposal_comments').select('*').eq('proposal_id', p.id),
+        supabase.from('proposal_work_notes').select('*').eq('proposal_id', p.id),
+      ])
+      if (!alive) return
+      const nm = (id: string) => users.find(u => u.id === id)?.name ?? ''
+      setTalk([
+        ...((c.data ?? []) as any[]).map(x => ({ at: x.created_at as string, text: `💬 ${nm(x.user_id)}: ${x.content}` })),
+        ...((w.data ?? []) as any[]).map(x => ({ at: x.created_at as string, text: `🗒 Work Note · ${nm(x.user_id)}: ${x.note}` })),
+      ])
+    })()
+    return () => { alive = false }
+  }, [p.id, bump])
   const events = [
+    ...talk,
     { at: p.createdAt, text: `${userOf(p.submittedBy)?.name ?? ''} đã gửi đề xuất` },
     ...approvals.filter(a => a.proposalId === p.id).map(a => ({
       at: a.createdAt,
@@ -9941,7 +10001,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
             </section>
             <ProposalSupplementSection p={p} currentUser={currentUser} flow={flow} />
             <ProposalCostSection p={p} canEdit={canEdit} />
-            <ProposalCommentsSection p={p} users={users} currentUser={currentUser} />
+            <ProposalCommentsSection p={p} users={users} currentUser={currentUser} onSent={() => setBump(b => b + 1)} />
           </div>
 
           <div className="space-y-4">
