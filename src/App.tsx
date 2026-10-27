@@ -2793,10 +2793,7 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
       setError('Link folder không hợp lệ, vui lòng dán đúng đường dẫn Google Drive.')
       return
     }
-    if (needsOwnFolderName && driveLink.trim() && !folderName.trim()) {
-      setError('Vui lòng ghi tên folder bạn đã tự tạo trước khi nộp.')
-      return
-    }
+
     if (files.length === 0 && !driveLink.trim() && !note.trim()) { setError('Vui lòng đính kèm ảnh/file, dán link Drive hoặc ghi chú kết quả.'); return }
     if (driveLink.trim() && !/^https?:\/\//i.test(driveLink.trim())) { setError('Link không hợp lệ, vui lòng dán đúng đường dẫn Google Drive.'); return }
     if (hasIssue && !issueText.trim()) { setError('Bạn chọn "Complete with issue", vui lòng ghi rõ issue là gì.'); return }
@@ -2924,7 +2921,7 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
         ) : needsOwnFolderName && pmsWithDrive.length > 0 ? (
           <div className="mb-4 p-3 rounded-lg" style={{ background: '#fbbf2414', border: '1px solid #fbbf2440' }}>
             <p className="text-xs leading-relaxed mb-3" style={{ color: '#d97706' }}>
-              ⚠️ Quản lý chưa tạo sẵn folder cho task này. Vào Drive bên dưới, tự tạo 1 folder mới, đặt tên tuỳ ý, rồi ghi lại tên đó ở ô bên dưới.
+              ⚠️ Quản lý chưa tạo sẵn folder cho task này. Vào Drive bên dưới, tự tạo 1 folder mới, đặt tên tuỳ ý, nộp file vào đó rồi dán link vào ô bên dưới.
             </p>
             <div className="space-y-2">
               {pmsWithDrive.map(pm => (
@@ -2937,21 +2934,7 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
               ))}
             </div>
           </div>
-        ) : (
-          <div className="mb-4 p-3 rounded-lg text-xs" style={{ background: '#fbbf2414', color: '#d97706' }}>
-            ⚠️ Quản lý dự án chưa thiết lập link Google Drive. Hãy liên hệ trực tiếp để xin link nộp file, sau đó dán vào ô bên dưới.
-          </div>
-        )}
-
-        {needsOwnFolderName && (
-          <>
-            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Tên folder bạn đã tự tạo (khi có dán link Drive)</label>
-            <input value={folderName} onChange={e => setFolderName(e.target.value)}
-              placeholder="VD: Nộp task - Nguyễn Văn A"
-              className="w-full px-3 py-2.5 rounded-lg text-sm outline-none mb-4 placeholder-[color:var(--text-muted)]"
-              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
-          </>
-        )}
+        ) : null}
 
         <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Dán link Google Drive (nếu có nhiều file / hình ảnh)</label>
         <input value={driveLink} onChange={e => setDriveLink(e.target.value)}
