@@ -2108,8 +2108,7 @@ function TaskViewFlow({ task, tasks, users, currentUser, readOnly = false, initi
   const live = tasks.find(t => t.id === task.id) ?? task   // luôn dùng bản mới nhất
   const canApprove = !readOnly && canApproveSelfTask(live, currentUser, users)
   const isMyDraft = !readOnly && live.selfCreated && live.createdBy === currentUser.id && live.creationApproval === 'draft'
-  const canEdit = !readOnly && !!onEdit && (isMyDraft || (currentUser.role === 'manager' &&
-    (live.createdBy === currentUser.id || live.assignedTo.some(id => users.find(u => u.id === id)?.teamId === currentUser.teamId))))
+  const canEdit = !readOnly && !!onEdit && canEditTask(live, currentUser, users)
   const canSend = isMyDraft
   const edit = readOnly ? undefined : onEdit
   const openCard = readOnly ? undefined : onOpenInTasks
@@ -2720,8 +2719,14 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
     const elapsed = task.processingStartedAt
       ? Math.floor((Date.now() - new Date(task.processingStartedAt).getTime()) / 1000) : 0
 
+    const autoClose = isBodTaskForManager(task, users) && task.assignedTo.includes(currentUser.id)
     const { error: updateError } = await supabase.from('tasks').update({
-      status: 'submitted',
+      status: autoClose ? 'completed' : 'submitted',
+      ...(autoClose ? {
+        close_result: hasIssue ? 'with_issue' : 'successful',
+        close_note: hasIssue ? issueText.trim() : null,
+        approved_at: new Date().toISOString(),
+      } : {}),
       work_status: 'complete',
       processing_started_at: null,
       total_processing_seconds: (task.totalProcessingSeconds ?? 0) + elapsed,
@@ -2755,7 +2760,17 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
         link_task_id: task.id,
       })
     }
-
+    if (autoClose) {
+      const supportExp = Math.round(task.expReward * SUPPORTER_EXP_PERCENT)
+      for (const uid of task.assignedTo) {
+        const u = users.find(x => x.id === uid)
+        if (u) await supabase.from('profiles').update({ exp: u.exp + task.expReward }).eq('id', u.id)
+      }
+      for (const uid of task.supporters) {
+        const u = users.find(x => x.id === uid)
+        if (u) await supabase.from('profiles').update({ exp: u.exp + supportExp }).eq('id', u.id)
+      }
+    }
     onClose()
   }
 
@@ -3310,7 +3325,23 @@ function MultiUserSelect({ label, options, selected, onToggle, placeholder = 'Ch
 // ===== Task nhân viên tự tạo phải được quản lý duyệt trước khi làm =====
 const isTaskGated = (t: Task) =>
   t.creationApproval === 'draft' || t.creationApproval === 'pending' || t.creationApproval === 'rejected'
+// Task do BOD giao (không phải tự tạo, người tạo là BOD)
+const isBodAssigned = (t: Task, users: User[]) =>
+  !t.selfCreated && !!users.find(u => u.id === t.createdBy)?.isDirector
 
+// Task BOD giao cho quản lý: quản lý chỉ làm, không có bước duyệt
+const isBodTaskForManager = (t: Task, users: User[]) =>
+  isBodAssigned(t, users) && t.assignedTo.length > 0 &&
+  t.assignedTo.every(id => users.find(u => u.id === id)?.role === 'manager')
+
+// Quyền sửa: task BOD giao thì chỉ BOD được sửa
+const canEditTask = (t: Task, user: User, users: User[]) => {
+  if (t.selfCreated && t.createdBy === user.id && t.creationApproval === 'draft') return true
+  if (user.role !== 'manager') return false
+  if (isBodAssigned(t, users)) return !!user.isDirector
+  const assignees = users.filter(u => t.assignedTo.includes(u.id))
+  return t.createdBy === user.id || assignees.some(a => a.teamId === user.teamId)
+}
 // Ai được thấy task chưa duyệt: người tạo, hoặc quản lý đang cần duyệt nó
 const isTaskVisibleTo = (t: Task, user: User, users: User[]) =>
   !isTaskGated(t) || t.createdBy === user.id || canApproveSelfTask(t, user, users)
@@ -4724,6 +4755,24 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       if (task.pendingRequestedAt) return // đang chờ duyệt rồi, không gửi lại
       const reason = window.prompt('Lý do xin tạm dừng task này (quản lý sẽ duyệt trước khi chính thức tạm dừng):') ?? ''
       if (!reason.trim()) return
+      // Task BOD giao cho quản lý: tự tạm dừng, không cần ai duyệt
+      if (isBodTaskForManager(task, users) && task.assignedTo.includes(currentUser.id)) {
+        const updates: Record<string, any> = { work_status: 'pending' }
+        if (task.processingStartedAt) {
+          const elapsed = Math.floor((Date.now() - new Date(task.processingStartedAt).getTime()) / 1000)
+          updates.total_processing_seconds = (task.totalProcessingSeconds ?? 0) + elapsed
+          updates.processing_started_at = null
+        }
+        const { error: pErr } = await supabase.from('tasks').update(updates).eq('id', task.id)
+        if (pErr) { alert('Không đổi được trạng thái: ' + pErr.message); return }
+        if (task.createdBy !== currentUser.id) {
+          await supabase.from('notifications').insert({
+            message: `⏸ ${currentUser.name} tạm dừng task "${task.title}": ${reason.trim()}`,
+            target_user_id: task.createdBy, link_task_id: task.id,
+          })
+        }
+        return
+      }
       const { error } = await supabase.from('tasks').update({
         pending_reason: reason.trim(),
         pending_requested_by: currentUser.id,
@@ -4833,6 +4882,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
   }
 
   const openEditModal = (task: Task) => {
+    if (!canEditTask(task, currentUser, users)) return
     setEditingTask(task)
     setSelfMode(task.selfCreated)
     setForm({
@@ -5083,8 +5133,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
           const isTaskParticipant = task.assignedTo.includes(currentUser.id) || task.projectManager.includes(currentUser.id) || task.supporters.includes(currentUser.id) || task.createdBy === currentUser.id
           const isBeforeStartDate = !!task.startDate && task.startDate > new Date().toISOString().split('T')[0]
           const catColor = CATEGORY_COLORS[task.category] ?? '#6b7280'
-          const isMyDraft = task.selfCreated && task.createdBy === currentUser.id && task.creationApproval === 'draft'
-          const canEdit = isMyDraft || (isManager && (task.createdBy === currentUser.id || assignees.some(a => a.teamId === currentUser.teamId)))
+          const canEdit = canEditTask(task, currentUser, users)
 
           const isFlashed = flashTaskId === task.id
           return (
