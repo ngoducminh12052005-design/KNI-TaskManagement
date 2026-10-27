@@ -1506,11 +1506,11 @@ function DashboardProjects({ currentUser, users, onOpen, onViewAll }: {
     const load = async () => {
       const [p, m] = await Promise.all([
         supabase.from('projects').select('*').order('created_at', { ascending: false }),
-        supabase.from('project_members').select('project_id, user_id'),
+        supabase.from('project_members').select('project_id, user_id, role'),
       ])
-      const byProject: Record<string, string[]> = {}
-      ;(m.data ?? []).forEach((x: any) => { (byProject[x.project_id] ??= []).push(x.user_id) })
-      setProjects((p.data ?? []).map((x: any) => mapDbProject(x, byProject[x.id] ?? [])))
+      const byProject: Record<string, string[]> = {}; const byManager: Record<string, string[]> = {}
+      ;(m.data ?? []).forEach((x: any) => { (byProject[x.project_id] ??= []).push(x.user_id); if (x.role === 'manager') (byManager[x.project_id] ??= []).push(x.user_id) })
+      setProjects((p.data ?? []).map((x: any) => mapDbProject(x, byProject[x.id] ?? [], byManager[x.id] ?? [])))
       setLoading(false)
     }
     load()
@@ -1524,7 +1524,7 @@ function DashboardProjects({ currentUser, users, onOpen, onViewAll }: {
   const isDir = !!currentUser.isDirector
   const isMgr = currentUser.role === 'manager'
   const canSee = (p: Project) => projectGateOk(p, currentUser, users) && (
-    isDir || p.createdBy === currentUser.id || p.managerId === currentUser.id || p.ownerId === currentUser.id ||
+    isDir || p.createdBy === currentUser.id || p.managerIds.includes(currentUser.id) || p.ownerId === currentUser.id ||
     p.memberIds.includes(currentUser.id) || (p.approvalStatus === 'pending' && projectApproverIds(p, users).includes(currentUser.id)))
   const visible = projects.filter(canSee)
   const countOf = (k: string) => visible.filter(p => p.status === k).length
@@ -1572,7 +1572,7 @@ function DashboardProjects({ currentUser, users, onOpen, onViewAll }: {
               {rowsToShow.map((p, i) => {
                 const st = PROJECT_STATUS[p.status] ?? PROJECT_STATUS.planning
                 const risk = PROJECT_RISK[p.riskLevel] ?? PROJECT_RISK.medium
-                const pm = users.find(u => u.id === (p.managerId ?? p.ownerId))
+                const pm = users.find(u => u.id === (p.managerIds[0] ?? p.ownerId))
                 return (
                   <tr key={p.id} onClick={() => onOpen?.(p.id)}
                     className="cursor-pointer transition-colors hover:bg-[color:var(--bg-card-alt)]"
@@ -1589,7 +1589,7 @@ function DashboardProjects({ currentUser, users, onOpen, onViewAll }: {
                       <div className="text-[10px] font-semibold" style={{ color: risk[1] }}>Rủi ro: {risk[0]}</div>
                     </td>
                     <td className={td}>
-                      {pm ? <div className="flex items-center gap-1.5"><CharAvatar user={pm} size={20} /><span className="truncate">{pm.name}</span></div> : '—'}
+                      {pm ? <div className="flex items-center gap-1.5"><CharAvatar user={pm} size={20} /><span className="truncate">{pm.name}{p.managerIds.length > 1 ? ` +${p.managerIds.length - 1}` : ''}</span></div> : '—'}
                     </td>
                     <td className={td}>{fmtShort(p.plannedStart)}</td>
                     <td className={td}>{fmtShort(p.plannedEnd)}</td>
@@ -11026,6 +11026,7 @@ interface Project {
   description?: string
   ownerId?: string
   managerId?: string
+  managerIds: string[]
   teamId?: string
   affected?: string
   plannedStart?: string
@@ -11041,7 +11042,7 @@ interface Project {
   approvalNote?: string
 }
 
-function mapDbProject(p: any, memberIds: string[]): Project {
+function mapDbProject(p: any, memberIds: string[], managerIds: string[] = []): Project {
   return {
     id: p.id, code: p.code ?? '', name: p.name, company: p.company ?? undefined, cls: p.class ?? 'project',
     status: p.status ?? 'planning', priority: p.priority ?? 'P3', objective: p.objective ?? undefined,
@@ -11050,16 +11051,18 @@ function mapDbProject(p: any, memberIds: string[]): Project {
     plannedEnd: p.planned_end ?? undefined, budget: Number(p.budget) || 0, supplierName: p.supplier_name ?? undefined,
     supplierRef: p.supplier_ref ?? undefined, riskLevel: p.risk_level ?? 'medium', createdBy: p.created_by ?? undefined,
     createdAt: p.created_at, memberIds,
+    managerIds: Array.from(new Set([...(p.manager_id ? [p.manager_id as string] : []), ...managerIds])),
     approvalStatus: p.approval_status ?? 'approved', approvalNote: p.approval_note ?? undefined,
   }
 }
 
 // Dự án chờ duyệt / bị từ chối chỉ người tạo, trưởng bộ phận cùng phòng và BOD nhìn thấy
 // Quản lý được duyệt dự án: đã chọn PM là quản lý khác người tạo thì chỉ PM đó; chưa chọn thì quản lý cùng phòng ban người tạo
-const projectApproverIds = (p: { createdBy?: string; managerId?: string; teamId?: string }, users: User[]) => {
+const projectApproverIds = (p: { createdBy?: string; managerId?: string; managerIds?: string[]; teamId?: string }, users: User[]) => {
   const creator = users.find(u => u.id === p.createdBy)
-  const pm = users.find(u => u.id === p.managerId)
-  if (pm && pm.role === 'manager' && pm.id !== p.createdBy) return [pm.id]
+  const pms = Array.from(new Set([...(p.managerIds ?? []), ...(p.managerId ? [p.managerId] : [])]))
+    .filter(id => id !== p.createdBy && users.find(u => u.id === id)?.role === 'manager')
+  if (pms.length > 0) return pms
   return users.filter(u => u.role === 'manager' && u.teamId === (creator?.teamId ?? p.teamId) && u.id !== p.createdBy).map(u => u.id)
 }
 const projectGateOk = (p: Project, u: User, users: User[]) =>
@@ -11123,7 +11126,8 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
   const [objective, setObjective] = useState('')
   const [description, setDescription] = useState('')
   const [ownerId, setOwnerId] = useState('')
-  const [managerId, setManagerId] = useState(currentUser.id)
+  const [managerIds, setManagerIds] = useState<string[]>([currentUser.id])
+  const managerId = managerIds[0] ?? ''   // PM chính (lưu ở cột manager_id)
   const [teamId, setTeamId] = useState(currentUser.teamId)
   const [members, setMembers] = useState<string[]>([])
   const [affected, setAffected] = useState('')
@@ -11181,10 +11185,10 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
       if (!insertError || insertError.code !== '23505') break
     }
     if (insertError || !created) { setSaving(false); setError(insertError?.message ?? 'Không tạo được dự án.'); return }
-    const memberIds = Array.from(new Set([managerId, ...(ownerId ? [ownerId] : []), ...members]))
-    await supabase.from('project_members').insert(memberIds.map(uid => ({ project_id: created.id, user_id: uid, role: uid === managerId ? 'manager' : 'member' })))
+    const memberIds = Array.from(new Set([...managerIds, ...(ownerId ? [ownerId] : []), ...members]))
+    await supabase.from('project_members').insert(memberIds.map(uid => ({ project_id: created.id, user_id: uid, role: managerIds.includes(uid) ? 'manager' : 'member' })))
         if (needsApproval) {
-      const approverIds = projectApproverIds({ createdBy: currentUser.id, managerId, teamId: currentUser.teamId }, users)
+      const approverIds = projectApproverIds({ createdBy: currentUser.id, managerId, managerIds, teamId: currentUser.teamId }, users)
       const approvers = users.filter(u => approverIds.includes(u.id))
       if (approvers.length > 0) {
         await supabase.from('notifications').insert(approvers.map(u => ({
@@ -11253,8 +11257,19 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
               <select value={ownerId} onChange={e => setOwnerId(e.target.value)} className={box} style={ink}>{userOptions}</select>
             </div>
             <div>
-              <label className={label}>Quản lý dự án (PM) *</label>
-              <select value={managerId} onChange={e => setManagerId(e.target.value)} className={box} style={ink}>{userOptions}</select>
+              <label className={label}>Quản lý dự án (PM) * (chọn được nhiều người)</label>
+              <div className="flex flex-wrap gap-1.5 mb-1.5">
+                {managerIds.map(id => (
+                  <span key={id} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full" style={{ background: '#ede9fe', color: '#5b21b6' }}>
+                    {users.find(u => u.id === id)?.name ?? '—'}
+                    {managerIds.length > 1 && <button type="button" onClick={() => setManagerIds(managerIds.filter(x => x !== id))} className="font-bold">✕</button>}
+                  </span>
+                ))}
+              </div>
+              <select value="" onChange={e => { const v = e.target.value; if (v && !managerIds.includes(v)) setManagerIds([...managerIds, v]) }} className={box} style={ink}>
+                <option value="">＋ Thêm quản lý dự án</option>
+                {users.filter(u => !managerIds.includes(u.id)).map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+              </select>
             </div>
             <div>
               <label className={label}>Phòng ban chịu trách nhiệm chính</label>
@@ -11266,7 +11281,7 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
           </div>
           <div>
             <label className={label}>Thành viên tham gia (chọn phòng ban rồi chọn người)</label>
-            <ProjectMemberPicker users={users} excludeIds={[managerId, ownerId]} value={members} onChange={setMembers} />
+            <ProjectMemberPicker users={users} excludeIds={[...managerIds, ownerId]} value={members} onChange={setMembers} />
           </div>
           <div>
             <label className={label}>Công ty / khách hàng bị ảnh hưởng</label>
@@ -11376,7 +11391,7 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
         task_code: code, project_id: project.id,
         work_status: 'received', status: 'open',
         assigned_to: assignees,
-        project_manager: project.managerId ? [project.managerId] : [],
+        project_manager: project.managerIds,
         supporters: [],
         created_by: currentUser.id,
         start_date: startDate, due_date: finalDue,
@@ -11410,12 +11425,12 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
         })
       }
     }
-    if (project.managerId && project.managerId !== currentUser.id && !notified.has(project.managerId)) {
+    for (const pmId of project.managerIds.filter(id => id !== currentUser.id && !notified.has(id))) {
       await supabase.from('notifications').insert({
         message: creatingForSelf
           ? `🎯 ${currentUser.name} vừa tự tạo task [${code}] ${where} và đang chờ bạn duyệt trước khi làm: ${title.trim()}`
           : `🗂️ ${currentUser.name} vừa tạo task [${code}] ${where}, giao cho ${assignees.map(nameOf).join(', ')}: ${title.trim()}`,
-        target_user_id: project.managerId, link_task_id: newTask.id,
+        target_user_id: pmId, link_task_id: newTask.id,
       })
     }
     setSaving(false)
@@ -11567,7 +11582,7 @@ function ProjectDiscussion({ project, currentUser, users }: { project: Project; 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline gap-1.5 flex-wrap">
                     <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{u?.name ?? 'Ẩn danh'}</span>
-                    {c.userId === project.managerId && (
+                    {project.managerIds.includes(c.userId) && (
                       <span className="text-[9px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#7c3aed22', color: '#7c3aed' }}>PM</span>
                     )}
                     <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{fmtWhen(c.createdAt)}</span>
@@ -11920,7 +11935,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
             <section className="rounded-xl p-4" style={card}>
               <h3 className="text-sm font-bold mb-2" style={{ color: 'var(--text-primary)' }}>Con người</h3>
               {row('Chủ dự án', nameOf(project.ownerId))}
-              {row('Quản lý dự án', nameOf(project.managerId))}
+              {row('Quản lý dự án', project.managerIds.map(nameOf).join(', '))}
               {row('Phòng ban chính', team ? `${team.emoji} ${team.name}` : '')}
               <p className="text-xs mt-2 mb-1 font-semibold" style={{ color: 'var(--text-muted)' }}>Thành viên ({project.memberIds.length})</p>
               <div className="flex flex-wrap gap-1.5">
@@ -11972,7 +11987,7 @@ function ProjectListTable({ projects, tasks, users, currentUser, canSee, onOpen 
           const pct = list.length ? Math.round((done / list.length) * 100) : 0
           const late = list.filter(t => t.status !== 'completed' && t.dueDate && t.dueDate < today).length
           const waiting = list.filter(t => t.status === 'submitted').length
-          const pm = userOf(p.managerId)
+          const pm = userOf(p.managerIds[0])
           return (
             <div key={p.id} onClick={() => onOpen(p)} className="px-4 py-3 cursor-pointer"
               style={{ borderTop: i === 0 ? undefined : '1px solid var(--border)', background: late > 0 ? '#dc262612' : undefined, color: 'var(--text-primary)' }}>
@@ -11996,7 +12011,7 @@ function ProjectListTable({ projects, tasks, users, currentUser, canSee, onOpen 
                 <span className="font-bold">{p.priority}</span>
                 <span className="font-semibold" style={{ color: rk[1] }}>● {rk[0]}</span>
                 <span style={{ color: 'var(--text-muted)' }}>{fmtShort(p.plannedStart)} → {fmtShort(p.plannedEnd)}</span>
-                {pm && <span className="flex items-center gap-1"><CharAvatar user={pm} size={18} />{pm.name}</span>}
+                {pm && <span className="flex items-center gap-1"><CharAvatar user={pm} size={18} />{pm.name}{p.managerIds.length > 1 ? ` +${p.managerIds.length - 1}` : ''}</span>}
               </div>
               <div className="mt-2">
                 <div className="h-1.5 rounded-full overflow-hidden mb-1" style={{ background: 'var(--bg-card-alt)' }}>
@@ -12062,7 +12077,7 @@ function ProjectListTable({ projects, tasks, users, currentUser, canSee, onOpen 
                   <div className="text-[10px] font-semibold" style={{ color: rk[1] }}>● {rk[0]}</div>
                 </td>
                 <td className={td}>
-                  {pm ? <div className="flex items-center gap-1.5"><CharAvatar user={pm} size={20} /><span className="truncate">{pm.name}</span></div> : '—'}
+                  {pm ? <div className="flex items-center gap-1.5"><CharAvatar user={pm} size={20} /><span className="truncate">{pm.name}{p.managerIds.length > 1 ? ` +${p.managerIds.length - 1}` : ''}</span></div> : '—'}
                 </td>
                 <td className={td}>{fmtShort(p.plannedStart)}</td>
                 <td className={td}>{fmtShort(p.plannedEnd)}</td>
@@ -12111,11 +12126,11 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
   const load = async () => {
     const [p, m] = await Promise.all([
       supabase.from('projects').select('*').order('created_at', { ascending: false }),
-      supabase.from('project_members').select('project_id, user_id'),
+      supabase.from('project_members').select('project_id, user_id, role'),
     ])
-    const byProject: Record<string, string[]> = {}
-    ;(m.data ?? []).forEach((x: any) => { (byProject[x.project_id] ??= []).push(x.user_id) })
-    setProjects((p.data ?? []).map((x: any) => mapDbProject(x, byProject[x.id] ?? [])))
+    const byProject: Record<string, string[]> = {}; const byManager: Record<string, string[]> = {}
+    ;(m.data ?? []).forEach((x: any) => { (byProject[x.project_id] ??= []).push(x.user_id); if (x.role === 'manager') (byManager[x.project_id] ??= []).push(x.user_id) })
+    setProjects((p.data ?? []).map((x: any) => mapDbProject(x, byProject[x.id] ?? [], byManager[x.id] ?? [])))
     setLoading(false)
   }
 
@@ -12135,9 +12150,9 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
   const isDir = !!currentUser.isDirector
   const isMgr = currentUser.role === 'manager'
   const canSee = (p: Project) => projectGateOk(p, currentUser, users) && (
-    isDir || p.createdBy === currentUser.id || p.managerId === currentUser.id || p.ownerId === currentUser.id ||
+    isDir || p.createdBy === currentUser.id || p.managerIds.includes(currentUser.id) || p.ownerId === currentUser.id ||
     p.memberIds.includes(currentUser.id) || (p.approvalStatus === 'pending' && projectApproverIds(p, users).includes(currentUser.id)))
-  const canEditProject = (p: Project) => isDir || p.managerId === currentUser.id || p.createdBy === currentUser.id
+  const canEditProject = (p: Project) => isDir || p.managerIds.includes(currentUser.id) || p.createdBy === currentUser.id
   const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
 
   // Ngày của dự án = ngày bắt đầu dự kiến (nếu không có thì ngày tạo)
