@@ -9339,8 +9339,9 @@ function ProposalPlanSection({ p, users, currentUser, flow }: {
     </section>
   )
 }
-function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revisions, onClose, onOpenDoc }: {
+function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revisions, onClose, onOpenDoc, canAct = false, onApprove, onReject, onRequestReview }: {
   proposal: Proposal; users: User[]; currentUser: User; approvals: ProposalApproval[]; revisions: ProposalRevision[]; onClose: () => void; onOpenDoc?: () => void
+  canAct?: boolean; onApprove?: () => void | Promise<void>; onReject?: () => void | Promise<void>; onRequestReview?: () => void | Promise<void>
 }) {
   const [steps, setSteps] = useState<{ id: string; approverId: string; order: number; status: string; note?: string; decidedAt?: string }[]>([])
   const userOf = (id?: string) => users.find(u => u.id === id)
@@ -9409,14 +9410,36 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
         <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
           {p.code ? `${p.code}: ` : ''}{p.title}
         </h2>
-        {onOpenDoc && (
-          <button type="button" onClick={onOpenDoc}
-            className="text-xs font-bold px-3 py-1.5 rounded-lg mb-2 mt-1"
-            style={{ background: '#05966922', color: '#059669', border: '1px solid #05966955' }}>
-            📄 Xem {p.kind === 'dntt' ? 'đề nghị thanh toán' : isFormDoc(p) ? 'văn bản' : 'tờ trình'}
-          </button>
-        )}
-        <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>{p.kind === 'totrinh' ? 'Tờ trình' : (p.groupName ? `Đề xuất ${p.groupName.toLowerCase()}` : 'Đề xuất')}</p>
+        <div className="flex flex-wrap items-center gap-2 mt-1 mb-4">
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{p.kind === 'totrinh' ? 'Tờ trình' : (p.groupName ? `Đề xuất ${p.groupName.toLowerCase()}` : 'Đề xuất')}</p>
+          <div className="ml-auto flex flex-wrap gap-2">
+            {onOpenDoc && (
+              <button type="button" onClick={onOpenDoc}
+                className="text-xs font-bold px-3 py-1.5 rounded-lg"
+                style={{ background: '#05966922', color: '#059669', border: '1px solid #05966955' }}>
+                📄 Xem {p.kind === 'dntt' ? 'đề nghị thanh toán' : isFormDoc(p) ? 'văn bản' : 'tờ trình'}
+              </button>
+            )}
+            {canAct && onRequestReview && (
+              <button type="button" onClick={() => onRequestReview()}
+                className="text-xs font-bold px-3 py-1.5 rounded-lg" style={{ background: '#fbbf2433', color: '#b45309' }}>
+                🔁 Xem xét lại
+              </button>
+            )}
+            {canAct && onReject && (
+              <button type="button" onClick={() => onReject()}
+                className="text-xs font-bold px-3 py-1.5 rounded-lg" style={{ background: '#f8717122', color: '#dc2626' }}>
+                Từ chối
+              </button>
+            )}
+            {canAct && onApprove && (
+              <button type="button" onClick={() => onApprove()}
+                className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: '#059669' }}>
+                ✓ Duyệt
+              </button>
+            )}
+          </div>
+        </div>
 
         <div className="grid md:grid-cols-3 gap-4">
           <div className="md:col-span-2 space-y-4">
@@ -10771,15 +10794,34 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
           <ProposalDocForm currentUser={currentUser} users={users} onCreated={setOpenNewId}
           onClose={() => { setShowModal(false); setCreateKind(null); setCreateGroup(null) }} />
       )}
-              {detailProposal && (
-        <ProposalDetailModal
-          proposal={proposals.find(x => x.id === detailProposal.id) ?? detailProposal}
-          users={users} currentUser={currentUser} approvals={proposalApprovals} revisions={proposalRevisions}
-          onOpenDoc={(detailProposal.kind === 'totrinh' || detailProposal.kind === 'dntt' || isFormDoc(detailProposal))
-            ? () => { const cur = proposals.find(x => x.id === detailProposal.id) ?? detailProposal; setDetailProposal(null); setDocProposal(cur) }
-            : undefined}
-          onClose={() => setDetailProposal(null)} />
-      )}
+      {detailProposal && (() => {
+        const cur = proposals.find(x => x.id === detailProposal.id) ?? detailProposal
+        return (
+          <ProposalDetailModal
+            proposal={cur}
+            users={users} currentUser={currentUser} approvals={proposalApprovals} revisions={proposalRevisions}
+            onOpenDoc={(cur.kind === 'totrinh' || cur.kind === 'dntt' || isFormDoc(cur))
+              ? () => { setDetailProposal(null); setDocProposal(cur) }
+              : undefined}
+            canAct={isMyTurn(cur) && cur.status === 'pending'}
+            onApprove={async () => {
+              if (!window.confirm(`Xác nhận DUYỆT "${cur.title}"?`)) return
+              await handleApprove(cur)
+            }}
+            onReject={async () => {
+              const reason = window.prompt('Lý do từ chối (người gửi sẽ thấy lý do này):')
+              if (reason === null) return
+              await declineProposal(cur, 'rejected', reason.trim())
+            }}
+            onRequestReview={async () => {
+              const note = window.prompt('Nội dung cần xem xét lại (người gửi sẽ thấy):')
+              if (note === null) return
+              if (!note.trim()) { alert('Vui lòng ghi nội dung cần xem xét lại.'); return }
+              await declineProposal(cur, 'revision', note.trim())
+            }}
+            onClose={() => setDetailProposal(null)} />
+        )
+      })()}
       {docProposal && (() => {
         const cur = proposals.find(x => x.id === docProposal.id) ?? docProposal
         const common = {
