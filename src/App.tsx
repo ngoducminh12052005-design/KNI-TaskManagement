@@ -1523,9 +1523,9 @@ function DashboardProjects({ currentUser, users, onOpen, onViewAll }: {
 
   const isDir = !!currentUser.isDirector
   const isMgr = currentUser.role === 'manager'
-  const canSee = (p: Project) => projectGateOk(p, currentUser) && (
+  const canSee = (p: Project) => projectGateOk(p, currentUser, users) && (
     isDir || p.createdBy === currentUser.id || p.managerId === currentUser.id || p.ownerId === currentUser.id ||
-    p.memberIds.includes(currentUser.id) || (isMgr && p.teamId === currentUser.teamId))
+    p.memberIds.includes(currentUser.id) || (p.approvalStatus === 'pending' && projectApproverIds(p, users).includes(currentUser.id)))
   const visible = projects.filter(canSee)
   const countOf = (k: string) => visible.filter(p => p.status === k).length
   const filtered = visible.filter(p => statusFilter === 'all' || p.status === statusFilter)
@@ -1796,7 +1796,10 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, editingT
   const otherManagers = users.filter(u => u.role === 'manager' && u.teamId !== currentUser.teamId)
   const togglePm = (id: string) => setForm((f: any) => ({
     ...f,
-    projectManager: f.projectManager.includes(id) ? f.projectManager.filter((x: string) => x !== id) : [...f.projectManager, id],
+    // Bấm quản lý nào thì chỉ người đó (bấm lại để bỏ chọn). Quản lý phòng khác chọn ở ô bên dưới vẫn giữ nguyên.
+    projectManager: f.projectManager.includes(id)
+      ? f.projectManager.filter((x: string) => x !== id)
+      : [...f.projectManager.filter((x: string) => !teamManagers.some(m => m.id === x)), id],
   }))
   useEffect(() => {
     if (editingTask || form.projectManager.length > 0) return
@@ -3315,13 +3318,10 @@ const isTaskVisibleTo = (t: Task, user: User, users: User[]) =>
 // Những người được quyền duyệt: quản lý cùng phòng ban với người tạo + quản lý được chọn làm PM của task
 const getTaskApproverIds = (creatorId: string, projectManagerIds: string[], users: User[]) => {
   const creator = users.find(u => u.id === creatorId)
-  const ids = new Set<string>()
-  users.forEach(u => { if (u.role === 'manager' && creator && u.teamId === creator.teamId && u.id !== creatorId) ids.add(u.id) })
-  projectManagerIds.forEach(id => {
-    const u = users.find(x => x.id === id)
-    if (u?.role === 'manager' && id !== creatorId) ids.add(id)
-  })
-  return Array.from(ids)
+  // Đã chọn quản lý (PM) thì CHỈ những người đó duyệt; chưa chọn ai thì mới tính cả quản lý cùng phòng ban
+  const picked = projectManagerIds.filter(id => id !== creatorId && users.find(x => x.id === id)?.role === 'manager')
+  if (picked.length > 0) return Array.from(new Set(picked))
+  return users.filter(u => u.role === 'manager' && !!creator && u.teamId === creator.teamId && u.id !== creatorId).map(u => u.id)
 }
 
 const canApproveSelfTask = (task: Task, user: User, users: User[]) => {
@@ -4516,8 +4516,10 @@ const scoped = tasks.filter(t => {
         ? deptPrefix(currentUser.teamId) === deptPrefix(t.targetTeamId)
         : t.targetTeamId === currentUser.teamId
     )
+    // Task nhân viên tự tạo đã chọn quản lý riêng: chỉ quản lý đó (và người tạo) thấy, không chia cho cả phòng
+    const teamSeesIt = !(t.selfCreated && t.projectManager.length > 0)
     const inScope = isManager
-      ? (isMyTask || t.createdBy === currentUser.id || assignees.some(a => a.teamId === currentUser.teamId) || isCrossDeptForMyDept)
+      ? (isMyTask || t.createdBy === currentUser.id || (teamSeesIt && assignees.some(a => a.teamId === currentUser.teamId)) || isCrossDeptForMyDept)
       : (isMyTask && !t.crossDeptRejected)
     if (!inScope) return false
     if (search.trim() && !t.title.toLowerCase().includes(search.trim().toLowerCase()) && !t.description.toLowerCase().includes(search.trim().toLowerCase())) return false
@@ -7036,7 +7038,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
   const [deNghi, setDeNghi] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [driveUrl, setDriveUrl] = useState('')
-  const [recipientId, setRecipientId] = useState(myManagers[0]?.id ?? '')
+  const [recipientId, setRecipientId] = useState('')
   const [kttId, setKttId] = useState('')                 // Kế toán trưởng
   const [gdId, setGdId] = useState('')                   // Giám đốc
   const [gdCompany, setGdCompany] = useState('')         // Công ty của Giám đốc (chọn hoặc tự điền)
@@ -7299,7 +7301,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
             <p className="font-bold">Trưởng bộ phận</p>
             <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
             <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className={sel} style={ink}>
-              {myManagers.length === 0 && <option value="">-- Chọn người ký --</option>}
+              <option value="">-- Chọn người ký --</option>
               {(myManagers.length > 0 ? myManagers : users.filter(u => u.id !== currentUser.id)).map(u => (
                 <option key={u.id} value={u.id}>{u.name}</option>
               ))}
@@ -7625,7 +7627,7 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated }: { currentU
   const [branch, setBranch] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [driveUrl, setDriveUrl] = useState('')
-  const [recipientId, setRecipientId] = useState(myManagers[0]?.id ?? '')
+  const [recipientId, setRecipientId] = useState('')
   const [extraApprovers, setExtraApprovers] = useState<string[]>([])
   const [approvalMode, setApprovalMode] = useState<'seq' | 'par'>('seq')
   const [saving, setSaving] = useState(false)
@@ -7870,7 +7872,7 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated }: { currentU
           <div>
             <label className="block text-xs text-gray-500 mb-1">1. Trưởng bộ phận / Quản lý đơn vị {myManagers.length > 0 ? '(quản lý phòng ban của bạn)' : ''} *</label>
             <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
-              {myManagers.length === 0 && <option value="">-- Chọn người duyệt --</option>}
+              <option value="">-- Chọn người duyệt --</option>
               {myManagers.length > 0
                 ? myManagers.map(u => <option key={u.id} value={u.id}>{u.name} — {u.department}</option>)
                 : (
@@ -8293,7 +8295,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
   const set = (patch: Record<string, any>) => setF(prev => ({ ...prev, ...patch }))
   const [files, setFiles] = useState<File[]>([])
   const [driveUrl, setDriveUrl] = useState('')
-  const [recipientId, setRecipientId] = useState(myManagers[0]?.id ?? '')
+  const [recipientId, setRecipientId] = useState('')
   const [extraApprovers, setExtraApprovers] = useState<string[]>([])
   const [approvalMode, setApprovalMode] = useState<'seq' | 'par'>('seq')
   const [saving, setSaving] = useState(false)
@@ -8478,7 +8480,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
           <div>
             <label className="block text-xs text-gray-500 mb-1">1. Trưởng bộ phận / Quản lý đơn vị {myManagers.length > 0 ? '(quản lý phòng ban của bạn)' : ''} *</label>
             <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
-              {myManagers.length === 0 && <option value="">-- Chọn người duyệt --</option>}
+              <option value="">-- Chọn người duyệt --</option>
               {myManagers.length > 0
                 ? myManagers.map(u => <option key={u.id} value={u.id}>{u.name} — {u.department}</option>)
                 : (
@@ -9547,8 +9549,7 @@ function ProposalModal({ currentUser, users, editingProposal, onClose, onCreated
   const [driveUrl, setDriveUrl] = useState(editingProposal?.driveUrl ?? '')
   const [revisionNote, setRevisionNote] = useState('')
   const [recipientId, setRecipientId] = useState(
-    editingProposal?.recipientId ??
-    (users.find(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)?.id ?? '')
+    editingProposal?.recipientId ?? ''
   )
   const [resubmitTeamId, setResubmitTeamId] = useState(
     editingProposal ? (users.find(u => u.id === editingProposal.recipientId)?.teamId ?? '') : ''
@@ -9861,10 +9862,10 @@ function ProposalModal({ currentUser, users, editingProposal, onClose, onCreated
             <>
               <div>
                 <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Người duyệt đầu tiên (quản lý phòng ban của bạn) *</label>
-                <select value={recipientId} disabled={myManagers.length === 1} onChange={e => setRecipientId(e.target.value)}
+                <select value={recipientId} onChange={e => setRecipientId(e.target.value)}
                   className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
                   style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
-                  {myManagers.length === 0 && <option value="">-- Chọn người duyệt --</option>}
+                  <option value="">-- Chọn người duyệt --</option>
                   {(myManagers.length > 0 ? myManagers : users.filter(u => u.id !== currentUser.id)).map(u => (
                     <option key={u.id} value={u.id}>{u.name} — {u.department}</option>
                   ))}
@@ -11054,8 +11055,15 @@ function mapDbProject(p: any, memberIds: string[]): Project {
 }
 
 // Dự án chờ duyệt / bị từ chối chỉ người tạo, trưởng bộ phận cùng phòng và BOD nhìn thấy
-const projectGateOk = (p: Project, u: User) =>
-  p.approvalStatus === 'approved' || p.createdBy === u.id || !!u.isDirector || (u.role === 'manager' && p.teamId === u.teamId)
+// Quản lý được duyệt dự án: đã chọn PM là quản lý khác người tạo thì chỉ PM đó; chưa chọn thì quản lý cùng phòng ban người tạo
+const projectApproverIds = (p: { createdBy?: string; managerId?: string; teamId?: string }, users: User[]) => {
+  const creator = users.find(u => u.id === p.createdBy)
+  const pm = users.find(u => u.id === p.managerId)
+  if (pm && pm.role === 'manager' && pm.id !== p.createdBy) return [pm.id]
+  return users.filter(u => u.role === 'manager' && u.teamId === (creator?.teamId ?? p.teamId) && u.id !== p.createdBy).map(u => u.id)
+}
+const projectGateOk = (p: Project, u: User, users: User[]) =>
+  p.approvalStatus === 'approved' || p.createdBy === u.id || !!u.isDirector || projectApproverIds(p, users).includes(u.id)
 
 function ProjectMemberPicker({ users, excludeIds, value, onChange }: {
   users: User[]; excludeIds: string[]; value: string[]; onChange: (v: string[]) => void
@@ -11176,7 +11184,8 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
     const memberIds = Array.from(new Set([managerId, ...(ownerId ? [ownerId] : []), ...members]))
     await supabase.from('project_members').insert(memberIds.map(uid => ({ project_id: created.id, user_id: uid, role: uid === managerId ? 'manager' : 'member' })))
         if (needsApproval) {
-      const approvers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)
+      const approverIds = projectApproverIds({ createdBy: currentUser.id, managerId, teamId: currentUser.teamId }, users)
+      const approvers = users.filter(u => approverIds.includes(u.id))
       if (approvers.length > 0) {
         await supabase.from('notifications').insert(approvers.map(u => ({
           message: `🗂️ ${currentUser.name} đề xuất dự án "${name.trim()}" và chờ bạn duyệt`,
@@ -11703,7 +11712,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
     const approved = project.approvalStatus === 'approved'
   const projectOpen = project.status !== 'closed' && project.status !== 'done' && approved
   const creator = users.find(u => u.id === project.createdBy)
-  const approverIds = users.filter(u => u.role === 'manager' && u.teamId === (creator?.teamId ?? project.teamId) && u.id !== project.createdBy).map(u => u.id)
+  const approverIds = projectApproverIds(project, users)
   const canDecide = project.approvalStatus === 'pending' && (!!currentUser.isDirector || approverIds.includes(currentUser.id))
   const isCreator = project.createdBy === currentUser.id
 
@@ -12125,9 +12134,9 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
 
   const isDir = !!currentUser.isDirector
   const isMgr = currentUser.role === 'manager'
-  const canSee = (p: Project) => projectGateOk(p, currentUser) && (
+  const canSee = (p: Project) => projectGateOk(p, currentUser, users) && (
     isDir || p.createdBy === currentUser.id || p.managerId === currentUser.id || p.ownerId === currentUser.id ||
-    p.memberIds.includes(currentUser.id) || (isMgr && p.teamId === currentUser.teamId))
+    p.memberIds.includes(currentUser.id) || (p.approvalStatus === 'pending' && projectApproverIds(p, users).includes(currentUser.id)))
   const canEditProject = (p: Project) => isDir || p.managerId === currentUser.id || p.createdBy === currentUser.id
   const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
 
@@ -12138,7 +12147,7 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
     .filter(p => !q.trim() || `${p.code} ${p.name}`.toLowerCase().includes(q.trim().toLowerCase()))
   const dated = base.filter(p => matchDateFilter(projDay(p), dateFilter))
   const needMine = (p: Project) =>
-    p.approvalStatus === 'pending' && p.createdBy !== currentUser.id && (isDir || (isMgr && p.teamId === currentUser.teamId))
+    p.approvalStatus === 'pending' && p.createdBy !== currentUser.id && (isDir || projectApproverIds(p, users).includes(currentUser.id))
   const countOf = (k: string) => dated.filter(p => p.approvalStatus === 'approved' && p.status === k).length
   const approvalCount = dated.filter(needMine).length
   const visible = dated.filter(p => fStatus === 'need_approval' ? needMine(p) : (!fStatus || (p.approvalStatus === 'approved' && p.status === fStatus)))
