@@ -2233,7 +2233,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   const btn = 'px-3 py-1.5 rounded-lg text-xs font-bold'
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
+    <div className="fixed right-0 left-0 md:left-[var(--sidebar-w)] top-16 bottom-14 md:bottom-0 z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
       <div className="max-w-6xl mx-auto pb-10">
         <button type="button" onClick={onClose} className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>← Danh sách task</button>
         <h2 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>
@@ -2461,7 +2461,7 @@ function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, canSen
   const doReject = async () => { await rejectSelfTask(task, currentUser); onClose() }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
+    <div className="fixed right-0 left-0 md:left-[var(--sidebar-w)] top-16 bottom-14 md:bottom-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
       <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
         <span className="text-sm font-bold text-gray-800">📄 Phiếu giao task {task.taskCode ?? ''}</span>
         <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
@@ -7627,7 +7627,7 @@ function ProposalDocView({ p, users, currentUserId, onClose, canAct, onApprove, 
   }
 
   return (
-    <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
+    <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 md:left-[var(--sidebar-w)] z-50 flex flex-col" style={{ background: '#d1d5db' }}>
       <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
         <span className="text-sm font-bold text-gray-800">📄 Tờ trình {p.code ?? ''}</span>
         <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
@@ -8773,7 +8773,7 @@ function ProposalFormDocView({ p, users, currentUserId, onClose, canAct, onAppro
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
+    <div className="fixed right-0 left-0 md:left-[var(--sidebar-w)] top-16 bottom-14 md:bottom-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
       <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
         <span className="text-sm font-bold text-gray-800">{cfg.icon} {cfg.title.charAt(0) + cfg.title.slice(1).toLowerCase()} {p.code ?? ''}</span>
         <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
@@ -8943,7 +8943,7 @@ function ProposalDnttView({ p, users, currentUserId, onClose, canAct, onApprove,
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
+    <div className="fixed right-0 left-0 md:left-[var(--sidebar-w)] top-16 bottom-14 md:bottom-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
       <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
         <span className="text-sm font-bold text-gray-800">💳 Đề nghị thanh toán {p.code ?? ''}</span>
         <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
@@ -9603,7 +9603,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
   const canEdit = currentUser.id === p.submittedBy || flow.some(s => s.approverId === currentUser.id) || !!currentUser.isDirector
 
   return (
-    <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
+    <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 md:left-[var(--sidebar-w)] z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
       <div className="max-w-5xl mx-auto">
         <button onClick={onClose} className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>← Danh sách đề xuất</button>
         <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
@@ -12044,7 +12044,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
   )
 
   return (
-    <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
+    <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 md:left-[var(--sidebar-w)] z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
       <div className="max-w-5xl mx-auto">
         <button type="button" onClick={onClose} className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>← Danh sách dự án</button>
         <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
@@ -13208,7 +13208,7 @@ function NotificationBell({ notifications, onNotificationClick }: {
         )}
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-80 max-h-96 overflow-y-auto rounded-xl z-50"
+        <div className="absolute right-0 top-full mt-2 w-80 max-h-96 overflow-y-auto rounded-xl z-[65]"
           style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.25)' }}>
           <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
             <span className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>Thông báo</span>
