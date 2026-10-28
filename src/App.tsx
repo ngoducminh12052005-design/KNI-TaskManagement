@@ -69,6 +69,12 @@ interface Task {
   isTeamProject?: boolean
   crossDeptPending?: boolean
   onBehalfOf?: string
+  transferPending?: boolean
+  transferTeamId?: string
+  transferAssignees?: string[]
+  transferManagerId?: string
+  transferReason?: string
+  transferBy?: string
   crossDeptRejected?: boolean
   crossDeptRejectedReason?: string
   crossDeptRejectedBy?: string
@@ -1778,6 +1784,148 @@ function DocPeoplePicker({ options, value, onChange, empty = 'Chưa chọn' }: {
 }
 
 // Form tạo / sửa task dạng tờ giấy A4 (giống form tạo tờ trình). State do TasksView giữ, bấm lưu gọi onSave (= handleSaveTask).
+// Quản lý phòng người nhận được đổi người nhận / chuyển phòng (không áp cho người đã giao task)
+const canReassignTask = (task: Task, user: User, users: User[]) => {
+  if (user.role !== 'manager' || task.crossDeptPending || task.crossDeptRejected || task.transferPending || isTaskGated(task) || task.status === 'completed' || task.status === 'submitted') return false
+  if (task.createdBy === user.id) return false
+  return task.assignedTo.some(id => users.find(u => u.id === id)?.teamId === user.teamId)
+}
+
+// Ai được duyệt đề nghị chuyển phòng: quản lý được chọn duyệt (nếu chuyển cho nhân viên) hoặc chính quản lý được chuyển tới
+const canApproveTransfer = (task: Task, user: User) =>
+  !!task.transferPending && user.role === 'manager' && user.id !== task.transferBy &&
+  (task.transferManagerId ? task.transferManagerId === user.id : (task.transferAssignees ?? []).includes(user.id))
+
+async function approveTransfer(task: Task, me: User, users: User[]) {
+  const nm = (id: string) => users.find(u => u.id === id)?.name ?? '?'
+  const toTeam = TEAMS.find(t => t.id === task.transferTeamId)?.name ?? ''
+  const next = task.transferAssignees ?? []
+  const { error } = await supabase.from('tasks').update({
+    assigned_to: next, target_team_id: task.transferTeamId ?? null, target_manager_id: null, cross_dept_pending: false,
+    transfer_pending: false, transfer_team_id: null, transfer_assignees: [], transfer_manager_id: null, transfer_reason: null, transfer_by: null,
+  }).eq('id', task.id).eq('transfer_pending', true)
+  if (error) { alert('Không duyệt được: ' + error.message); return }
+  await logTaskHistory(task.id, me, `✅ ${me.name} đã duyệt nhận task chuyển sang phòng ${toTeam}. Người nhận: ${next.map(nm).join(', ')}`)
+  const label = task.taskCode ?? task.title
+  const targets = new Set<string>([...next, ...task.assignedTo, task.createdBy, ...(task.transferBy ? [task.transferBy] : [])])
+  targets.delete(me.id)
+  for (const uid of targets) {
+    await supabase.from('notifications').insert({
+      message: `✅ ${me.name} đã duyệt chuyển task [${label}] sang phòng ${toTeam}. Người nhận mới: ${next.map(nm).join(', ')}`,
+      target_user_id: uid, link_task_id: task.id,
+    })
+  }
+}
+
+async function rejectTransfer(task: Task, me: User) {
+  const reason = window.prompt('Lý do từ chối nhận task (người đề nghị sẽ thấy):') ?? ''
+  if (reason.trim() === '' && !window.confirm('Bạn chưa nhập lý do, vẫn muốn từ chối?')) return
+  const { error } = await supabase.from('tasks').update({
+    transfer_pending: false, transfer_team_id: null, transfer_assignees: [], transfer_manager_id: null, transfer_reason: null, transfer_by: null,
+  }).eq('id', task.id).eq('transfer_pending', true)
+  if (error) { alert('Không từ chối được: ' + error.message); return }
+  await logTaskHistory(task.id, me, `❌ ${me.name} đã từ chối nhận task chuyển phòng${reason.trim() ? `. Lý do: ${reason.trim()}` : ''}`)
+  const label = task.taskCode ?? task.title
+  for (const uid of new Set<string>([task.createdBy, ...(task.transferBy ? [task.transferBy] : [])])) {
+    if (uid === me.id) continue
+    await supabase.from('notifications').insert({
+      message: `❌ ${me.name} từ chối nhận task [${label}] chuyển phòng${reason.trim() ? `: ${reason.trim()}` : ''}. Task vẫn do phòng cũ phụ trách.`,
+      target_user_id: uid, link_task_id: task.id,
+    })
+  }
+}
+
+// ===== Đề nghị chuyển task sang phòng ban khác (bắt buộc lý do, quản lý phòng nhận duyệt mới chuyển) =====
+function TransferModal({ task, currentUser, users, onClose }: { task: Task; currentUser: User; users: User[]; onClose: () => void }) {
+  const [teamId, setTeamId] = useState('')
+  const [pickedId, setPickedId] = useState('')
+  const [mgrId, setMgrId] = useState('')
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  const deptIds = useDeptMemberIds(teamId)
+  const inDept = users.filter(u => !!teamId && (u.teamId === teamId || deptIds.includes(u.id)))
+  const people = inDept.filter(u => !u.isDirector).sort((a, b) => (b.role === 'manager' ? 1 : 0) - (a.role === 'manager' ? 1 : 0))
+  const managers = people.filter(u => u.role === 'manager')
+  const picked = users.find(u => u.id === pickedId)
+  const needMgr = !!picked && picked.role !== 'manager'
+  const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? '?'
+
+  const save = async () => {
+    if (!teamId || !picked) { alert('Chọn phòng ban và người nhận.'); return }
+    if (needMgr && !mgrId) { alert('Chuyển cho nhân viên thì phải chọn quản lý phòng đó để duyệt.'); return }
+    if (!reason.trim()) { alert('Vui lòng nhập lý do chuyển phòng.'); return }
+    setSaving(true)
+    const approverId = needMgr ? mgrId : picked.id
+    const { error } = await supabase.from('tasks').update({
+      transfer_pending: true, transfer_team_id: teamId, transfer_assignees: [picked.id],
+      transfer_manager_id: needMgr ? mgrId : null, transfer_reason: reason.trim(), transfer_by: currentUser.id,
+    }).eq('id', task.id)
+    if (error) { setSaving(false); alert('Không gửi được đề nghị: ' + error.message); return }
+    const toTeam = TEAMS.find(t => t.id === teamId)?.name ?? ''
+    const label = task.taskCode ?? task.title
+    await logTaskHistory(task.id, currentUser, `🏢 ${currentUser.name} đề nghị chuyển task sang phòng ${toTeam} (người nhận: ${picked.name}), chờ ${nameOf(approverId)} duyệt. Lý do: ${reason.trim()}`)
+    await supabase.from('notifications').insert({
+      message: `🏢 ${currentUser.name} đề nghị chuyển task [${label}] "${task.title}" sang phòng ${toTeam} cho ${picked.name}. Lý do: ${reason.trim()}. Cần bạn duyệt.`,
+      target_user_id: approverId, link_task_id: task.id,
+    })
+    // Báo người giao task / BOD để nắm lý do
+    const fyi = new Set<string>([task.createdBy, ...users.filter(u => u.isDirector).map(u => u.id)])
+    fyi.delete(currentUser.id); fyi.delete(approverId)
+    for (const uid of fyi) {
+      await supabase.from('notifications').insert({
+        message: `ℹ️ ${currentUser.name} đề nghị chuyển task [${label}] sang phòng ${toTeam}. Lý do: ${reason.trim()}`,
+        target_user_id: uid, link_task_id: task.id,
+      })
+    }
+    setSaving(false)
+    onClose()
+  }
+
+  const chip = (on: boolean) => ({ background: on ? '#7c3aed' : 'var(--bg-card-alt)', color: on ? '#fff' : 'var(--text-primary)', border: '1px solid var(--border)' })
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl p-5 max-h-[90vh] overflow-y-auto" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }} onClick={e => e.stopPropagation()}>
+        <h3 className="font-bold text-base mb-1" style={{ color: 'var(--text-primary)' }}>🏢 Chuyển task sang phòng ban khác</h3>
+        <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>{task.taskCode} · {task.title}. Quản lý phòng nhận phải duyệt thì task mới được chuyển.</p>
+        <select value={teamId} onChange={e => { setTeamId(e.target.value); setPickedId(''); setMgrId('') }}
+          className="w-full rounded-lg px-3 py-2 text-sm outline-none mb-3" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+          <option value="">-- chọn phòng ban nhận --</option>
+          {TEAMS.filter(t => t.id !== currentUser.teamId).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        {teamId && (
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {people.length === 0 && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Phòng này chưa có người.</span>}
+            {people.map(u => (
+              <button key={u.id} type="button" onClick={() => { setPickedId(pickedId === u.id ? '' : u.id); setMgrId('') }}
+                className="px-2.5 py-1 rounded-lg text-xs" style={chip(pickedId === u.id)}>
+                {pickedId === u.id ? '✓ ' : ''}{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}
+              </button>
+            ))}
+          </div>
+        )}
+        {needMgr && (
+          <div className="mb-3">
+            <label className="text-xs font-bold block mb-1" style={{ color: 'var(--text-muted)' }}>Quản lý phòng ban nhận (duyệt) *</label>
+            <select value={mgrId} onChange={e => setMgrId(e.target.value)}
+              className="w-full rounded-lg px-3 py-2 text-sm outline-none" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+              <option value="">-- chọn quản lý --</option>
+              {managers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </div>
+        )}
+        {picked && !needMgr && <p className="text-[11px] mb-3" style={{ color: 'var(--text-muted)' }}>{picked.name} duyệt, rồi tự làm hoặc phân công cho người trong phòng mình.</p>}
+        <label className="text-xs font-bold block mb-1" style={{ color: 'var(--text-muted)' }}>Lý do chuyển phòng * (người giao và BOD sẽ thấy)</label>
+        <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} placeholder="VD: Task thuộc chuyên môn của phòng Kế toán..."
+          className="w-full rounded-lg px-3 py-2 text-sm outline-none mb-3" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-primary)' }}>Hủy</button>
+          <button onClick={save} disabled={saving} className="px-4 py-2 rounded-lg text-sm font-bold text-white" style={{ background: '#7c3aed', opacity: saving ? 0.6 : 1 }}>{saving ? 'Đang gửi...' : 'Gửi đề nghị'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ===== Quản lý phòng người nhận đổi người nhận task (bắt buộc nhập lý do, có ghi lịch sử) =====
 function ReassignModal({ task, currentUser, users, onClose }: { task: Task; currentUser: User; users: User[]; onClose: () => void }) {
   const deptIds = useDeptMemberIds(currentUser.teamId)
@@ -2274,9 +2422,11 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
       if (alive) setHist((data ?? []).map((r: any) => ({ at: r.created_at, actor: r.actor_id, detail: r.detail })))
     })
     return () => { alive = false }
-  }, [task.id, task.assignedTo.join(','), task.crossDeptPending, task.dueDate, task.title])
+  }, [task.id, task.assignedTo.join(','), task.crossDeptPending, task.transferPending, task.dueDate, task.title])
   const [wnotes, setWnotes] = useState<{ id: string; userId: string; note: string; createdAt: string }[]>([])
   const [wdraft, setWdraft] = useState('')
+  const [showReassign, setShowReassign] = useState(false)
+  const [showTransfer, setShowTransfer] = useState(false)
   useEffect(() => {
     let alive = true
     const load = () => supabase.from('task_work_notes').select('*').eq('task_id', task.id).order('created_at').then(({ data }: any) => {
@@ -2406,6 +2556,21 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
           {withCompanyPrefix(task.title, task.company)}
         </h2>
 
+        {task.transferPending && (
+          <div className="rounded-xl p-3 mt-3 text-sm" style={{ background: '#fbbf2422', border: '1px solid #fbbf2455', color: 'var(--text-primary)' }}>
+            <p className="font-semibold">🏢 Đang chờ chuyển sang phòng {TEAMS.find(t => t.id === task.transferTeamId)?.name ?? ''}</p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+              {nameOf(task.transferBy)} đề nghị · người nhận: {names(task.transferAssignees ?? [])} · chờ {nameOf(task.transferManagerId ?? (task.transferAssignees ?? [])[0])} duyệt
+            </p>
+            {task.transferReason && <p className="text-xs mt-1">Lý do: {task.transferReason}</p>}
+            {canApproveTransfer(task, currentUser) && (
+              <div className="flex gap-2 mt-2">
+                <button type="button" onClick={() => rejectTransfer(task, currentUser)} className={btn} style={{ background: '#f8717122', color: '#dc2626' }}>Từ chối</button>
+                <button type="button" onClick={() => approveTransfer(task, currentUser, users)} className={btn} style={{ background: '#34d39922', color: '#059669' }}>✓ Duyệt nhận task</button>
+              </div>
+            )}
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2 mt-2 mb-4">
           {chip(task.category || 'Task', '#ede9fe', '#6d28d9')}
           {chip(statusText, `${bucket.color}22`, bucket.color)}
@@ -2419,6 +2584,14 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
             {canEdit && onEdit && (
               <button type="button" onClick={onEdit} className={btn}
                 style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>✏️ Sửa</button>
+            )}
+            {canReassignTask(task, currentUser, users) && (
+              <>
+                <button type="button" onClick={() => setShowReassign(true)} className={btn}
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#7c3aed' }}>🔁 Đổi người nhận</button>
+                <button type="button" onClick={() => setShowTransfer(true)} className={btn}
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#7c3aed' }}>🏢 Chuyển phòng ban</button>
+              </>
             )}
             {canSend && (
               <button type="button" onClick={() => sendSelfTask(task, currentUser, users)} className={`${btn} text-white`} style={{ background: '#0ea5e9' }}>📤 Gửi task cho quản lý</button>
@@ -2598,6 +2771,8 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
           </div>
         </div>
       </div>
+      {showReassign && <ReassignModal task={task} currentUser={currentUser} users={users} onClose={() => setShowReassign(false)} />}
+      {showTransfer && <TransferModal task={task} currentUser={currentUser} users={users} onClose={() => setShowTransfer(false)} />}
       {showComplete && <SubmitTaskModal task={task} currentUser={currentUser} users={users} onClose={() => setShowComplete(false)} />}
       {showClose && <CloseTaskModal task={task} currentUser={currentUser} users={users} onClose={() => setShowClose(false)} />}
     </div>
@@ -5012,8 +5187,9 @@ const scoped = tasks.filter(t => {
     )
     // Task nhân viên tự tạo đã chọn quản lý riêng: chỉ quản lý đó (và người tạo) thấy, không chia cho cả phòng
     const teamSeesIt = !(t.selfCreated && t.projectManager.length > 0)
+    const transferMine = isManager && (t.transferManagerId === currentUser.id || (t.transferAssignees ?? []).includes(currentUser.id))
     const inScope = isManager
-      ? (isMyTask || t.createdBy === currentUser.id || (teamSeesIt && assignees.some(a => a.teamId === currentUser.teamId)) || isCrossDeptForMyDept)
+      ? (isMyTask || transferMine || t.createdBy === currentUser.id || (teamSeesIt && assignees.some(a => a.teamId === currentUser.teamId)) || isCrossDeptForMyDept)
       : (isMyTask && !t.crossDeptRejected)
     if (!inScope) return false
     if (search.trim() && !t.title.toLowerCase().includes(search.trim().toLowerCase()) && !t.description.toLowerCase().includes(search.trim().toLowerCase())) return false
@@ -5247,11 +5423,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
   }
 
   // Quản lý phòng người nhận được đổi người nhận trong phòng mình (bắt buộc nhập lý do)
-  const canReassign = (task: Task) => {
-    if (currentUser.role !== 'manager' || task.crossDeptPending || task.crossDeptRejected || isTaskGated(task) || task.status === 'completed' || task.status === 'submitted') return false
-    if (task.createdBy === currentUser.id) return false
-    return task.assignedTo.some(id => users.find(u => u.id === id)?.teamId === currentUser.teamId)
-  }
+  const canReassign = (task: Task) => canReassignTask(task, currentUser, users)
 
   const handleRejectCrossDept = async (task: Task) => {
     const reason = window.prompt('Lý do từ chối (quản lý đã giao sẽ thấy lý do này):') ?? ''
@@ -13915,6 +14087,12 @@ export default function App() {
     startDate: t.start_date,
     crossDeptPending: t.cross_dept_pending ?? false,
     onBehalfOf: t.on_behalf_of ?? undefined,
+    transferPending: t.transfer_pending ?? false,
+    transferTeamId: t.transfer_team_id ?? undefined,
+    transferAssignees: t.transfer_assignees ?? [],
+    transferManagerId: t.transfer_manager_id ?? undefined,
+    transferReason: t.transfer_reason ?? undefined,
+    transferBy: t.transfer_by ?? undefined,
     crossDeptRejected: t.cross_dept_rejected ?? false,
     crossDeptRejectedReason: t.cross_dept_rejected_reason ?? undefined,
     crossDeptRejectedBy: t.cross_dept_rejected_by ?? undefined,
