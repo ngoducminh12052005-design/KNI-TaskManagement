@@ -1723,6 +1723,35 @@ const fmtTaskMoney = (n: number) => Math.round(n).toLocaleString('vi-VN')
 // Bỏ dòng trống trước khi lưu vào cột tasks.form_data
 // Các lần nộp kết quả lưu trong form_data._meta.submissions (không cần thêm cột trong database)
 const taskMeta = (t: { formData?: any }): any => (t.formData && typeof t.formData === 'object' ? (t.formData as any)._meta : undefined) ?? {}
+// ===== Giao chéo phòng ban =====
+const deptPrefix = (id?: string) => id?.match(/^t\d+/)?.[0] ?? ''
+
+// Quản lý phòng ĐÍCH (người duyệt + phân công): duyệt, phân công, nộp kết quả, KHÔNG được Close
+const isTargetDeptApprover = (t: Task, u: User) =>
+  !!t.targetTeamId && u.role === 'manager' && t.createdBy !== u.id &&
+  (u.isDirector ? deptPrefix(u.teamId) === deptPrefix(t.targetTeamId) : u.teamId === t.targetTeamId)
+
+const crossForwardedAt = (t: Task): string | undefined => taskMeta(t).crossForwardedAt
+
+// Task giao chéo, nhân viên đã nộp, nhưng quản lý phòng đích chưa nộp lên người giao
+const isWaitingForward = (t: Task, users: User[]) =>
+  !!t.targetTeamId && t.status === 'submitted' && !crossForwardedAt(t) &&
+  !t.assignedTo.some(id => users.find(u => u.id === id)?.role === 'manager')
+
+async function forwardCrossDeptResult(task: Task, me: User) {
+  const { error } = await supabase.from('tasks').update({
+    form_data: { ...(task.formData ?? {}), _meta: { ...taskMeta(task), crossForwardedAt: new Date().toISOString(), crossForwardedBy: me.id } },
+  }).eq('id', task.id)
+  if (error) { alert('Không nộp được kết quả: ' + error.message); return false }
+  const to = new Set([task.createdBy, ...task.projectManager].filter(id => id && id !== me.id))
+  for (const uid of to) {
+    await supabase.from('notifications').insert({
+      message: `📤 ${me.name} đã nộp kết quả task [${task.taskCode ?? task.title}] cho bạn duyệt & đóng`,
+      target_user_id: uid, link_task_id: task.id,
+    })
+  }
+  return true
+}
 const withMeta = (doc: any, meta?: any) => (meta && Object.keys(meta).length > 0 ? { ...doc, _meta: meta } : doc)
 
 const cleanTaskDoc = (d: TaskDocData) => ({
@@ -2182,7 +2211,10 @@ function CrossDeptApproveModal({ task, currentUser, users, onClose }: { task: Ta
     const assignedTo = mode === 'self' ? [currentUser.id] : picked
     if (assignedTo.length === 0) { setError('Vui lòng chọn ít nhất 1 người thực hiện.'); return }
     setError(''); setSaving(true)
-    const { error: upErr } = await supabase.from('tasks').update({ cross_dept_pending: false, assigned_to: assignedTo }).eq('id', task.id)
+    const { error: upErr } = await supabase.from('tasks').update({
+      cross_dept_pending: false, assigned_to: assignedTo,
+      form_data: { ...(task.formData ?? {}), _meta: { ...taskMeta(task), crossApprovedBy: currentUser.id, crossApprovedAt: new Date().toISOString() } },
+    }).eq('id', task.id)
     if (upErr) { setSaving(false); setError('Không duyệt được: ' + upErr.message); return }
 
     const changes: TaskChange[] = [{ label: 'Duyệt giao chéo phòng ban', from: 'Chờ duyệt', to: `Đã duyệt bởi ${currentUser.name}` }]
@@ -2314,10 +2346,13 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   const [showReject, setShowReject] = useState(false)
   const isAssignee = task.assignedTo.includes(currentUser.id)
   const canComplete = isAssignee && task.status === 'in-progress' && task.workStatus !== 'pending' && !task.pendingRequestedAt && !task.isLocked && !isTaskGated(task)
+  const waitFwd = isWaitingForward(task, users)
+  const canForward = task.status === 'submitted' && waitFwd && isTargetDeptApprover(task, currentUser) && !isAssignee
   const canClose = currentUser.role === 'manager' && !isAssignee && task.status === 'submitted'
-  const canReject = canClose
+    && !isTargetDeptApprover(task, currentUser) && !waitFwd
+  const canReject = canClose || canForward
   const [showCrossApprove, setShowCrossApprove] = useState(false)
-  const canApproveCross = !!task.crossDeptPending && currentUser.role === 'manager' && (currentUser.teamId === task.targetTeamId || !!currentUser.isDirector)
+  const canApproveCross = !!task.crossDeptPending && isTargetDeptApprover(task, currentUser)
   // Nhân viên được giao: bấm "Bắt đầu" ngay trong chi tiết, bắt đầu rồi mới có nút Complete
   const isBeforeStart = !!task.startDate && task.startDate > new Date().toISOString().split('T')[0]
   const canStart = isAssignee && task.status === 'open' && !task.crossDeptPending && !task.crossDeptRejected && !isTaskGated(task) && !isBeforeStart
@@ -2374,10 +2409,15 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
     })
   }
   if (task.crossDeptPending || task.crossDeptRejected || task.targetTeamId) {
+    const meta = taskMeta(task)
+    const tgtMgrs = users.filter(u => u.role === 'manager' && u.teamId === task.targetTeamId).map(u => u.name).join(', ')
     steps.push({
-      label: 'Duyệt giao chéo phòng ban',
-      who: task.crossDeptRejectedBy ? nameOf(task.crossDeptRejectedBy) : (teamName(task.targetTeamId) ?? 'Quản lý phòng ban nhận'),
+      label: `Trưởng phòng ${teamName(task.targetTeamId) ?? ''} duyệt giao chéo`.trim(),
+      who: task.crossDeptRejectedBy ? nameOf(task.crossDeptRejectedBy)
+        : meta.crossApprovedBy ? nameOf(meta.crossApprovedBy)
+        : (tgtMgrs || 'Trưởng phòng ban nhận'),
       status: task.crossDeptRejected ? 'rejected' : task.crossDeptPending ? 'current' : 'done',
+      at: meta.crossApprovedAt,
       note: task.crossDeptRejectedReason,
     })
   }
@@ -2387,9 +2427,18 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
     at: task.startedAt, note: blocked ? undefined : WS[task.workStatus ?? 'received'],
   })
   steps.push({ label: 'Nộp kết quả', who: names(task.assignedTo), status: finished ? 'done' : 'wait', at: task.submittedAt, note: [task.completeIssue, subs.length > 1 ? `Đã nộp ${subs.length} lần` : ''].filter(Boolean).join(' · ') || undefined })
+  if (task.targetTeamId) {
+    const m = taskMeta(task)
+    steps.push({
+      label: 'Quản lý phòng nhận nộp kết quả',
+      who: m.crossForwardedBy ? nameOf(m.crossForwardedBy) : (m.crossApprovedBy ? nameOf(m.crossApprovedBy) : 'Quản lý phòng nhận'),
+      status: m.crossForwardedAt || task.status === 'completed' ? 'done' : task.status === 'submitted' ? 'current' : 'wait',
+      at: m.crossForwardedAt,
+    })
+  }
   steps.push({
     label: 'Quản lý duyệt & đóng',
-    who: task.approvedBy ? nameOf(task.approvedBy) : names(task.projectManager),
+    who: task.approvedBy ? nameOf(task.approvedBy) : (task.targetTeamId ? nameOf(task.createdBy) : names(task.projectManager)),
     status: task.status === 'completed' ? 'done' : task.status === 'submitted' ? 'current' : rejectedResult ? 'rejected' : 'wait',
     at: task.approvedAt,
     note: task.status === 'completed'
@@ -2501,6 +2550,11 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
             )}
             {canReject && (
               <button type="button" onClick={() => setShowReject(true)} className={btn} style={{ background: '#f8717122', color: '#dc2626' }}>✕ Từ chối</button>
+            )}
+            {canForward && (
+              <button type="button" onClick={() => forwardCrossDeptResult(task, currentUser)} className={`${btn} text-white`} style={{ background: '#2563eb' }}>
+                📤 Nộp kết quả cho {nameOf(task.createdBy)}
+              </button>
             )}
             {canClose && (
               <button type="button" onClick={() => setShowClose(true)} className={`${btn} text-white`} style={{ background: '#7c3aed' }}>🔒 Close</button>
@@ -2717,6 +2771,8 @@ function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, canSen
   const heading = (t: string) => <p className="font-bold mb-1">{t}</p>
   const para = (text?: string) => (text ? <p className="whitespace-pre-wrap mb-4">{text}</p> : null)
   const doApprove = async () => { await approveSelfTask(task, currentUser); onClose() }
+  const [showCross, setShowCross] = useState(false)
+  const canApproveCross = !!task.crossDeptPending && isTargetDeptApprover(task, currentUser)
   const doReject = async () => { await rejectSelfTask(task, currentUser); onClose() }
 
   return (
@@ -2822,6 +2878,13 @@ function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, canSen
       <div className="shrink-0 px-4 py-3 flex items-center justify-end gap-3" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
         {canApprove && <span className="text-xs mr-auto" style={{ color: '#d97706' }}>🎯 {nameOf(task.createdBy)} tự tạo task này, cần bạn duyệt trước khi làm.</span>}
         <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600">Đóng</button>
+        {canApproveCross && (
+          <>
+            <button type="button" onClick={() => rejectCrossDept(task, currentUser)} className="px-4 py-2 rounded-lg text-sm font-bold" style={{ background: '#fee2e2', color: '#dc2626' }}>Từ chối</button>
+            <button type="button" onClick={() => setShowCross(true)} className="px-5 py-2 rounded-lg text-sm font-bold text-white" style={{ background: '#059669' }}>✓ Duyệt & phân công</button>
+          </>
+        )}
+        {showCross && <CrossDeptApproveModal task={task} currentUser={currentUser} users={users} onClose={() => setShowCross(false)} />}
         {canEdit && onEdit && <button type="button" onClick={onEdit} className="px-4 py-2 rounded-lg text-sm font-bold" style={{ background: '#f3f4f6', color: '#111827' }}>✏️ Sửa</button>}
         {canSend && <button type="button" onClick={async () => { await sendSelfTask(task, currentUser, users); onClose() }} className="px-5 py-2 rounded-lg text-sm font-bold text-white" style={{ background: '#0ea5e9' }}>📤 Gửi task cho quản lý</button>}
         {canApprove ? (
@@ -3041,7 +3104,7 @@ async function rejectTaskResult(task: Task, me: User, reason: string) {
   const { error } = await supabase.from('tasks').update({
     status: 'in-progress', work_status: 'processing', processing_started_at: new Date().toISOString(),
     complete_issue: null, submission_file_url: null, submission_note: null, rejected_reason: reason,
-    form_data: { ...(task.formData ?? {}), _meta: { ...taskMeta(task), submissions: marked } },
+    form_data: { ...(task.formData ?? {}), _meta: { ...taskMeta(task), submissions: marked, crossForwardedAt: null, crossForwardedBy: null } },
   }).eq('id', task.id)
   if (error) { alert('Không từ chối được: ' + error.message); return false }
   for (const uid of Array.from(new Set([...task.assignedTo, ...task.supporters])).filter(u => u && u !== me.id)) {
@@ -3139,9 +3202,11 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
     setSaving(false)
     if (updateError) { setError(updateError.message); return }
 
+    const isCrossFirstHop = !!task.targetTeamId && currentUser.role !== 'manager'
     const recipientIds = new Set(
-      Array.from(new Set([task.createdBy, ...task.projectManager]))
-        .filter(uid => uid && uid !== currentUser.id)
+      isCrossFirstHop
+        ? users.filter(u => u.role === 'manager' && u.teamId === task.targetTeamId && u.id !== currentUser.id).map(u => u.id)
+        : Array.from(new Set([task.createdBy, ...task.projectManager])).filter(uid => uid && uid !== currentUser.id)
     )
 
     if (task.selfCreated) {
@@ -3240,6 +3305,7 @@ async function closeTask(
   attachments: { name: string; path: string; size: number; type: string }[],
   currentUser: User, users: User[],
 ): Promise<boolean> {
+  if (isTargetDeptApprover(task, currentUser)) { alert('Quản lý phòng nhận chỉ nộp kết quả, người giao task mới được Close.'); return false }
   const closeLabel = result === 'with_issue' ? 'Close with issue' : 'Close successful'
   const approvedAt = new Date().toISOString()
 
@@ -5893,7 +5959,24 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                       )}
                     </div>
 
-                  ) : task.status === 'submitted' && currentUser.role === 'manager' ? (
+                  ) : task.status === 'submitted' && isTargetDeptApprover(task, currentUser) && !task.assignedTo.includes(currentUser.id) ? (
+                    crossForwardedAt(task) ? (
+                      <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>
+                        ✅ Đã nộp kết quả, chờ {getUserById(task.createdBy)?.name} Close
+                      </span>
+                    ) : (
+                      <div className="flex gap-1.5">
+                        <button onClick={() => handleReject(task)} className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>Làm lại</button>
+                        <button onClick={() => forwardCrossDeptResult(task, currentUser)} className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#3b82f622', color: '#2563eb' }}>📤 Nộp kết quả</button>
+                      </div>
+                    )
+
+                  ) : task.status === 'submitted' && currentUser.role === 'manager' && isWaitingForward(task, users) ? (
+                    <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#fbbf2422', color: '#d97706' }}>
+                      ⏳ Chờ quản lý phòng nhận nộp kết quả
+                    </span>
+
+                  ) : task.status === 'submitted' && currentUser.role === 'manager' && !task.assignedTo.includes(currentUser.id) && !isTargetDeptApprover(task, currentUser) ? (
                     <div className="flex flex-col gap-1.5 items-end">
                       {task.submissionOwnFolderUrl && (
                         <a href={task.submissionOwnFolderUrl} target="_blank" rel="noopener noreferrer"
