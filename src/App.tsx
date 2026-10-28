@@ -1736,7 +1736,7 @@ const isTargetDeptApprover = (t: Task, u: User) => u.role === 'manager' && chain
 
 // Quản lý phòng đích đang được chờ duyệt (giao chéo hoặc bị chuyển sang)
 const canApproveCrossTask = (t: Task, u: User) =>
-  !!t.crossDeptPending && !!t.targetTeamId && u.role === 'manager' && t.createdBy !== u.id &&
+  !!t.crossDeptPending && !!t.targetTeamId && u.role === 'manager' && t.createdBy !== u.id && !chainOf(t).includes(u.id) &&
   (u.isDirector ? deptPrefix(u.teamId) === deptPrefix(t.targetTeamId) : u.teamId === t.targetTeamId)
 
 // Nhân viên đã nộp, quản lý cuối chuỗi chưa nộp lên người giao
@@ -2505,7 +2505,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   const [showDelegate, setShowDelegate] = useState(false)
   const canDelegate = currentUser.role === 'manager' && !currentUser.isDirector && isAssignee
     && (task.status === 'open' || task.status === 'in-progress') && !task.crossDeptPending && !isTaskGated(task)
-  const canApproveCross = !!task.crossDeptPending && isTargetDeptApprover(task, currentUser)
+  const canApproveCross = canApproveCrossTask(task, currentUser)
   // Nhân viên được giao: bấm "Bắt đầu" ngay trong chi tiết, bắt đầu rồi mới có nút Complete
   const isBeforeStart = !!task.startDate && task.startDate > new Date().toISOString().split('T')[0]
   const canStart = isAssignee && task.status === 'open' && !task.crossDeptPending && !task.crossDeptRejected && !isTaskGated(task) && !isBeforeStart
@@ -2697,6 +2697,11 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
                 <button type="button" onClick={() => rejectCrossDept(task, currentUser)} className={btn} style={{ background: '#f8717122', color: '#dc2626' }}>Từ chối</button>
                 <button type="button" onClick={() => setShowCrossApprove(true)} className={`${btn} text-white`} style={{ background: '#059669' }}>✓ Duyệt & phân công</button>
               </>
+            )}
+            {task.crossDeptPending && !canApproveCross && (
+              <span className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: '#fbbf2422', color: '#d97706' }}>
+                ⏳ Chờ {users.filter(u => u.role === 'manager' && u.teamId === task.targetTeamId).map(u => u.name).join(', ') || 'quản lý phòng nhận'} duyệt
+              </span>
             )}
             {canDelegate && (
               <button type="button" onClick={() => setShowDelegate(true)} className={btn}
@@ -6028,9 +6033,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
 
               {/* Actions */}
               <div className="flex items-center justify-end mt-3">
-                {task.crossDeptPending &&
-                  currentUser.role === 'manager' &&
-                  (currentUser.teamId === task.targetTeamId || currentUser.isDirector) ? (
+                {task.crossDeptPending && canApproveCrossTask(task, currentUser) ? (
                     <div className="flex flex-col gap-1.5 items-end">
                       <p className="text-[10px] text-right max-w-[220px] leading-relaxed" style={{ color: '#d97706' }}>
                         📨 {getUserById(task.createdBy)?.name} ({TEAMS.find(t => t.id === getUserById(task.createdBy)?.teamId)?.name}) muốn giao cho team {TEAMS.find(t => t.id === task.targetTeamId)?.name}
