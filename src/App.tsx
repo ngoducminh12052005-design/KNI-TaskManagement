@@ -1779,9 +1779,10 @@ function DocPeoplePicker({ options, value, onChange, empty = 'Chưa chọn' }: {
 }
 
 // Form tạo / sửa task dạng tờ giấy A4 (giống form tạo tờ trình). State do TasksView giữ, bấm lưu gọi onSave (= handleSaveTask).
-function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, editingTask, currentUser, users, employees, teamUsers, onSave, onClose }: {
+function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMode, setCrossMode, crossTeamId, setCrossTeamId, editingTask, currentUser, users, employees, teamUsers, onSave, onClose }: {
   form: any; setForm: (v: any) => void
   isManager: boolean; selfMode: boolean; setSelfMode: (v: boolean) => void
+  crossMode: boolean; setCrossMode: (v: boolean) => void; crossTeamId: string; setCrossTeamId: (v: string) => void
   editingTask: Task | null; currentUser: User; users: User[]; employees: User[]; teamUsers: User[]
   onSave: () => void; onClose: () => void
 }) {
@@ -1854,9 +1855,13 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, editingT
 
       {isManager && !editingTask && (
         <div className="max-w-[860px] mx-auto mt-4 flex gap-1 p-1 rounded-xl bg-white shadow">
-          <button type="button" onClick={() => setSelfMode(false)} className="flex-1 py-2 rounded-lg text-xs font-semibold"
-            style={{ background: !selfMode ? '#7c3aed' : 'transparent', color: !selfMode ? '#fff' : '#6b7280' }}>📋 Giao cho người khác</button>
-          <button type="button" onClick={() => setSelfMode(true)} className="flex-1 py-2 rounded-lg text-xs font-semibold"
+          <button type="button" onClick={() => { setSelfMode(false); setCrossMode(false); patchForm({ assignedTo: [] }) }} className="flex-1 py-2 rounded-lg text-xs font-semibold"
+            style={{ background: !selfMode && !crossMode ? '#7c3aed' : 'transparent', color: !selfMode && !crossMode ? '#fff' : '#6b7280' }}>📋 Giao nhân viên phòng ban</button>
+          {!currentUser.isDirector && (
+            <button type="button" onClick={() => { setSelfMode(false); setCrossMode(true); patchForm({ assignedTo: [] }) }} className="flex-1 py-2 rounded-lg text-xs font-semibold"
+              style={{ background: !selfMode && crossMode ? '#7c3aed' : 'transparent', color: !selfMode && crossMode ? '#fff' : '#6b7280' }}>🤝 Giao / phối hợp phòng ban khác</button>
+          )}
+          <button type="button" onClick={() => { setSelfMode(true); setCrossMode(false) }} className="flex-1 py-2 rounded-lg text-xs font-semibold"
             style={{ background: selfMode ? '#7c3aed' : 'transparent', color: selfMode ? '#fff' : '#6b7280' }}>🎯 Tự tạo cho tôi</button>
         </div>
       )}
@@ -1892,7 +1897,23 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, editingT
           <b className="shrink-0 w-24">Giao cho:</b>
           <div className="flex-1">
             {assigning
-              ? <DocPeoplePicker options={employees} value={form.assignedTo} onChange={v => patchForm({ assignedTo: v })} empty="Chưa giao (mỗi người nhận đủ 100% EXP)" />
+              ? (crossMode && !currentUser.isDirector ? (
+                  <div className="space-y-2">
+                    <select value={crossTeamId} onChange={e => { setCrossTeamId(e.target.value); patchForm({ assignedTo: [] }) }}
+                      className="w-full border-b border-dashed border-gray-300 bg-transparent outline-none font-semibold" style={ink}>
+                      <option value="">-- chọn phòng ban cần giao / phối hợp --</option>
+                      {TEAMS.filter(t => t.id !== currentUser.teamId).map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
+                    </select>
+                    {crossTeamId && (
+                      <DocPeoplePicker options={users.filter(u => u.teamId === crossTeamId)} value={form.assignedTo}
+                        onChange={v => patchForm({ assignedTo: v })} empty="Để quản lý phòng ban đó tự làm hoặc phân công" />
+                    )}
+                    <p className="text-[11px] leading-relaxed" style={{ color: '#b45309' }}>
+                      ⚠️ Quản lý phòng ban đó phải <b>duyệt</b> thì task mới được làm. Họ có thể tự làm hoặc phân công lại cho bất kỳ ai trong phòng. Người (nhân viên hoặc quản lý) bạn chọn ở trên chỉ là đề xuất.
+                    </p>
+                  </div>
+                )
+                : <DocPeoplePicker options={employees} value={form.assignedTo} onChange={v => patchForm({ assignedTo: v })} empty="Chưa giao (mỗi người nhận đủ 100% EXP)" />)
               : <span>{currentUser.name} (tự thực hiện)</span>}
           </div>
         </div>
@@ -2128,6 +2149,105 @@ function TaskViewFlow({ task, tasks, users, currentUser, readOnly = false, initi
   )
 }
 
+// Quản lý phòng ban đích từ chối task giao chéo (báo lại cho người gửi)
+async function rejectCrossDept(task: Task, currentUser: User) {
+  const reason = (window.prompt('Lý do từ chối (quản lý đã giao sẽ thấy lý do này):') ?? '').trim()
+  if (!reason && !window.confirm('Bạn chưa nhập lý do, vẫn muốn từ chối?')) return
+  const { error } = await supabase.from('tasks').update({
+    cross_dept_pending: false, cross_dept_rejected: true,
+    cross_dept_rejected_reason: reason || null, cross_dept_rejected_by: currentUser.id,
+  }).eq('id', task.id)
+  if (error) { alert('Không từ chối được: ' + error.message); return }
+  if (task.createdBy !== currentUser.id) {
+    await supabase.from('notifications').insert({
+      message: `❌ ${currentUser.name} đã từ chối task [${task.taskCode ?? task.title}]${reason ? `: ${reason}` : ''}`,
+      target_user_id: task.createdBy, link_task_id: task.id,
+    })
+  }
+}
+
+// Quản lý phòng đích duyệt: tự làm hoặc phân công cho bất kỳ ai trong phòng
+function CrossDeptApproveModal({ task, currentUser, users, onClose }: { task: Task; currentUser: User; users: User[]; onClose: () => void }) {
+  const teamId = task.targetTeamId ?? currentUser.teamId
+  const people = users.filter(u => u.teamId === teamId)
+  const proposed = task.assignedTo.filter(id => people.some(u => u.id === id))
+  const [mode, setMode] = useState<'self' | 'assign'>(proposed.length > 0 && !proposed.includes(currentUser.id) ? 'assign' : 'self')
+  const [picked, setPicked] = useState<string[]>(proposed.filter(id => id !== currentUser.id))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const nm = (ids: string[]) => ids.map(id => users.find(u => u.id === id)?.name ?? '—').join(', ') || '—'
+  const toggle = (id: string) => setPicked(p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]))
+
+  const submit = async () => {
+    const assignedTo = mode === 'self' ? [currentUser.id] : picked
+    if (assignedTo.length === 0) { setError('Vui lòng chọn ít nhất 1 người thực hiện.'); return }
+    setError(''); setSaving(true)
+    const { error: upErr } = await supabase.from('tasks').update({ cross_dept_pending: false, assigned_to: assignedTo }).eq('id', task.id)
+    if (upErr) { setSaving(false); setError('Không duyệt được: ' + upErr.message); return }
+
+    const changes: TaskChange[] = [{ label: 'Duyệt giao chéo phòng ban', from: 'Chờ duyệt', to: `Đã duyệt bởi ${currentUser.name}` }]
+    if ([...assignedTo].sort().join('|') !== [...task.assignedTo].sort().join('|')) {
+      changes.push({ label: 'Người phụ trách', from: nm(task.assignedTo), to: nm(assignedTo) })
+    }
+    await supabase.from('task_edit_logs').insert({ task_id: task.id, user_id: currentUser.id, changes })
+
+    const code = task.taskCode ?? task.title
+    if (task.createdBy !== currentUser.id) {
+      await supabase.from('notifications').insert({
+        message: `✅ ${currentUser.name} đã duyệt task [${code}] — ${mode === 'self' ? 'quản lý trực tiếp làm' : `phân công cho ${nm(assignedTo)}`}`,
+        target_user_id: task.createdBy, link_task_id: task.id,
+      })
+    }
+    for (const uid of assignedTo) {
+      if (uid === currentUser.id) continue
+      await supabase.from('notifications').insert({
+        message: `📋 ${currentUser.name} phân công task [${code}] cho bạn: ${task.description?.trim() || task.title}`,
+        target_user_id: uid, link_task_id: task.id,
+      })
+    }
+    setSaving(false); onClose()
+  }
+
+  const field = { background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
+  return (
+    <div className="fixed inset-0 flex items-center justify-center z-[60] px-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
+      <div className="w-full max-w-md rounded-2xl p-6 max-h-[90vh] overflow-y-auto" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+        <h3 className="font-bold text-lg mb-1" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>Duyệt & phân công task</h3>
+        <p className="text-sm mb-1" style={{ color: 'var(--text-primary)' }}>{task.title}</p>
+        <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
+          Do {users.find(u => u.id === task.createdBy)?.name ?? '—'} ({TEAMS.find(t => t.id === users.find(u => u.id === task.createdBy)?.teamId)?.name ?? ''}) giao.
+          {proposed.length > 0 ? ` Đề xuất: ${nm(proposed)}.` : ''}
+        </p>
+
+        <label className="flex items-center gap-2 p-3 rounded-lg mb-2 cursor-pointer text-sm" style={field}>
+          <input type="radio" checked={mode === 'self'} onChange={() => setMode('self')} /> 🙋 Tôi trực tiếp làm
+        </label>
+        <label className="flex items-center gap-2 p-3 rounded-lg mb-2 cursor-pointer text-sm" style={field}>
+          <input type="radio" checked={mode === 'assign'} onChange={() => setMode('assign')} /> 👥 Phân công cho người trong phòng
+        </label>
+        {mode === 'assign' && (
+          <div className="p-2 rounded-lg mb-3 max-h-48 overflow-y-auto" style={field}>
+            {people.map(u => (
+              <label key={u.id} className="flex items-center gap-2 py-1 px-1 text-sm cursor-pointer">
+                <input type="checkbox" checked={picked.includes(u.id)} onChange={() => toggle(u.id)} />
+                <span>{u.name}</span>
+                <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{u.role === 'manager' ? 'Quản lý' : 'Nhân viên'}</span>
+              </label>
+            ))}
+          </div>
+        )}
+
+        {error && <p className="text-xs mb-3" style={{ color: '#dc2626' }}>{error}</p>}
+        <div className="flex gap-2 mt-2">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl font-semibold text-sm" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>Hủy</button>
+          <button onClick={submit} disabled={saving} className="flex-1 py-2.5 rounded-xl font-bold text-sm disabled:opacity-40"
+            style={{ background: 'linear-gradient(135deg,#059669,#047857)', color: '#fff' }}>{saving ? 'Đang lưu...' : '✓ Duyệt'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 type FlowStep = { label: string; who: string; status: 'done' | 'current' | 'rejected' | 'wait' | 'skip'; at?: string; note?: string }
 
 type TaskChange = { label: string; from: string; to: string }
@@ -2196,6 +2316,8 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   const canComplete = isAssignee && task.status === 'in-progress' && task.workStatus !== 'pending' && !task.pendingRequestedAt && !task.isLocked && !isTaskGated(task)
   const canClose = currentUser.role === 'manager' && !isAssignee && task.status === 'submitted'
   const canReject = canClose
+  const [showCrossApprove, setShowCrossApprove] = useState(false)
+  const canApproveCross = !!task.crossDeptPending && currentUser.role === 'manager' && (currentUser.teamId === task.targetTeamId || !!currentUser.isDirector)
   // Nhân viên được giao: bấm "Bắt đầu" ngay trong chi tiết, bắt đầu rồi mới có nút Complete
   const isBeforeStart = !!task.startDate && task.startDate > new Date().toISOString().split('T')[0]
   const canStart = isAssignee && task.status === 'open' && !task.crossDeptPending && !task.crossDeptRejected && !isTaskGated(task) && !isBeforeStart
@@ -2367,6 +2489,12 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
               <span className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
                 🔒 Chưa tới ngày bắt đầu ({fmtD(task.startDate)})
               </span>
+            )}
+            {canApproveCross && (
+              <>
+                <button type="button" onClick={() => rejectCrossDept(task, currentUser)} className={btn} style={{ background: '#f8717122', color: '#dc2626' }}>Từ chối</button>
+                <button type="button" onClick={() => setShowCrossApprove(true)} className={`${btn} text-white`} style={{ background: '#059669' }}>✓ Duyệt & phân công</button>
+              </>
             )}
             {canComplete && (
               <button type="button" onClick={() => setShowComplete(true)} className={`${btn} text-white`} style={{ background: '#059669' }}>{getSubs(task).length > 0 ? `📤 Nộp lại (lần ${getSubs(task).length + 1})` : '✓ Complete'}</button>
@@ -2557,6 +2685,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
       {showComplete && <SubmitTaskModal task={task} currentUser={currentUser} users={users} onClose={() => setShowComplete(false)} />}
       {showClose && <CloseTaskModal task={task} currentUser={currentUser} users={users} onClose={() => setShowClose(false)} />}
       {showReject && <RejectResultModal task={task} currentUser={currentUser} onClose={() => setShowReject(false)} />}
+      {showCrossApprove && <CrossDeptApproveModal task={task} currentUser={currentUser} users={users} onClose={() => setShowCrossApprove(false)} />}
     </div>
   )
 }
@@ -2575,6 +2704,8 @@ function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, canSen
   const statusText = task.creationApproval === 'draft' ? (task.creationRejectedReason ? '↩️ Bị trả về, cần sửa' : '📝 Nháp, chưa gửi')
     : task.creationApproval === 'pending' ? '⏳ Chờ quản lý duyệt'
     : task.creationApproval === 'rejected' ? '❌ Bị từ chối'
+    : task.crossDeptPending ? '⏳ Chờ quản lý phòng ban duyệt'
+    : task.crossDeptRejected ? '❌ Phòng ban từ chối'
     : bucket.label
   const rows: TaskDocRow[] = Array.isArray(f.rows) ? f.rows : []
   const costRows: TaskCostRow[] = Array.isArray(f.costRows) ? f.costRows : []
@@ -4905,6 +5036,10 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   const [closingTask, setClosingTask] = useState<Task | null>(null)
   const [returnToTaskId, setReturnToTaskId] = useState<string | null>(null)  // sửa từ trang chi tiết thì xong quay lại đó
   const [selfMode, setSelfMode] = useState(false)
+  const [crossMode, setCrossMode] = useState(false)          // giao / phối hợp phòng ban khác
+  const [crossTeamId, setCrossTeamId] = useState('')         // phòng ban được giao
+  const [crossApproveTask, setCrossApproveTask] = useState<Task | null>(null)   // quản lý phòng đích đang duyệt
+  useEffect(() => { if (!showModal) { setCrossMode(false); setCrossTeamId('') } }, [showModal])
   const taskRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [flashTaskId, setFlashTaskId] = useState<string | null>(null)
 
@@ -5305,10 +5440,16 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
   } else {
       const creatingForSelf = !isManager || selfMode
       const needsApproval = creatingForSelf && currentUser.role === 'employee'
-      const assignedUsers = form.assignedTo.map(uid => users.find(u => u.id === uid)).filter(Boolean) as User[]
+      // Giao / phối hợp phòng ban khác: không chọn người thì mặc định giao cho quản lý phòng đó (họ tự làm hoặc phân công)
+      const crossRequested = !creatingForSelf && crossMode && !currentUser.isDirector
+      if (crossRequested && !crossTeamId) { alert('Vui lòng chọn phòng ban cần giao / phối hợp.'); return }
+      const targetManagerIds = users.filter(u => u.role === 'manager' && u.teamId === crossTeamId).map(u => u.id)
+      const finalAssigned: string[] = crossRequested && form.assignedTo.length === 0 ? targetManagerIds : form.assignedTo
+      if (crossRequested && finalAssigned.length === 0) { alert('Phòng ban này chưa có quản lý nào để nhận task, vui lòng chọn người cụ thể.'); return }
+      const assignedUsers = finalAssigned.map(uid => users.find(u => u.id === uid)).filter(Boolean) as User[]
       const outsideAssignees = assignedUsers.filter(u => u.teamId !== currentUser.teamId)
-      const isCrossDept = !creatingForSelf && !currentUser.isDirector && outsideAssignees.length > 0
-      const targetTeamId = isCrossDept ? outsideAssignees[0].teamId : null
+      const isCrossDept = crossRequested || (!creatingForSelf && !currentUser.isDirector && outsideAssignees.length > 0)
+      const targetTeamId = crossRequested ? crossTeamId : (isCrossDept ? outsideAssignees[0].teamId : null)
 
       const taskCode = generateTaskCode(form.startDate, tasks)
       const { data: newTask } = await supabase.from('tasks').insert({
@@ -5320,7 +5461,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         status: (creatingForSelf && !needsApproval) ? 'in-progress' : 'open',
         started_at: (creatingForSelf && !needsApproval) ? new Date().toISOString() : null,
         processing_started_at: (creatingForSelf && !needsApproval) ? new Date().toISOString() : null,
-        assigned_to: creatingForSelf ? [currentUser.id] : form.assignedTo,
+        assigned_to: creatingForSelf ? [currentUser.id] : finalAssigned,
         project_manager: form.projectManager, supporters: form.supporters,
         created_by: currentUser.id,
         start_date: form.startDate,
@@ -5338,7 +5479,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
 
       if (isManager && !selfMode) {
         const taskContent = form.description.trim() || form.title
-        for (const uid of form.assignedTo) {
+        for (const uid of (isCrossDept ? [] : finalAssigned)) {
           if (uid === currentUser.id) continue
           await supabase.from('notifications').insert({
             message: `📋 ${currentUser.name} vừa giao task [${taskCode}] cho bạn: ${taskContent}`,
@@ -5358,10 +5499,10 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
 
         if (isCrossDept && targetTeamId) {
           const targetManagers = users.filter(u => u.role === 'manager' && u.teamId === targetTeamId)
-          const assigneeNames = outsideAssignees.map(u => u.name).join(', ')
+          const assigneeNames = crossRequested && form.assignedTo.length === 0 ? '' : outsideAssignees.map(u => u.name).join(', ')
           for (const mgr of targetManagers) {
             await supabase.from('notifications').insert({
-              message: `📨 ${currentUser.name} (${TEAMS.find(t => t.id === currentUser.teamId)?.name ?? ''}) muốn giao task [${taskCode}] "${form.title}" cho ${assigneeNames} trong phòng ban của bạn: ${taskContent}`,
+              message: `📨 ${currentUser.name} (${TEAMS.find(t => t.id === currentUser.teamId)?.name ?? ''}) đề nghị giao / phối hợp task [${taskCode}] "${form.title}" với phòng ban của bạn${assigneeNames ? ` (đề xuất: ${assigneeNames})` : ''}. Bạn duyệt rồi tự làm hoặc phân công người trong phòng: ${taskContent}`,
               target_user_id: mgr.id,
               link_task_id: newTaskId,
             })
@@ -5669,13 +5810,13 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                         📨 {getUserById(task.createdBy)?.name} ({TEAMS.find(t => t.id === getUserById(task.createdBy)?.teamId)?.name}) muốn giao cho team {TEAMS.find(t => t.id === task.targetTeamId)?.name}
                       </p>
                       <div className="flex gap-1.5">
-                        <button onClick={() => handleRejectCrossDept(task)}
+                                                <button onClick={() => rejectCrossDept(task, currentUser)}
                           className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>
                           Từ chối
                         </button>
-                        <button onClick={() => handleApproveCrossDept(task)}
+                                                <button onClick={() => setCrossApproveTask(task)}
                           className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#34d39922', color: '#059669' }}>
-                          ✓ Duyệt nhận task
+                          ✓ Duyệt & phân công 
                         </button>
                       </div>
                     </div>
@@ -5888,9 +6029,13 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         </div>
       )}
 
+      {crossApproveTask && (
+        <CrossDeptApproveModal task={crossApproveTask} currentUser={currentUser} users={users} onClose={() => setCrossApproveTask(null)} />
+      )}
       {/* Create / Edit: phiếu giao task dạng tờ giấy */}
       {showModal && (
         <TaskDocForm form={form} setForm={setForm} isManager={isManager} selfMode={selfMode} setSelfMode={setSelfMode}
+          crossMode={crossMode} setCrossMode={setCrossMode} crossTeamId={crossTeamId} setCrossTeamId={setCrossTeamId}
           editingTask={editingTask} currentUser={currentUser} users={users} employees={employees} teamUsers={teamUsers}
           onSave={handleSaveTask} onClose={() => { setShowModal(false); setEditingTask(null); setSelfMode(false); if (returnToTaskId) { setOpenNewTaskId(returnToTaskId); setReturnToTaskId(null) } }} />
       )}
