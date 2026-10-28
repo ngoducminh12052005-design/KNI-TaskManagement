@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, createContext, useContext } from 'react'
+import { useState, useRef, useEffect, useMemo, createContext, useContext } from 'react'
 import { supabase } from './supabaseClient'
 import companyLogo from './assets/company-logo.png'
 import * as XLSX from 'xlsx'
@@ -4102,6 +4102,7 @@ function TaskWorkNotePanel({ taskId, currentUser, users }: { taskId: string; cur
     supabase.from('task_work_notes').select('*').eq('task_id', taskId).order('created_at', { ascending: false })
       .then(({ data }) => {
         if (data) setNotes(data.map(n => ({ id: n.id, userId: n.user_id, note: n.note, createdAt: n.created_at })))
+        markWorkNoteSeen(currentUser.id, taskId)
         setLoading(false)
       })
 
@@ -4109,6 +4110,7 @@ function TaskWorkNotePanel({ taskId, currentUser, users }: { taskId: string; cur
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'task_work_notes', filter: `task_id=eq.${taskId}` }, payload => {
         const n = payload.new
         setNotes(prev => [{ id: n.id, userId: n.user_id, note: n.note, createdAt: n.created_at }, ...prev])
+        markWorkNoteSeen(currentUser.id, taskId)
       }).subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [taskId])
@@ -4497,6 +4499,7 @@ function TaskUpdateDrawer({ task, users, currentUser, canWrite, onClose }: {
 
   const load = async () => {
     const { data } = await supabase.from('task_work_notes').select('*').eq('task_id', task.id).order('created_at')
+    markWorkNoteSeen(currentUser.id, task.id)
     setNotes((data ?? []).map((x: any) => ({ id: x.id as string, userId: x.user_id as string, note: x.note as string, createdAt: x.created_at as string })))
     setLoading(false)
   }
@@ -4604,9 +4607,73 @@ function TaskUpdateDrawer({ task, users, currentUser, canWrite, onClose }: {
     </div>
   )
 }
+// ===== Số Work Note chưa đọc (hiện trên nút Work Note, giống số tin nhắn) =====
+function getWorkNoteSeen(uid: string): Record<string, string> {
+  try { return JSON.parse(localStorage.getItem(`workNoteSeen:${uid}`) || '{}') } catch { return {} }
+}
+function markWorkNoteSeen(uid: string, taskId: string) {
+  try {
+    const m = getWorkNoteSeen(uid)
+    m[taskId] = new Date().toISOString()
+    localStorage.setItem(`workNoteSeen:${uid}`, JSON.stringify(m))
+    window.dispatchEvent(new Event('workNoteSeen'))
+  } catch {}
+}
 
+function useWorkNoteBadges(taskIds: string[], uid: string): Record<string, number> {
+  const [rows, setRows] = useState<{ task_id: string; user_id: string; created_at: string }[]>([])
+  const [rev, setRev] = useState(0)
+  const key = taskIds.join(',')
+
+  useEffect(() => {
+    if (taskIds.length === 0) { setRows([]); return }
+    let alive = true
+    const load = async () => {
+      const chunks: string[][] = []
+      for (let i = 0; i < taskIds.length; i += 80) chunks.push(taskIds.slice(i, i + 80))
+      const res = await Promise.all(chunks.map(c =>
+        supabase.from('task_work_notes').select('task_id, user_id, created_at').in('task_id', c)))
+      if (alive) setRows(res.flatMap(r => (r.data ?? []) as any[]))
+    }
+    load()
+    const ch = supabase.channel(`wn-badge-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_work_notes' }, () => { load() })
+      .subscribe()
+    const onSeen = () => setRev(r => r + 1)
+    window.addEventListener('workNoteSeen', onSeen)
+    return () => { alive = false; supabase.removeChannel(ch); window.removeEventListener('workNoteSeen', onSeen) }
+  }, [key])
+
+  return useMemo(() => {
+    let base = ''
+    try { base = localStorage.getItem(`workNoteBase:${uid}`) || '' } catch {}
+    if (!base) {
+      base = new Date().toISOString()
+      try { localStorage.setItem(`workNoteBase:${uid}`, base) } catch {}
+    }
+    const seen = getWorkNoteSeen(uid)
+    const out: Record<string, number> = {}
+    for (const r of rows) {
+      if (r.user_id === uid) continue                       // note của chính mình thì không tính
+      const since = seen[r.task_id] ?? base
+      if (Date.parse(r.created_at) > Date.parse(since)) out[r.task_id] = (out[r.task_id] ?? 0) + 1
+    }
+    return out
+  }, [rows, rev, uid])
+}
+
+function WorkNoteBadge({ count }: { count: number }) {
+  if (count <= 0) return null
+  return (
+    <span className="absolute -top-2 -right-2 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center text-white pointer-events-none"
+      style={{ background: '#ef4444', boxShadow: '0 0 0 2px var(--bg-panel)' }}>
+      {count > 99 ? '99+' : count}
+    </span>
+  )
+}
 function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; users: User[]; currentUser: User; onOpen: (t: Task) => void }) {
   const [updateTask, setUpdateTask] = useState<Task | null>(null)
+  const badges = useWorkNoteBadges(tasks.map(t => t.id), currentUser.id)
   const userOf = (id: string) => users.find(u => u.id === id)
   const fmtShort = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '—')
   const th = 'px-2 py-2.5 text-[10px] font-bold uppercase tracking-wide text-left'
@@ -4651,8 +4718,11 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
               <div className="mt-1.5 text-xs"><SlaCell task={t} compact /></div>
               <div className="mt-2">
                 <button type="button" onClick={e => { e.stopPropagation(); setUpdateTask(t) }}
-                  className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold"
-                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>📝 Work Note</button>
+                  className="relative px-2.5 py-1.5 rounded-lg text-[11px] font-bold"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>
+                  📝 Work Note
+                  <WorkNoteBadge count={badges[t.id] ?? 0} />
+                </button>
               </div>
             </div>
           )
@@ -4726,9 +4796,10 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
                 <td className={td}>{fmtShort(t.dueDate)}</td>
                 <td className={td}>
                   <button type="button" onClick={e => { e.stopPropagation(); setUpdateTask(t) }}
-                    className="px-2 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap"
+                    className="relative px-2 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap"
                     style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>
                     📝 Work Note
+                    <WorkNoteBadge count={badges[t.id] ?? 0} />
                   </button>
                 </td>
               </tr>
@@ -4761,13 +4832,44 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   const [filter, setFilter] = useState<'all' | TaskBucket>('all')
   const [search, setSearch] = useState('')
   const [showCollabModal, setShowCollabModal] = useState(false)
-  const [viewMode, setViewMode] = useState<'cards' | 'list' | 'tracker'>('list')
+  const [viewMode, setViewMode] = useState<'cards' | 'list' | 'tracker'>(() => {
+    try { return (sessionStorage.getItem('taskViewMode') as 'cards' | 'list' | 'tracker') || 'list' } catch { return 'list' }
+  })
+  useEffect(() => { try { sessionStorage.setItem('taskViewMode', viewMode) } catch {} }, [viewMode])
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
   const [dateFilter, setDateFilter] = useState<DateFilterValue>(EMPTY_DATE_FILTER)
   const [showModal, setShowModal] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [docTask, setDocTask] = useState<Task | null>(null)
   const [docStage, setDocStage] = useState<'phieu' | 'detail'>('detail')
+
+  // Nhớ task đang mở: reload trang vẫn ở đúng trang chi tiết (hoặc phiếu) đó
+  const [restoreTaskId, setRestoreTaskId] = useState<string | null>(() => {
+    try { return sessionStorage.getItem('openTaskId') } catch { return null }
+  })
+  useEffect(() => {
+    try {
+      if (docTask) {
+        sessionStorage.setItem('openTaskId', docTask.id)
+        sessionStorage.setItem('openTaskStage', docStage)
+      } else if (!restoreTaskId) {
+        sessionStorage.removeItem('openTaskId')
+        sessionStorage.removeItem('openTaskStage')
+      }
+    } catch {}
+  }, [docTask, docStage, restoreTaskId])
+  useEffect(() => {
+    if (!restoreTaskId || docTask) return
+    const t = tasks.find(x => x.id === restoreTaskId)
+    if (!t) return   // dữ liệu chưa tải xong, effect chạy lại khi tasks đổi
+    try { setDocStage(sessionStorage.getItem('openTaskStage') === 'phieu' ? 'phieu' : 'detail') } catch {}
+    setDocTask(t)
+    setRestoreTaskId(null)
+  }, [restoreTaskId, tasks, docTask])
+  // Chuyển sang trang khác (Dashboard...) thì quên task đang mở; còn reload trang thì giữ lại
+  useEffect(() => () => {
+    try { sessionStorage.removeItem('openTaskId'); sessionStorage.removeItem('openTaskStage') } catch {}
+  }, [])
     // Vừa bấm "Tạo task" xong: tự mở thẳng trang chi tiết của task đó
   const [openNewTaskId, setOpenNewTaskId] = useState<string | null>(null)
   useEffect(() => {
@@ -4783,6 +4885,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   const [openTicketFor, setOpenTicketFor] = useState<string | null>(null)
   const [submittingTask, setSubmittingTask] = useState<Task | null>(null)
   const [closingTask, setClosingTask] = useState<Task | null>(null)
+  const [returnToTaskId, setReturnToTaskId] = useState<string | null>(null)  // sửa từ trang chi tiết thì xong quay lại đó
   const [selfMode, setSelfMode] = useState(false)
   const taskRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [flashTaskId, setFlashTaskId] = useState<string | null>(null)
@@ -5253,6 +5356,8 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
     setShowModal(false)
     setEditingTask(null)
     setSelfMode(false)
+    // Sửa xong thì mở lại đúng trang chi tiết của task đó (không bị văng ra ngoài)
+    if (returnToTaskId) { setOpenNewTaskId(returnToTaskId); setReturnToTaskId(null) }
     setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'development', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '', slaLevel: '', company: '', doc: emptyTaskDoc() })
   }
 
@@ -5759,12 +5864,12 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       {showModal && (
         <TaskDocForm form={form} setForm={setForm} isManager={isManager} selfMode={selfMode} setSelfMode={setSelfMode}
           editingTask={editingTask} currentUser={currentUser} users={users} employees={employees} teamUsers={teamUsers}
-          onSave={handleSaveTask} onClose={() => { setShowModal(false); setEditingTask(null); setSelfMode(false) }} />
+          onSave={handleSaveTask} onClose={() => { setShowModal(false); setEditingTask(null); setSelfMode(false); if (returnToTaskId) { setOpenNewTaskId(returnToTaskId); setReturnToTaskId(null) } }} />
       )}
       {docTask && (
         <TaskViewFlow task={docTask} tasks={tasks} users={users} currentUser={currentUser} initialStage={docStage}
           onClose={() => setDocTask(null)}
-          onEdit={() => { const t = tasks.find(x => x.id === docTask.id) ?? docTask; setDocTask(null); openEditModal(t) }}
+          onEdit={() => { const t = tasks.find(x => x.id === docTask.id) ?? docTask; setReturnToTaskId(t.id); setDocTask(null); openEditModal(t) }}
           onOpenInTasks={viewMode === 'list' ? () => { const id = docTask.id; setDocTask(null); setExpandedRow(id) } : undefined} />
       )}
       {closingTask && (
@@ -13396,7 +13501,11 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   proposalApprovals: ProposalApproval[]
   proposalRevisions: ProposalRevision[]
 }) {
-  const [view, setView] = useState<View>('dashboard')
+  // Nhớ trang đang xem: reload vẫn ở đúng chỗ (sessionStorage = theo từng tab trình duyệt)
+  const [view, setView] = useState<View>(() => {
+    try { return (sessionStorage.getItem('appView') as View) || 'dashboard' } catch { return 'dashboard' }
+  })
+  useEffect(() => { try { sessionStorage.setItem('appView', view) } catch {} }, [view])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => { try { return localStorage.getItem('sidebarCollapsed') === '1' } catch { return false } })
   const [sidebarHover, setSidebarHover] = useState(false)
   useEffect(() => { try { localStorage.setItem('sidebarCollapsed', sidebarCollapsed ? '1' : '0') } catch {} }, [sidebarCollapsed])
@@ -13511,6 +13620,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
           openProposalId={openProposalId} clearOpenProposalId={() => setOpenProposalId(null)} />
           case 'useradmin': return currentUser.isItAdmin ? <UserAdminView currentUser={currentUser} users={mergedUsers} /> : <DashboardView {...sharedProps} proposals={proposals} />
           case 'bodlog': return currentUser.isDirector ? <BodLogView tasks={tasks} users={users} /> : <DashboardView {...sharedProps} proposals={proposals} />
+          default: return <DashboardView {...sharedProps} proposals={proposals} />
     }
   }
 
