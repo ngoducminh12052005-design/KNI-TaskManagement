@@ -2130,6 +2130,61 @@ function TaskViewFlow({ task, tasks, users, currentUser, readOnly = false, initi
 
 type FlowStep = { label: string; who: string; status: 'done' | 'current' | 'rejected' | 'wait' | 'skip'; at?: string; note?: string }
 
+type TaskChange = { label: string; from: string; to: string }
+
+// So sánh task trước và sau khi sửa, ghi lại từng thông tin đã đổi để hiện trong Lịch sử
+function diffTaskEdit(old: Task, f: {
+  title: string; company: string; description: string; expReward: number
+  assignedTo: string[]; projectManager: string[]; supporters: string[]
+  startDate: string; dueDate: string; category: string; priority: TaskPriority
+  important: boolean; urgent: boolean; isTeamProject: boolean; slaLevel: string
+  doc: any
+}, users: User[]): TaskChange[] {
+  const out: TaskChange[] = []
+  const names = (ids: string[]) => ids.map(id => users.find(u => u.id === id)?.name ?? '—').join(', ') || '—'
+  const date = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN') : '—')
+  const short = (s?: string, n = 80) => { const t = (s ?? '').trim(); return t ? (t.length > n ? `${t.slice(0, n)}…` : t) : '—' }
+  const sameIds = (a: string[], b: string[]) => [...a].sort().join('|') === [...b].sort().join('|')
+  const pushVal = (label: string, from: string, to: string) => { if (from !== to) out.push({ label, from, to }) }
+  const pushText = (label: string, a?: string, b?: string) => { if ((a ?? '').trim() !== (b ?? '').trim()) out.push({ label, from: short(a), to: short(b) }) }
+
+  pushText('Tên task', old.title, f.title)
+  pushVal('Công ty', old.company ?? '—', f.company || '—')
+  pushText('Mô tả', old.description, f.description)
+  pushVal('EXP thưởng', String(old.expReward), String(f.expReward))
+  if (!sameIds(old.assignedTo, f.assignedTo)) out.push({ label: 'Người phụ trách', from: names(old.assignedTo), to: names(f.assignedTo) })
+  if (!sameIds(old.supporters, f.supporters)) out.push({ label: 'Người hỗ trợ', from: names(old.supporters), to: names(f.supporters) })
+  if (!sameIds(old.projectManager, f.projectManager)) out.push({ label: 'Quản lý (PM)', from: names(old.projectManager), to: names(f.projectManager) })
+  pushVal('Ngày bắt đầu', date(old.startDate), date(f.startDate))
+  pushVal('Hạn hoàn thành', date(old.dueDate), date(f.dueDate))
+  pushVal('Danh mục', old.category || '—', f.category || '—')
+  pushVal('Ưu tiên', PRIORITY_CONFIG[old.priority]?.label ?? old.priority, PRIORITY_CONFIG[f.priority]?.label ?? f.priority)
+  pushVal('Mức độ quan trọng', old.important ? 'Quan trọng' : 'Bình thường', f.important ? 'Quan trọng' : 'Bình thường')
+  pushVal('Mức độ gấp', old.urgent ? 'Gấp' : 'Không gấp', f.urgent ? 'Gấp' : 'Không gấp')
+  pushVal('Công việc nhóm', old.isTeamProject ? 'Có' : 'Không', f.isTeamProject ? 'Có' : 'Không')
+  pushVal('Mức độ SLA',
+    old.slaLevel ? (SLA_LEVELS[old.slaLevel]?.label ?? old.slaLevel) : 'Không áp dụng SLA',
+    f.slaLevel ? (SLA_LEVELS[f.slaLevel]?.label ?? f.slaLevel) : 'Không áp dụng SLA')
+
+  // Các mục trong phiếu giao task (chỉ so sánh khi task đã có phiếu)
+  const o: any = old.formData ?? {}
+  if (Object.keys(o).length > 0) {
+    const n: any = f.doc ?? {}
+    const arr = (x: any) => (Array.isArray(x) ? x : [])
+    const rowsText = (rows: any[]) => (rows.length ? `${rows.length} hạng mục: ${rows.map(r => r.item).join('; ')}` : '—')
+    const costText = (rows: any[]) => (rows.length
+      ? `${rows.length} dòng, tổng ${Math.round(rows.reduce((s, r) => s + (Number(r.qty) || 0) * (Number(r.price) || 0), 0)).toLocaleString('vi-VN')} VNĐ`
+      : '—')
+    if (JSON.stringify(arr(o.canCu)) !== JSON.stringify(arr(n.canCu))) out.push({ label: 'Căn cứ', from: short(arr(o.canCu).join(' | ')), to: short(arr(n.canCu).join(' | ')) })
+    if (JSON.stringify(arr(o.rows)) !== JSON.stringify(arr(n.rows))) out.push({ label: 'Hạng mục công việc', from: short(rowsText(arr(o.rows)), 100), to: short(rowsText(arr(n.rows)), 100) })
+    if (JSON.stringify(arr(o.costRows)) !== JSON.stringify(arr(n.costRows))) out.push({ label: 'Chi phí', from: costText(arr(o.costRows)), to: costText(arr(n.costRows)) })
+    pushText('Yêu cầu thực hiện', o.yeuCau, n.yeuCau)
+    pushText('Thông tin khác', o.thongTinKhac, n.thongTinKhac)
+    pushText('Địa điểm', o.place, n.place)
+  }
+  return out
+}
+
 function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend = false, onClose, onOpenPhieu, onEdit, onOpenInTasks }: {
   task: Task; users: User[]; currentUser: User; canApprove: boolean; canEdit: boolean; canSend?: boolean
   onClose: () => void; onOpenPhieu: () => void; onEdit?: () => void; onOpenInTasks?: () => void
@@ -2213,7 +2268,20 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   const stepIcon = (s: FlowStep['status']) => (s === 'done' ? '✅' : s === 'current' ? '⏳' : s === 'rejected' ? '❌' : s === 'skip' ? '⏭' : '○')
 
   // ----- Lịch sử -----
-  const events: { at: string; text: string }[] = []
+  const [editLogs, setEditLogs] = useState<{ id: string; userId: string; changes: TaskChange[]; createdAt: string }[]>([])
+  useEffect(() => {
+    const load = async () => {
+      const { data } = await supabase.from('task_edit_logs').select('*').eq('task_id', task.id).order('created_at')
+      setEditLogs((data ?? []).map((x: any) => ({ id: x.id, userId: x.user_id, changes: Array.isArray(x.changes) ? x.changes : [], createdAt: x.created_at })))
+    }
+    load()
+    const ch = supabase.channel(`task-edit-logs-${task.id}-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'task_edit_logs', filter: `task_id=eq.${task.id}` }, () => { load() })
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [task.id])
+
+  const events: { at: string; text: string; lines?: string[] }[] = []
   const add = (at: string | undefined, text: string) => { if (at) events.push({ at, text }) }
   add(task.createdAt, `${nameOf(task.createdBy)} ${task.selfCreated ? 'tự tạo task' : 'giao task'}`)
   if (task.creationApproval === 'approved' && task.creationApprovedBy) add(task.creationApprovedAt, `${nameOf(task.creationApprovedBy)} duyệt cho làm`)
@@ -2231,6 +2299,10 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
     })
   } else add(task.submittedAt, `📤 Nộp kết quả${task.submissionNote ? `: ${task.submissionNote}` : ''}`)
   add(task.approvedAt, `✅ ${nameOf(task.approvedBy)} duyệt & đóng task`)
+  editLogs.forEach(l => {
+    if (l.changes.length === 0) return
+    events.push({ at: l.createdAt, text: `✏️ ${nameOf(l.userId)} đã chỉnh sửa task`, lines: l.changes.map(c => `${c.label}: ${c.from} → ${c.to}`) })
+  })
   events.sort((a, b) => a.at.localeCompare(b.at))
 
   const card = { background: 'var(--bg-panel)', border: '1px solid var(--border)' }
@@ -2451,6 +2523,11 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
                 {events.map((e, i) => (
                   <div key={i}>
                     <p className="text-sm break-words" style={{ color: 'var(--text-primary)' }}>{e.text}</p>
+                    {e.lines && (
+                      <ul className="mt-1 space-y-0.5">
+                        {e.lines.map((ln, j) => <li key={j} className="text-xs break-words pl-2" style={{ color: 'var(--text-muted)' }}>- {ln}</li>)}
+                      </ul>
+                    )}
                     <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{fmtDT(e.at)}</p>
                   </div>
                 ))}
@@ -3109,22 +3186,12 @@ async function closeTask(
 
 function CloseTaskModal({ task, currentUser, users, onClose }: { task: Task; currentUser: User; users: User[]; onClose: () => void }) {
   const [hasIssue, setHasIssue] = useState(!!task.completeIssue)
-  const [issueText, setIssueText] = useState('')
   const [note, setNote] = useState('')
-  const [files, setFiles] = useState<File[]>([])
-  const [driveLink, setDriveLink] = useState('')
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
 
   const handleSubmit = async () => {
-    if (hasIssue && !issueText.trim()) { setError('Bạn chọn "Close with issue", vui lòng ghi rõ issue là gì.'); return }
-    if (driveLink.trim() && !/^https?:\/\//i.test(driveLink.trim())) { setError('Link không hợp lệ, vui lòng dán đúng đường dẫn Google Drive.'); return }
-    setError(''); setSaving(true)
-    let uploaded: { name: string; path: string; size: number; type: string }[] = []
-    try { uploaded = await uploadProposalFiles(currentUser.id, files) }
-    catch (e: any) { setSaving(false); setError('Upload file lỗi: ' + (e?.message ?? '')); return }
-    const text = [hasIssue ? issueText.trim() : '', note.trim(), driveLink.trim() ? `Link: ${driveLink.trim()}` : ''].filter(Boolean).join(' · ')
-    const ok = await closeTask(task, hasIssue ? 'with_issue' : 'successful', text, uploaded, currentUser, users)
+    setSaving(true)
+    const ok = await closeTask(task, hasIssue ? 'with_issue' : 'successful', note, [], currentUser, users)
     setSaving(false)
     if (ok) onClose()
   }
@@ -3134,37 +3201,26 @@ function CloseTaskModal({ task, currentUser, users, onClose }: { task: Task; cur
     <div className="fixed inset-0 flex items-center justify-center z-50 px-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
       <div className="w-full max-w-md rounded-2xl p-6 max-h-[90vh] overflow-y-auto" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
         <h3 className="font-bold text-lg mb-1" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>Close task</h3>
-        <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>{task.title}</p>
+        <p className="text-sm mb-3" style={{ color: 'var(--text-muted)' }}>{task.title}</p>
+        {task.completeIssue && (
+          <p className="text-xs mb-3" style={{ color: '#b45309' }}>⚠️ Nhân viên báo issue: {task.completeIssue}</p>
+        )}
 
-        <div className="mb-4 p-3 rounded-lg" style={field}>
-          <p className="text-xs uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>Kết quả Close *</p>
-          <div className="flex gap-2 mb-2">
-            <button type="button" onClick={() => setHasIssue(false)} className="flex-1 py-2 rounded-lg text-xs font-bold"
-              style={{ background: !hasIssue ? '#34d39922' : 'transparent', color: !hasIssue ? '#059669' : 'var(--text-muted)', border: `1px solid ${!hasIssue ? '#059669' : 'var(--border)'}` }}>
-              🔒 Close successful
-            </button>
-            <button type="button" onClick={() => setHasIssue(true)} className="flex-1 py-2 rounded-lg text-xs font-bold"
-              style={{ background: hasIssue ? '#f8717122' : 'transparent', color: hasIssue ? '#dc2626' : 'var(--text-muted)', border: `1px solid ${hasIssue ? '#dc2626' : 'var(--border)'}` }}>
-              ⚠️ Close with issue
-            </button>
-          </div>
-          {hasIssue && (
-            <textarea value={issueText} onChange={e => setIssueText(e.target.value)} rows={2} placeholder="Ghi rõ issue là gì..."
-              className="w-full px-3 py-2 rounded-lg text-xs outline-none resize-none" style={field} />
-          )}
+        <div className="flex gap-2 mb-4">
+          <button type="button" onClick={() => setHasIssue(false)} className="flex-1 py-2.5 rounded-lg text-xs font-bold"
+            style={{ background: !hasIssue ? '#34d39922' : 'transparent', color: !hasIssue ? '#059669' : 'var(--text-muted)', border: `1px solid ${!hasIssue ? '#059669' : 'var(--border)'}` }}>
+            🔒 Close successful
+          </button>
+          <button type="button" onClick={() => setHasIssue(true)} className="flex-1 py-2.5 rounded-lg text-xs font-bold"
+            style={{ background: hasIssue ? '#f8717122' : 'transparent', color: hasIssue ? '#dc2626' : 'var(--text-muted)', border: `1px solid ${hasIssue ? '#dc2626' : 'var(--border)'}` }}>
+            ⚠️ Close with issue
+          </button>
         </div>
 
-        <FilePicker files={files} setFiles={setFiles} />
-
-        <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Dán link Google Drive (nếu có nhiều file / hình ảnh)</label>
-        <input value={driveLink} onChange={e => setDriveLink(e.target.value)} placeholder="https://drive.google.com/..."
-          className="w-full px-3 py-2.5 rounded-lg text-sm outline-none mb-4" style={field} />
-
         <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Ghi chú (không bắt buộc)</label>
-        <textarea value={note} onChange={e => setNote(e.target.value)} rows={3}
+        <textarea value={note} onChange={e => setNote(e.target.value)} rows={2}
           className="w-full px-4 py-2.5 mb-4 rounded-xl text-sm outline-none resize-none" style={field} />
 
-        {error && <p className="text-xs mb-3" style={{ color: '#dc2626' }}>{error}</p>}
         <div className="flex gap-2">
           <button onClick={onClose} className="flex-1 py-2.5 rounded-xl font-semibold text-sm" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>Hủy</button>
           <button onClick={handleSubmit} disabled={saving} className="flex-1 py-2.5 rounded-xl font-bold text-sm disabled:opacity-40"
@@ -3174,8 +3230,6 @@ function CloseTaskModal({ task, currentUser, users, onClose }: { task: Task; cur
     </div>
   )
 }
-
-
 //====================CollaborationRequestModal======================
 function CollaborationRequestModal({ currentUser, users, onClose }: {
   currentUser: User; users: User[]; onClose: () => void
@@ -5089,7 +5143,10 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
 
     if (editingTask) {
       const resubmit = false   // sửa xong vẫn ở New; bấm 'Gửi task cho quản lý' mới gửi
-      await supabase.from('tasks').update({
+      // Ghi lại người sửa đã đổi những gì (hiện ở Lịch sử trong chi tiết task)
+      const editChanges = diffTaskEdit(editingTask, { ...form, title: finalTitle, doc: cleanTaskDoc(form.doc) }, users)
+      const isOwnDraftEdit = editingTask.createdBy === currentUser.id && (editingTask.creationApproval === 'draft' || editingTask.creationApproval === 'rejected')
+      const { error: updateError } = await supabase.from('tasks').update({
         title: finalTitle, company: form.company || null, description: form.description, exp_reward: form.expReward,
         assigned_to: form.assignedTo, project_manager: form.projectManager, supporters: form.supporters,
         start_date: form.startDate, due_date: form.dueDate,
@@ -5101,6 +5158,11 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       sla_level: form.slaLevel || null,
       form_data: withMeta(cleanTaskDoc(form.doc), taskMeta(editingTask)),
     }).eq('id', editingTask.id)
+    if (updateError) {
+      alert('Không lưu được thay đổi: ' + updateError.message)
+    } else if (editChanges.length > 0 && !isOwnDraftEdit) {
+      await supabase.from('task_edit_logs').insert({ task_id: editingTask.id, user_id: currentUser.id, changes: editChanges })
+    }
     if (resubmit) {
       for (const mgrId of getTaskApproverIds(currentUser.id, form.projectManager, users)) {
         await supabase.from('notifications').insert({
