@@ -1727,6 +1727,8 @@ const taskMeta = (t: { formData?: any }): any => (t.formData && typeof t.formDat
 // ===== Giao chéo / ủy quyền qua quản lý =====
 const deptPrefix = (id?: string) => id?.match(/^t\d+/)?.[0] ?? ''
 
+const outsideAssigneesNames = (us: User[]) => us.map(u => u.name).join(', ')
+
 // Chuỗi quản lý trung gian theo thứ tự; người CUỐI là người phân công cho nhân viên (hoặc tự làm)
 const chainOf = (t: { formData?: any }): string[] => (Array.isArray(taskMeta(t).chain) ? taskMeta(t).chain : [])
 const relayIdOf = (t: { formData?: any }): string | undefined => chainOf(t)[chainOf(t).length - 1]
@@ -2285,6 +2287,11 @@ function CrossDeptApproveModal({ task, currentUser, users, onClose }: { task: Ta
           Do {users.find(u => u.id === task.createdBy)?.name ?? '—'} ({TEAMS.find(t => t.id === users.find(u => u.id === task.createdBy)?.teamId)?.name ?? ''}) giao.
           {proposed.length > 0 ? ` Đề xuất: ${nm(proposed)}.` : ''}
         </p>
+        {taskMeta(task).bodGate && (
+          <p className="text-xs mb-3 p-2 rounded-lg" style={{ background: '#fbbf2422', color: '#b45309' }}>
+            📌 BOD giao thẳng cho nhân viên phòng bạn. Bạn duyệt rồi chọn: tự làm, giữ nguyên người được giao hoặc phân công lại cho người khác trong phòng.
+          </p>
+        )}
 
         <label className="flex items-center gap-2 p-3 rounded-lg mb-2 cursor-pointer text-sm" style={field}>
           <input type="radio" checked={mode === 'self'} onChange={() => setMode('self')} /> 🙋 Tôi trực tiếp làm
@@ -2513,7 +2520,8 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   const canReject = canClose || canForward
   const [showCrossApprove, setShowCrossApprove] = useState(false)
   const [showDelegate, setShowDelegate] = useState(false)
-  const canDelegate = currentUser.role === 'manager' && !currentUser.isDirector && isAssignee
+  const canDelegate = currentUser.role === 'manager' && !currentUser.isDirector
+    && (isAssignee || (!!taskMeta(task).bodGate && relayIdOf(task) === currentUser.id))
     && (task.status === 'open' || task.status === 'in-progress') && !task.crossDeptPending && !isTaskGated(task)
   const canApproveCross = canApproveCrossTask(task, currentUser)
   // Nhân viên được giao: bấm "Bắt đầu" ngay trong chi tiết, bắt đầu rồi mới có nút Complete
@@ -2575,7 +2583,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
     const meta = taskMeta(task)
     const tgtMgrs = users.filter(u => u.role === 'manager' && u.teamId === task.targetTeamId).map(u => u.name).join(', ')
     steps.push({
-      label: `Trưởng phòng ${teamName(task.targetTeamId) ?? ''} duyệt giao chéo`.trim(),
+      label: (meta.bodGate ? `Trưởng phòng ${teamName(task.targetTeamId) ?? ''} duyệt (BOD giao thẳng nhân viên)` : `Trưởng phòng ${teamName(task.targetTeamId) ?? ''} duyệt giao chéo`).trim(),
       who: task.crossDeptRejectedBy ? nameOf(task.crossDeptRejectedBy)
         : meta.crossApprovedBy ? nameOf(meta.crossApprovedBy)
         : (tgtMgrs || 'Trưởng phòng ban nhận'),
@@ -5704,15 +5712,31 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       if (crossRequested && finalAssigned.length === 0) { alert('Phòng ban này chưa có quản lý nào để nhận task, vui lòng chọn người cụ thể.'); return }
       const assignedUsers = finalAssigned.map(uid => users.find(u => u.id === uid)).filter(Boolean) as User[]
       const outsideAssignees = assignedUsers.filter(u => u.teamId !== currentUser.teamId)
-      const isCrossDept = crossRequested || (!creatingForSelf && !asBod && outsideAssignees.length > 0)
-      const targetTeamId = crossRequested ? crossTeamId : (isCrossDept ? outsideAssignees[0].teamId : null)
+      // BOD / trợ lý BOD (tab "Giao task từ BOD") giao THẲNG cho nhân viên, không qua quản lý:
+      // quản lý phòng ban của nhân viên đó phải duyệt trước (rồi tự làm, giữ nguyên hoặc phân công lại)
+      const bodDirectEmployees = !creatingForSelf && asBod ? assignedUsers.filter(u => u.role !== 'manager') : []
+      const bodGate = bodDirectEmployees.length > 0
+      if (bodGate) {
+        if (new Set(assignedUsers.map(u => u.teamId)).size > 1) {
+          alert('Giao thẳng cho nhân viên: mỗi task chỉ chọn người thuộc MỘT phòng ban để quản lý phòng đó duyệt. Hãy tách thành nhiều task theo phòng ban.'); return
+        }
+        const gateTeamId = bodDirectEmployees[0].teamId
+        if (!users.some(u => u.role === 'manager' && u.teamId === gateTeamId && u.id !== currentUser.id)) {
+          alert('Phòng ban của nhân viên này chưa có quản lý để duyệt task. Hãy chọn quản lý phòng ban làm người nhận.'); return
+        }
+      }
+      const isCrossDept = crossRequested || bodGate || (!creatingForSelf && !asBod && outsideAssignees.length > 0)
+      const targetTeamId = crossRequested ? crossTeamId : bodGate ? bodDirectEmployees[0].teamId : (isCrossDept ? outsideAssignees[0].teamId : null)
 
       const taskCode = generateTaskCode(form.startDate, tasks)
       const { data: newTask } = await supabase.from('tasks').insert({
         title: finalTitle, company: form.company || null, description: form.description, exp_reward: form.expReward,
         task_code: taskCode,
         sla_level: form.slaLevel || null,
-        form_data: withMeta(cleanTaskDoc(form.doc), (currentUser.isBodAssistant && !currentUser.isDirector && form.fromBod && !creatingForSelf) ? { fromBod: true } : undefined),
+        form_data: withMeta(cleanTaskDoc(form.doc), {
+          ...((currentUser.isBodAssistant && !currentUser.isDirector && form.fromBod && !creatingForSelf) ? { fromBod: true } : {}),
+          ...(bodGate ? { bodGate: true } : {}),
+        }),
         work_status: (creatingForSelf && !needsApproval) ? 'processing' : 'received',
         status: (creatingForSelf && !needsApproval) ? 'in-progress' : 'open',
         started_at: (creatingForSelf && !needsApproval) ? new Date().toISOString() : null,
@@ -5758,7 +5782,9 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
           const assigneeNames = crossRequested && form.assignedTo.length === 0 ? '' : outsideAssignees.map(u => u.name).join(', ')
           for (const mgr of targetManagers) {
             await supabase.from('notifications').insert({
-              message: `📨 ${currentUser.name} (${TEAMS.find(t => t.id === currentUser.teamId)?.name ?? ''}) đề nghị giao / phối hợp task [${taskCode}] "${form.title}" với phòng ban của bạn${assigneeNames ? ` (đề xuất: ${assigneeNames})` : ''}. Bạn duyệt rồi tự làm hoặc phân công người trong phòng: ${taskContent}`,
+              message: bodGate
+                ? `📌 ${currentUser.name} giao thẳng task [${taskCode}] "${form.title}" cho ${outsideAssigneesNames(assignedUsers)} thuộc phòng bạn. Bạn cần DUYỆT trước, rồi chọn giữ nguyên người được giao, tự làm hoặc phân công lại: ${taskContent}`
+                : `📨 ${currentUser.name} (${TEAMS.find(t => t.id === currentUser.teamId)?.name ?? ''}) đề nghị giao / phối hợp task [${taskCode}] "${form.title}" với phòng ban của bạn${assigneeNames ? ` (đề xuất: ${assigneeNames})` : ''}. Bạn duyệt rồi tự làm hoặc phân công người trong phòng: ${taskContent}`,
               target_user_id: mgr.id,
               link_task_id: newTaskId,
             })
