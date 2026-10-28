@@ -1730,17 +1730,6 @@ const emptyTaskDoc = (): TaskDocData => ({ place: 'HCMC', canCu: [''], rows: [{ 
 const taskCostAmount = (r: { qty?: string; price?: string }) => (Number(r.qty) || 0) * (Number(r.price) || 0)
 const fmtTaskMoney = (n: number) => Math.round(n).toLocaleString('vi-VN')
 // Bỏ dòng trống trước khi lưu vào cột tasks.form_data
-// Dữ liệu phụ (quản lý duyệt chéo phòng, đề nghị chuyển phòng) lưu trong form_data._meta: không cần thêm cột trong database
-const taskMeta = (t: { formData?: any }): any => (t.formData && typeof t.formData === 'object' ? (t.formData as any)._meta : undefined) ?? {}
-const withMeta = (doc: any, meta?: any) => (meta && Object.keys(meta).length > 0 ? { ...doc, _meta: meta } : doc)
-async function saveTaskMeta(task: Task, patch: Record<string, any>, extra: Record<string, any> = {}) {
-  const meta = { ...taskMeta(task), ...patch }
-  return supabase.from('tasks').update({ form_data: { ...(task.formData ?? {}), _meta: meta }, ...extra }).eq('id', task.id)
-}
-// Lịch sử task lưu trong bảng task_work_notes sẵn có, đánh dấu bằng tiền tố này
-const HIST_PREFIX = '[LS] '
-const isHistNote = (n: string) => n.startsWith(HIST_PREFIX)
-
 const cleanTaskDoc = (d: TaskDocData) => ({
   place: d.place.trim() || 'HCMC',
   canCu: d.canCu.map(s => s.trim()).filter(Boolean),
@@ -1811,8 +1800,10 @@ async function approveTransfer(task: Task, me: User, users: User[]) {
   const nm = (id: string) => users.find(u => u.id === id)?.name ?? '?'
   const toTeam = TEAMS.find(t => t.id === task.transferTeamId)?.name ?? ''
   const next = task.transferAssignees ?? []
-  const { error } = await saveTaskMeta(task, { transfer: null, targetManagerId: null },
-    { assigned_to: next, target_team_id: task.transferTeamId ?? null, cross_dept_pending: false })
+  const { error } = await supabase.from('tasks').update({
+    assigned_to: next, target_team_id: task.transferTeamId ?? null, target_manager_id: null, cross_dept_pending: false,
+    transfer_pending: false, transfer_team_id: null, transfer_assignees: [], transfer_manager_id: null, transfer_reason: null, transfer_by: null,
+  }).eq('id', task.id).eq('transfer_pending', true)
   if (error) { alert('Không duyệt được: ' + error.message); return }
   await logTaskHistory(task.id, me, `✅ ${me.name} đã duyệt nhận task chuyển sang phòng ${toTeam}. Người nhận: ${next.map(nm).join(', ')}`)
   const label = task.taskCode ?? task.title
@@ -1829,7 +1820,9 @@ async function approveTransfer(task: Task, me: User, users: User[]) {
 async function rejectTransfer(task: Task, me: User) {
   const reason = window.prompt('Lý do từ chối nhận task (người đề nghị sẽ thấy):') ?? ''
   if (reason.trim() === '' && !window.confirm('Bạn chưa nhập lý do, vẫn muốn từ chối?')) return
-  const { error } = await saveTaskMeta(task, { transfer: null })
+  const { error } = await supabase.from('tasks').update({
+    transfer_pending: false, transfer_team_id: null, transfer_assignees: [], transfer_manager_id: null, transfer_reason: null, transfer_by: null,
+  }).eq('id', task.id).eq('transfer_pending', true)
   if (error) { alert('Không từ chối được: ' + error.message); return }
   await logTaskHistory(task.id, me, `❌ ${me.name} đã từ chối nhận task chuyển phòng${reason.trim() ? `. Lý do: ${reason.trim()}` : ''}`)
   const label = task.taskCode ?? task.title
@@ -1863,7 +1856,10 @@ function TransferModal({ task, currentUser, users, onClose }: { task: Task; curr
     if (!reason.trim()) { alert('Vui lòng nhập lý do chuyển phòng.'); return }
     setSaving(true)
     const approverId = needMgr ? mgrId : picked.id
-    const { error } = await saveTaskMeta(task, { transfer: { pending: true, teamId, assignees: [picked.id], managerId: needMgr ? mgrId : null, reason: reason.trim(), by: currentUser.id } })
+    const { error } = await supabase.from('tasks').update({
+      transfer_pending: true, transfer_team_id: teamId, transfer_assignees: [picked.id],
+      transfer_manager_id: needMgr ? mgrId : null, transfer_reason: reason.trim(), transfer_by: currentUser.id,
+    }).eq('id', task.id)
     if (error) { setSaving(false); alert('Không gửi được đề nghị: ' + error.message); return }
     const toTeam = TEAMS.find(t => t.id === teamId)?.name ?? ''
     const label = task.taskCode ?? task.title
@@ -2413,145 +2409,23 @@ function TaskViewFlow({ task, tasks, users, currentUser, readOnly = false, initi
 
 type FlowStep = { label: string; who: string; status: 'done' | 'current' | 'rejected' | 'wait' | 'skip'; at?: string; note?: string }
 
-// ===== Khung "Trạng thái xử lý" trong trang chi tiết task: đổi trạng thái, đồng hồ, xin tạm dừng, mở khóa SLA =====
-function TaskWorkPanel({ task, users, currentUser, readOnly, onComplete }: { task: Task; users: User[]; currentUser: User; readOnly: boolean; onComplete: () => void }) {
-  const [, setTick] = useState(0)
-  useEffect(() => {
-    if (task.workStatus !== 'processing') return
-    const id = setInterval(() => setTick(t => t + 1), 1000)
-    return () => clearInterval(id)
-  }, [task.workStatus])
-  const isPart = task.assignedTo.includes(currentUser.id) || task.supporters.includes(currentUser.id) || task.projectManager.includes(currentUser.id) || task.createdBy === currentUser.id
-  const isMgr = currentUser.role === 'manager'
-  if (readOnly || isTaskGated(task) || task.crossDeptPending || task.transferPending || task.status === 'open' || (!isPart && !isMgr)) return null
-  const finished = task.status === 'submitted' || task.status === 'completed'
-  const canMove = isPart && !finished && !task.pendingRequestedAt && !task.isLocked
-
-  const notifyMgrs = async (status: string) => {
-    const label = WORK_STATUS_CONFIG[status]?.label ?? status
-    for (const m of users.filter(u => u.role === 'manager' && (u.teamId === currentUser.teamId || u.isDirector) && u.id !== currentUser.id)) {
-      await supabase.from('notifications').insert({ message: `🔄 ${currentUser.name} đã chuyển task "${task.title}" sang trạng thái: ${label}`, target_user_id: m.id, link_task_id: task.id })
-    }
-  }
-  const stopClock = () => {
-    const u: Record<string, any> = {}
-    if (task.processingStartedAt) {
-      u.total_processing_seconds = (task.totalProcessingSeconds ?? 0) + Math.floor((Date.now() - new Date(task.processingStartedAt).getTime()) / 1000)
-      u.processing_started_at = null
-    }
-    return u
-  }
-  const changeStatus = async (v: string) => {
-    if (v === 'complete') { onComplete(); return }
-    if (v === 'pending') {
-      if (task.pendingRequestedAt) return
-      const reason = window.prompt('Lý do xin tạm dừng task này (quản lý sẽ duyệt trước khi chính thức tạm dừng):') ?? ''
-      if (!reason.trim()) return
-      if (isBodTaskForManager(task, users) && task.assignedTo.includes(currentUser.id)) {
-        const { error } = await supabase.from('tasks').update({ work_status: 'pending', ...stopClock() }).eq('id', task.id)
-        if (error) { alert('Không đổi được trạng thái: ' + error.message); return }
-        await logTaskHistory(task.id, currentUser, `⏸ ${currentUser.name} tạm dừng task. Lý do: ${reason.trim()}`, task.createdBy, task.taskCode)
-        return
-      }
-      const { error } = await supabase.from('tasks').update({ pending_reason: reason.trim(), pending_requested_by: currentUser.id, pending_requested_at: new Date().toISOString() }).eq('id', task.id)
-      if (error) { alert('Không gửi được yêu cầu tạm dừng: ' + error.message); return }
-      for (const m of users.filter(u => u.role === 'manager' && (u.teamId === currentUser.teamId || u.isDirector))) {
-        await supabase.from('notifications').insert({ message: `⏸ ${currentUser.name} xin tạm dừng task "${task.title}": ${reason.trim()}`, target_user_id: m.id, link_task_id: task.id })
-      }
-      return
-    }
-    const upd: Record<string, any> = { work_status: v }
-    if (v === 'processing') {
-      if (!task.processingStartedAt) upd.processing_started_at = new Date().toISOString()
-      upd.pending_reason = null; upd.pending_requested_by = null; upd.pending_requested_at = null
-    }
-    const { error } = await supabase.from('tasks').update(upd).eq('id', task.id)
-    if (error) { alert('Không đổi được trạng thái: ' + error.message); return }
-    await notifyMgrs(v)
-  }
-  const approvePending = async () => {
-    const { error } = await supabase.from('tasks').update({ work_status: 'pending', pending_requested_by: null, pending_requested_at: null, pending_reason: null, ...stopClock() }).eq('id', task.id)
-    if (error) { alert('Không duyệt được yêu cầu tạm dừng: ' + error.message); return }
-    await logTaskHistory(task.id, currentUser, `⏸ ${currentUser.name} đã duyệt tạm dừng task${task.pendingReason ? `. Lý do: ${task.pendingReason}` : ''}`, task.pendingRequestedBy, task.taskCode)
-  }
-  const rejectPending = async () => {
-    const reason = window.prompt('Lý do từ chối yêu cầu tạm dừng (không bắt buộc):') ?? ''
-    const { error } = await supabase.from('tasks').update({ pending_reason: null, pending_requested_by: null, pending_requested_at: null }).eq('id', task.id)
-    if (error) { alert('Không từ chối được yêu cầu: ' + error.message); return }
-    if (task.pendingRequestedBy && task.pendingRequestedBy !== currentUser.id) {
-      await supabase.from('notifications').insert({ message: `❌ ${currentUser.name} đã từ chối yêu cầu tạm dừng task "${task.title}"${reason.trim() ? `: ${reason.trim()}` : ''}`, target_user_id: task.pendingRequestedBy, link_task_id: task.id })
-    }
-  }
-  const requestUnlock = async () => {
-    const reason = window.prompt('Lý do trễ hạn / xin mở khoá task:') ?? ''
-    if (!reason.trim()) return
-    await supabase.from('tasks').update({ unlock_requested_reason: reason.trim(), unlock_requested_at: new Date().toISOString() }).eq('id', task.id)
-    for (const m of users.filter(u => u.role === 'manager' && (u.teamId === currentUser.teamId || u.isDirector) && u.id !== currentUser.id)) {
-      await supabase.from('notifications').insert({ message: `🔒 ${currentUser.name} xin mở khoá task quá hạn "${task.title}": ${reason.trim()}`, target_user_id: m.id, link_task_id: task.id })
-    }
-  }
-  const grantUnlock = async () => {
-    await supabase.from('tasks').update({ is_locked: false, unlock_requested_reason: null, unlock_requested_at: null, sla_unlock_granted: true }).eq('id', task.id)
-    for (const uid of Array.from(new Set([...task.assignedTo, task.createdBy])).filter(u => u !== currentUser.id)) {
-      await supabase.from('notifications').insert({ message: `🔓 ${currentUser.name} đã mở khoá task "${task.title}", bạn có thể tiếp tục làm.`, target_user_id: uid, link_task_id: task.id })
-    }
-  }
-
-  const card = { background: 'var(--bg-panel)', border: '1px solid var(--border)' }
-  const ws = WORK_STATUS_CONFIG[task.workStatus ?? 'received'] ?? WORK_STATUS_CONFIG.received
-  return (
-    <section className="rounded-xl p-5" style={card}>
-      <h3 className="text-sm font-bold mb-3" style={{ color: 'var(--text-primary)' }}>Trạng thái xử lý</h3>
-      <div className="flex items-center gap-2 flex-wrap">
-        <select value={task.workStatus ?? 'received'} disabled={!canMove} onChange={e => changeStatus(e.target.value)}
-          className="text-sm px-3 py-1.5 rounded-lg outline-none disabled:opacity-50"
-          style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: ws.color }}>
-          {Object.entries(WORK_STATUS_CONFIG).filter(([k]) => !(k === 'received' && task.selfCreated)).map(([k, c]) => <option key={k} value={k}>{c.label}</option>)}
-        </select>
-        {(task.workStatus === 'processing' || task.workStatus === 'pending' || task.workStatus === 'complete') && (
-          <span className="text-xs px-2 py-1 rounded font-mono" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>⏱ {formatDuration(getElapsedProcessingSeconds(task))}</span>
-        )}
-        {isSlaOverdue(task) && !task.isLocked && <span className="text-xs px-2 py-1 rounded font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>⚠️ Quá hạn SLA</span>}
-        {task.isLocked && <span className="text-xs px-2 py-1 rounded font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>🔒 Đã khoá — quá hạn SLA</span>}
-      </div>
-      {!finished && !task.pendingRequestedAt && <p className="text-[11px] mt-2" style={{ color: 'var(--text-muted)' }}>Chọn "Complete" để nộp kết quả; chọn "Pending" để xin tạm dừng (cần nhập lý do).</p>}
-
-      {task.pendingRequestedAt && (
-        <div className="mt-3 p-2.5 rounded-lg" style={{ background: '#d9770622', border: '1px solid #d9770640' }}>
-          <p className="text-xs font-semibold" style={{ color: '#d97706' }}>⏳ Đang chờ duyệt yêu cầu tạm dừng</p>
-          <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>Lý do: {task.pendingReason}</p>
-          {isMgr && task.pendingRequestedBy !== currentUser.id && (
-            <div className="flex gap-1.5 mt-2">
-              <button type="button" onClick={rejectPending} className="px-2.5 py-1 rounded-lg text-xs font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>Từ chối</button>
-              <button type="button" onClick={approvePending} className="px-2.5 py-1 rounded-lg text-xs font-bold" style={{ background: '#34d39922', color: '#059669' }}>✓ Duyệt tạm dừng</button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {(task.isLocked || (isSlaOverdue(task) && !task.slaUnlockGranted)) && !finished && (
-        <div className="mt-3">
-          {task.unlockRequestedReason ? (
-            <>
-              <p className="text-xs font-semibold" style={{ color: '#d97706' }}>⏳ Đang chờ duyệt mở khoá</p>
-              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Lý do: {task.unlockRequestedReason}</p>
-              {isMgr && <button type="button" onClick={grantUnlock} className="mt-1.5 px-2.5 py-1 rounded-lg text-xs font-bold" style={{ background: '#34d39922', color: '#059669' }}>🔓 Mở khoá cho làm tiếp</button>}
-            </>
-          ) : isPart && (
-            <button type="button" onClick={requestUnlock} className="px-2.5 py-1 rounded-lg text-xs font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>🔒 Xin mở khoá (ghi lý do)</button>
-          )}
-        </div>
-      )}
-    </section>
-  )
-}
-
 function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend = false, readOnly = false, onClose, onOpenPhieu, onEdit, onOpenInTasks }: {
   task: Task; users: User[]; currentUser: User; canApprove: boolean; canEdit: boolean; canSend?: boolean; readOnly?: boolean
   onClose: () => void; onOpenPhieu: () => void; onEdit?: () => void; onOpenInTasks?: () => void
 }) {
   const [showComplete, setShowComplete] = useState(false)
   const [showClose, setShowClose] = useState(false)
+  const [hist, setHist] = useState<{ at: string; actor?: string; detail: string }[]>([])
+  useEffect(() => {
+    let alive = true
+    const loadHist = () => supabase.from('task_history').select('*').eq('task_id', task.id).order('created_at').then(({ data }: any) => {
+      if (alive) setHist((data ?? []).map((r: any) => ({ at: r.created_at, actor: r.actor_id, detail: r.detail })))
+    })
+    loadHist()
+    const hch = supabase.channel(`task-hist-${task.id}-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'task_history', filter: `task_id=eq.${task.id}` }, () => { loadHist() }).subscribe()
+    return () => { alive = false; supabase.removeChannel(hch) }
+  }, [task.id, task.assignedTo.join(','), task.crossDeptPending, task.transferPending, task.dueDate, task.title])
   const [wnotes, setWnotes] = useState<{ id: string; userId: string; note: string; createdAt: string }[]>([])
   const [wdraft, setWdraft] = useState('')
   const [showReassign, setShowReassign] = useState(false)
@@ -2564,17 +2438,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
     load()
     const ch = supabase.channel(`task-detail-notes-${task.id}-${Math.random().toString(36).slice(2)}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'task_work_notes', filter: `task_id=eq.${task.id}` }, () => { load() }).subscribe()
-    // Không phụ thuộc hoàn toàn vào realtime: tự tải lại khi vừa có thay đổi ở máy này, khi quay lại tab, và mỗi 4 giây
-    const onLocal = (e: Event) => { if ((e as CustomEvent).detail === task.id) load() }
-    const onVisible = () => { if (document.visibilityState === 'visible') load() }
-    window.addEventListener('task-history-changed', onLocal)
-    document.addEventListener('visibilitychange', onVisible)
-    const timer = setInterval(load, 4000)
-    return () => {
-      alive = false; supabase.removeChannel(ch); clearInterval(timer)
-      window.removeEventListener('task-history-changed', onLocal)
-      document.removeEventListener('visibilitychange', onVisible)
-    }
+    return () => { alive = false; supabase.removeChannel(ch) }
   }, [task.id])
   const canWriteNote = task.assignedTo.includes(currentUser.id) || task.supporters.includes(currentUser.id) || task.projectManager.includes(currentUser.id) || task.createdBy === currentUser.id || currentUser.role === 'manager'
   const sendWorkNote = async () => {
@@ -2608,8 +2472,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
         target_user_id: uid, link_task_id: task.id,
       })
     }
-    const nth = (await countTaskHistory(task.id, '↩️')) + 1
-    await logTaskHistory(task.id, currentUser, `↩️ Làm lại lần ${nth} — ${currentUser.name} từ chối kết quả${reason.trim() ? `. Lý do: ${reason.trim()}` : ''}`)
+    await logTaskHistory(task.id, currentUser, `↩️ ${currentUser.name} yêu cầu làm lại${reason.trim() ? `. Lý do: ${reason.trim()}` : ''}`)
   }
   const canComplete = !readOnly && isAssignee && task.status === 'in-progress' && task.workStatus !== 'pending' && !task.pendingRequestedAt && !task.isLocked && !isTaskGated(task)
   const canClose = !readOnly && currentUser.role === 'manager' && !isAssignee && task.status === 'submitted'
@@ -2643,8 +2506,6 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   const blocked = isTaskGated(task) || !!task.crossDeptPending || !!task.crossDeptRejected
   const finished = task.status === 'submitted' || task.status === 'completed'
   const rejectedResult = task.status === 'in-progress' && !!task.rejectedReason
-  const subCount = wnotes.filter(n => n.note.startsWith(HIST_PREFIX + '📤')).length
-  const reworkCount = wnotes.filter(n => n.note.startsWith(HIST_PREFIX + '↩️')).length
   const steps: FlowStep[] = []
   steps.push({ label: task.selfCreated ? 'Tự tạo task' : 'Giao task', who: nameOf(task.createdBy), status: 'done', at: task.createdAt })
   if (task.selfCreated) {
@@ -2671,7 +2532,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
     status: blocked ? 'wait' : finished ? 'done' : 'current',
     at: task.startedAt, note: blocked ? undefined : WS[task.workStatus ?? 'received'],
   })
-  steps.push({ label: 'Nộp kết quả', who: names(task.assignedTo), status: finished ? 'done' : 'wait', at: task.submittedAt, note: [task.completeIssue, subCount > 1 ? `Đã nộp ${subCount} lần` : ''].filter(Boolean).join(' · ') || undefined })
+  steps.push({ label: 'Nộp kết quả', who: names(task.assignedTo), status: finished ? 'done' : 'wait', at: task.submittedAt, note: task.completeIssue || undefined })
   steps.push({
     label: 'Quản lý duyệt & đóng',
     who: task.approvedBy ? nameOf(task.approvedBy) : names(task.projectManager),
@@ -2681,14 +2542,14 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
       ? [task.closeResult === 'with_issue' ? 'Đóng — có vấn đề' : task.closeResult === 'successful' ? 'Đóng — thành công' : '', task.closeNote].filter(Boolean).join(' · ') || undefined
       : rejectedResult ? `Từ chối kết quả: ${task.rejectedReason}` : undefined,
   })
-  if (reworkCount > 0) { const last = steps[steps.length - 1]; last.note = [last.note, `Đã yêu cầu làm lại ${reworkCount} lần`].filter(Boolean).join(' · ') }
   const stepIcon = (s: FlowStep['status']) => (s === 'done' ? '✅' : s === 'current' ? '⏳' : s === 'rejected' ? '❌' : s === 'skip' ? '⏭' : '○')
 
   // ----- Lịch sử -----
   const events: { at: string; text: string }[] = []
   const add = (at: string | undefined, text: string) => { if (at) events.push({ at, text }) }
   add(task.createdAt, `${nameOf(task.createdBy)} ${task.selfCreated ? 'tự tạo task' : task.onBehalfOf ? `giao task (giao thay ${task.onBehalfOf})` : 'giao task'}`)
-  wnotes.forEach(n => add(n.createdAt, isHistNote(n.note) ? `📝 ${nameOf(n.userId)}: ${n.note.slice(HIST_PREFIX.length)}` : `🗒 Work Note · ${nameOf(n.userId)}: ${n.note}`))
+  hist.forEach(h => add(h.at, `📝 ${nameOf(h.actor)}: ${h.detail}`))
+  wnotes.forEach(n => add(n.createdAt, `🗒 Work Note · ${nameOf(n.userId)}: ${n.note}`))
   if (task.creationApproval === 'approved' && task.creationApprovedBy) add(task.creationApprovedAt, `${nameOf(task.creationApprovedBy)} duyệt cho làm`)
   if (task.creationApproval === 'rejected' || (task.creationApproval === 'draft' && task.creationRejectedReason)) add(task.creationApprovedAt, `${nameOf(task.creationApprovedBy)} từ chối task${task.creationRejectedReason ? `: ${task.creationRejectedReason}` : ''}`)
   add(task.ticketReceivedAt, `🔧 Ticket Received: ${task.ticketReceivedText ?? ''}`)
@@ -2697,9 +2558,8 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   add(task.pendingRequestedAt, `⏸ ${nameOf(task.pendingRequestedBy)} xin tạm hoãn${task.pendingReason ? `: ${task.pendingReason}` : ''}`)
   add(task.unlockRequestedAt, `🔓 Xin mở khóa SLA${task.unlockRequestedReason ? `: ${task.unlockRequestedReason}` : ''}`)
   add(task.ticketCompletedAt, `🔧 Ticket Completed: ${task.ticketCompletedText ?? ''}`)
-  const histHas = (m: string) => wnotes.some(n => n.note.startsWith(HIST_PREFIX + m))
-  if (!histHas('📤')) add(task.submittedAt, `📤 Nộp kết quả${task.submissionNote ? `: ${task.submissionNote}` : ''}`)
-  if (!histHas('🔒')) add(task.approvedAt, `✅ ${nameOf(task.approvedBy)} duyệt & đóng task`)
+  add(task.submittedAt, `📤 Nộp kết quả${task.submissionNote ? `: ${task.submissionNote}` : ''}`)
+  add(task.approvedAt, `✅ ${nameOf(task.approvedBy)} duyệt & đóng task`)
   events.sort((a, b) => a.at.localeCompare(b.at))
 
   const card = { background: 'var(--bg-panel)', border: '1px solid var(--border)' }
@@ -2797,7 +2657,6 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
         <div className="grid lg:grid-cols-3 gap-4">
           {/* Cột trái */}
           <div className="lg:col-span-2 space-y-4">
-            <TaskWorkPanel task={task} users={users} currentUser={currentUser} readOnly={readOnly} onComplete={() => setShowComplete(true)} />
             <section className="rounded-xl p-5" style={card}>
               <h3 className={h3} style={{ color: 'var(--text-primary)' }}>Thông tin chung</h3>
               {info('Nhóm task', task.category)}
@@ -3358,15 +3217,6 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
     setSaving(false)
     if (updateError) { setError(updateError.message); return }
 
-    {
-      const nth = (await countTaskHistory(task.id, '📤')) + 1
-      const parts = [`📤 Nộp kết quả lần ${nth} — ${hasIssue ? `Complete with issue: ${issueText.trim()}` : 'Complete successful'}`]
-      if (note.trim()) parts.push(`Ghi chú: ${note.trim()}`)
-      if (driveLink.trim()) parts.push(`Link: ${driveLink.trim()}`)
-      if (uploaded.length > 0) parts.push(`Tệp: ${uploaded.map(u => u.name).join(', ')}`)
-      await logTaskHistory(task.id, currentUser, parts.join(' · '))
-    }
-
     const recipientIds = new Set(
       Array.from(new Set([task.createdBy, ...task.projectManager]))
         .filter(uid => uid && uid !== currentUser.id)
@@ -3524,7 +3374,6 @@ async function closeTask(
     alert('Không thể đóng task: ' + approveError.message)
     return false
   }
-  await logTaskHistory(task.id, currentUser, `🔒 ${closeLabel}${closeNote.trim() ? `: ${closeNote.trim()}` : ''}`)
 
   const isTeamwork = task.isTeamProject || task.assignedTo.length > 1 || task.supporters.length > 0
   const supportExp = Math.round(task.expReward * SUPPORTER_EXP_PERCENT)
@@ -4127,15 +3976,12 @@ const canEditTask = (t: Task, user: User, users: User[]) => {
 }
 
 // Ghi lịch sử + báo người tạo khi có người sửa / đổi người nhận task
-// Đếm số lần đã ghi một loại sự kiện trong lịch sử (📤 nộp kết quả, ↩️ làm lại) để đánh số lần 1, 2, 3...
-async function countTaskHistory(taskId: string, marker: string): Promise<number> {
-  const { count } = await supabase.from('task_work_notes').select('id', { count: 'exact', head: true }).eq('task_id', taskId).like('note', `${HIST_PREFIX}${marker}%`)
-  return count ?? 0
-}
 async function logTaskHistory(taskId: string, actor: User, detail: string, notifyId?: string, taskLabel?: string) {
-  const { error: histErr } = await supabase.from('task_work_notes').insert({ task_id: taskId, user_id: actor.id, note: HIST_PREFIX + detail })
-  if (histErr) console.error('task history', histErr)
-  else window.dispatchEvent(new CustomEvent('task-history-changed', { detail: taskId }))
+  const { error: histErr } = await supabase.from('task_history').insert({ task_id: taskId, actor_id: actor.id, detail })
+  if (histErr) {
+    console.error('task_history', histErr)
+    alert('Chưa ghi được lịch sử task: ' + histErr.message + '\n(Bạn đã chạy file SQL giao_task_moi.sql để tạo bảng task_history chưa?)')
+  }
   if (notifyId && notifyId !== actor.id) {
     await supabase.from('notifications').insert({
       message: `📝 ${actor.name} đã thay đổi task${taskLabel ? ` [${taskLabel}]` : ''}: ${detail}`,
@@ -4378,7 +4224,7 @@ function TaskTracker({ tasks: rawTasks, users, currentUser }: { tasks: Task[]; u
       supabase.from('task_work_notes').select('*').in('task_id', ids).order('created_at'),
       supabase.from('task_comments').select('id, task_id').in('task_id', ids),
     ])
-    setNotes((n.data ?? []).filter((x: any) => !isHistNote(x.note)).map((x: any) => ({ id: x.id, taskId: x.task_id, userId: x.user_id, note: x.note, createdAt: x.created_at })))
+    setNotes((n.data ?? []).map((x: any) => ({ id: x.id, taskId: x.task_id, userId: x.user_id, note: x.note, createdAt: x.created_at })))
     const counts: Record<string, number> = {}
     ;(c.data ?? []).forEach((x: any) => { counts[x.task_id] = (counts[x.task_id] ?? 0) + 1 })
     setCommentCounts(counts)
@@ -4561,14 +4407,14 @@ function TaskWorkNotePanel({ taskId, currentUser, users }: { taskId: string; cur
   useEffect(() => {
     supabase.from('task_work_notes').select('*').eq('task_id', taskId).order('created_at', { ascending: false })
       .then(({ data }) => {
-        if (data) setNotes(data.filter(n => !isHistNote(n.note)).map(n => ({ id: n.id, userId: n.user_id, note: n.note, createdAt: n.created_at })))
+        if (data) setNotes(data.map(n => ({ id: n.id, userId: n.user_id, note: n.note, createdAt: n.created_at })))
         setLoading(false)
       })
 
     const channel = supabase.channel(`task-worknotes-${taskId}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'task_work_notes', filter: `task_id=eq.${taskId}` }, payload => {
         const n = payload.new
-        if (!isHistNote(n.note)) setNotes(prev => [{ id: n.id, userId: n.user_id, note: n.note, createdAt: n.created_at }, ...prev])
+        setNotes(prev => [{ id: n.id, userId: n.user_id, note: n.note, createdAt: n.created_at }, ...prev])
       }).subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [taskId])
@@ -4957,7 +4803,7 @@ function TaskUpdateDrawer({ task, users, currentUser, canWrite, onClose }: {
 
   const load = async () => {
     const { data } = await supabase.from('task_work_notes').select('*').eq('task_id', task.id).order('created_at')
-    setNotes((data ?? []).filter((x: any) => !isHistNote(x.note)).map((x: any) => ({ id: x.id as string, userId: x.user_id as string, note: x.note as string, createdAt: x.created_at as string })))
+    setNotes((data ?? []).map((x: any) => ({ id: x.id as string, userId: x.user_id as string, note: x.note as string, createdAt: x.created_at as string })))
     setLoading(false)
   }
 
@@ -5085,7 +4931,7 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
       const m: Record<string, { id: string; note: string; createdAt: string }[]> = {}
       for (const x of (data ?? []) as any[]) {
         if (!m[x.task_id]) m[x.task_id] = []
-        if (m[x.task_id].length < 2 && !isHistNote(x.note)) m[x.task_id].push({ id: x.id, note: x.note, createdAt: x.created_at })
+        if (m[x.task_id].length < 2) m[x.task_id].push({ id: x.id, note: x.note, createdAt: x.created_at })
       }
       setRecent(m)
     }
@@ -5435,10 +5281,6 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
     const notifyIds = Array.from(new Set([...task.assignedTo, ...task.supporters]))
       .filter(uid => uid && uid !== currentUser.id)
 
-    {
-      const nth = (await countTaskHistory(task.id, '↩️')) + 1
-      await logTaskHistory(task.id, currentUser, `↩️ Làm lại lần ${nth} — ${currentUser.name} từ chối kết quả${reason ? `. Lý do: ${reason}` : ''}`)
-    }
     for (const uid of notifyIds) {
       await supabase.from('notifications').insert({
         message: `❌ ${currentUser.name} đã từ chối task: "${task.title}"${reason ? ` — Lý do: ${reason}` : ''}`,
@@ -5681,7 +5523,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
               drive_folder_created: form.driveFolderCreated,
       drive_folder_name: form.driveFolderCreated ? (form.driveFolderName.trim() || null) : null,
       sla_level: form.slaLevel || null,
-      form_data: withMeta(cleanTaskDoc(form.doc), taskMeta(editingTask)),
+      form_data: cleanTaskDoc(form.doc),
     }).eq('id', editingTask.id)
     {
       const changes: string[] = []
@@ -5732,7 +5574,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         title: finalTitle, company: form.company || null, description: form.description, exp_reward: form.expReward,
         task_code: taskCode,
         sla_level: form.slaLevel || null,
-        form_data: withMeta(cleanTaskDoc(form.doc), isCrossDept && crossMode && form.targetManagerId ? { targetManagerId: form.targetManagerId } : undefined),
+        form_data: cleanTaskDoc(form.doc),
         work_status: (creatingForSelf && !needsApproval) ? 'processing' : 'received',
         status: (creatingForSelf && !needsApproval) ? 'in-progress' : 'open',
         started_at: (creatingForSelf && !needsApproval) ? new Date().toISOString() : null,
@@ -5745,6 +5587,8 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         category: form.category, priority: form.priority, self_created: creatingForSelf,
         important: form.important, urgent: form.urgent, is_team_project: form.isTeamProject,
         cross_dept_pending: isCrossDept,
+        target_manager_id: isCrossDept && crossMode && form.targetManagerId ? form.targetManagerId : null,
+        on_behalf_of: currentUser.isBodAssistant && form.onBehalfOf?.trim() ? form.onBehalfOf.trim() : null,
         creation_approval: needsApproval ? 'draft' : 'approved',
         target_team_id: targetTeamId,
         drive_folder_created: !creatingForSelf && form.driveFolderCreated,
@@ -5752,7 +5596,6 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       }).select('id').single()
       const newTaskId = newTask?.id
       if (newTaskId) setOpenNewTaskId(newTaskId)
-      if (newTaskId && currentUser.isBodAssistant && form.onBehalfOf?.trim()) await logTaskHistory(newTaskId, currentUser, `${currentUser.name} giao task thay ${form.onBehalfOf.trim()}`)
 
       if (isManager && !selfMode) {
         const taskContent = form.description.trim() || form.title
@@ -14277,7 +14120,7 @@ export default function App() {
   const [proposalRevisions, setProposalRevisions] = useState<ProposalRevision[]>([])
 
   function mapProfileToUser(p: any): User {
-  return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email, isDirector: p.is_director ?? false, isBodAssistant: !!p.is_director && /tr[ợơ] l[ýíy]/i.test(p.position ?? ''), driveFolderUrl: p.drive_folder_url ?? undefined, signatureUrl: p.signature_url ?? undefined, empCode: p.emp_code ?? undefined, position: p.position ?? undefined, internalLine: p.internal_line ?? undefined, company: p.company ?? undefined, mustChangePassword: p.must_change_password ?? false, isItAdmin: p.is_it_admin ?? false, isActive: p.is_active ?? true }
+  return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email, isDirector: p.is_director ?? false, isBodAssistant: p.is_bod_assistant ?? false, driveFolderUrl: p.drive_folder_url ?? undefined, signatureUrl: p.signature_url ?? undefined, empCode: p.emp_code ?? undefined, position: p.position ?? undefined, internalLine: p.internal_line ?? undefined, company: p.company ?? undefined, mustChangePassword: p.must_change_password ?? false, isItAdmin: p.is_it_admin ?? false, isActive: p.is_active ?? true }
 }
 
   function mapDbMessage(m: any): Message {
@@ -14297,12 +14140,13 @@ export default function App() {
     rejectedReason: t.rejected_reason ?? undefined,
     startDate: t.start_date,
     crossDeptPending: t.cross_dept_pending ?? false,
-    transferPending: !!taskMeta({ formData: t.form_data }).transfer?.pending,
-    transferTeamId: taskMeta({ formData: t.form_data }).transfer?.teamId ?? undefined,
-    transferAssignees: taskMeta({ formData: t.form_data }).transfer?.assignees ?? [],
-    transferManagerId: taskMeta({ formData: t.form_data }).transfer?.managerId ?? undefined,
-    transferReason: taskMeta({ formData: t.form_data }).transfer?.reason ?? undefined,
-    transferBy: taskMeta({ formData: t.form_data }).transfer?.by ?? undefined,
+    onBehalfOf: t.on_behalf_of ?? undefined,
+    transferPending: t.transfer_pending ?? false,
+    transferTeamId: t.transfer_team_id ?? undefined,
+    transferAssignees: t.transfer_assignees ?? [],
+    transferManagerId: t.transfer_manager_id ?? undefined,
+    transferReason: t.transfer_reason ?? undefined,
+    transferBy: t.transfer_by ?? undefined,
     crossDeptRejected: t.cross_dept_rejected ?? false,
     crossDeptRejectedReason: t.cross_dept_rejected_reason ?? undefined,
     crossDeptRejectedBy: t.cross_dept_rejected_by ?? undefined,
@@ -14311,7 +14155,7 @@ export default function App() {
     creationApprovedAt: t.creation_approved_at ?? undefined,
     creationRejectedReason: t.creation_rejected_reason ?? undefined,
     targetTeamId: t.target_team_id ?? undefined,
-    targetManagerId: taskMeta({ formData: t.form_data }).targetManagerId ?? undefined,
+    targetManagerId: t.target_manager_id ?? undefined,
     submissionOwnFolderUrl: t.submission_own_folder_url ?? undefined,
     driveFolderCreated: t.drive_folder_created ?? false,
     driveFolderName: t.drive_folder_name ?? undefined,
