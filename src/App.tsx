@@ -39,6 +39,7 @@ interface User {
   company?: string
   mustChangePassword?: boolean
   isItAdmin?: boolean
+  isBodAssistant?: boolean
   isActive?: boolean
 }
 
@@ -1889,17 +1890,26 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
         <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
       </div>
 
-      {isManager && !editingTask && (
+            {isManager && !editingTask && (
         <div className="max-w-[860px] mx-auto mt-4 flex gap-1 p-1 rounded-xl bg-white shadow">
-          <button type="button" onClick={() => { setSelfMode(false); setCrossMode(false); patchForm({ assignedTo: [] }) }} className="flex-1 py-2 rounded-lg text-xs font-semibold"
-            style={{ background: !selfMode && !crossMode ? '#7c3aed' : 'transparent', color: !selfMode && !crossMode ? '#fff' : '#6b7280' }}>📋 Giao nhân viên phòng ban</button>
+          <button type="button" onClick={() => { setSelfMode(false); setCrossMode(false); patchForm({ assignedTo: [], fromBod: false }) }} className="flex-1 py-2 rounded-lg text-xs font-semibold"
+            style={{ background: !selfMode && !crossMode && !form.fromBod ? '#7c3aed' : 'transparent', color: !selfMode && !crossMode && !form.fromBod ? '#fff' : '#6b7280' }}>📋 Giao nhân viên phòng ban</button>
           {!currentUser.isDirector && (
-            <button type="button" onClick={() => { setSelfMode(false); setCrossMode(true); patchForm({ assignedTo: [] }) }} className="flex-1 py-2 rounded-lg text-xs font-semibold"
+            <button type="button" onClick={() => { setSelfMode(false); setCrossMode(true); patchForm({ assignedTo: [], fromBod: false }) }} className="flex-1 py-2 rounded-lg text-xs font-semibold"
               style={{ background: !selfMode && crossMode ? '#7c3aed' : 'transparent', color: !selfMode && crossMode ? '#fff' : '#6b7280' }}>🤝 Giao / phối hợp phòng ban khác</button>
           )}
-          <button type="button" onClick={() => { setSelfMode(true); setCrossMode(false) }} className="flex-1 py-2 rounded-lg text-xs font-semibold"
+          {currentUser.isBodAssistant && !currentUser.isDirector && (
+            <button type="button" onClick={() => { setSelfMode(false); setCrossMode(false); patchForm({ assignedTo: [], fromBod: true }) }} className="flex-1 py-2 rounded-lg text-xs font-semibold"
+              style={{ background: !selfMode && !crossMode && form.fromBod ? '#b45309' : 'transparent', color: !selfMode && !crossMode && form.fromBod ? '#fff' : '#6b7280' }}>📌 Giao task từ BOD</button>
+          )}
+          <button type="button" onClick={() => { setSelfMode(true); setCrossMode(false); patchForm({ fromBod: false }) }} className="flex-1 py-2 rounded-lg text-xs font-semibold"
             style={{ background: selfMode ? '#7c3aed' : 'transparent', color: selfMode ? '#fff' : '#6b7280' }}>🎯 Tự tạo cho tôi</button>
         </div>
+      )}
+      {isManager && !editingTask && currentUser.isBodAssistant && form.fromBod && !selfMode && !crossMode && (
+        <p className="max-w-[860px] mx-auto mt-2 text-xs text-center" style={{ color: '#b45309' }}>
+          📌 Task này được ghi nhận là BOD giao: giao thẳng cho quản lý bất kỳ phòng ban nào, quản lý chỉ nộp kết quả, BOD hoặc trợ lý Close.
+        </p>
       )}
 
       <div className="max-w-[860px] mx-auto my-4 bg-white shadow-xl p-6 sm:p-12 text-[13px] leading-relaxed" style={{ ...ink, fontFamily: 'Arial, Helvetica, sans-serif' }}>
@@ -2499,7 +2509,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   const canForward = waitFwd && relayIdOf(task) === currentUser.id && !isAssignee
   const canClose = currentUser.role === 'manager' && !isAssignee && task.status === 'submitted'
     && !isTargetDeptApprover(task, currentUser) && !waitFwd
-    && (!isBodAssigned(task, users) || !!currentUser.isDirector)
+    && (!isBodAssigned(task, users) || isBodSide(currentUser))
   const canReject = canClose || canForward
   const [showCrossApprove, setShowCrossApprove] = useState(false)
   const [showDelegate, setShowDelegate] = useState(false)
@@ -2549,7 +2559,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   const subs = getSubs(task)
   const reworkCount = subs.filter(r => r.rejected).length
   const steps: FlowStep[] = []
-  steps.push({ label: task.selfCreated ? 'Tự tạo task' : 'Giao task', who: nameOf(task.createdBy), status: 'done', at: task.createdAt })
+  steps.push({ label: task.selfCreated ? 'Tự tạo task' : (isBodAssigned(task, users) && users.find(u => u.id === task.createdBy)?.isBodAssistant ? 'Trợ lý BOD giao task' : 'Giao task'), who: nameOf(task.createdBy), status: 'done', at: task.createdAt })
   if (task.selfCreated) {
     steps.push({ label: 'Gửi quản lý duyệt', who: nameOf(task.createdBy), status: task.creationApproval === 'draft' ? 'current' : 'done', note: task.creationApproval === 'draft' ? task.creationRejectedReason : undefined })
     const noApprover = task.creationApproval === 'approved' && !task.creationApprovedBy
@@ -3470,7 +3480,7 @@ async function closeTask(
   currentUser: User, users: User[],
 ): Promise<boolean> {
   if (isTargetDeptApprover(task, currentUser)) { alert('Quản lý trung gian chỉ nộp kết quả, người giao task mới được Close.'); return false }
-  if (isBodAssigned(task, users) && !currentUser.isDirector) { alert('Task do BOD giao, chỉ BOD được Close.'); return false }
+  if (isBodAssigned(task, users) && !isBodSide(currentUser)) { alert('Task do BOD giao, chỉ BOD hoặc trợ lý BOD được Close.'); return false }
   const closeLabel = result === 'with_issue' ? 'Close with issue' : 'Close successful'
   const approvedAt = new Date().toISOString()
 
@@ -4047,8 +4057,16 @@ function MultiUserSelect({ label, options, selected, onToggle, placeholder = 'Ch
 const isTaskGated = (t: Task) =>
   t.creationApproval === 'draft' || t.creationApproval === 'pending' || t.creationApproval === 'rejected'
 // Task do BOD giao (không phải tự tạo, người tạo là BOD)
-const isBodAssigned = (t: Task, users: User[]) =>
-  !t.selfCreated && !!users.find(u => u.id === t.createdBy)?.isDirector
+// "Phía BOD": Ban Giám đốc hoặc Trợ lý BOD
+const isBodSide = (u?: User) => !!u && (!!u.isDirector || !!u.isBodAssistant)
+// Task từ BOD: BOD giao, hoặc trợ lý BOD giao bằng tab "Giao task từ BOD" (đánh dấu _meta.fromBod)
+const isBodAssigned = (t: Task, users: User[]) => {
+  if (t.selfCreated) return false
+  const c = users.find(u => u.id === t.createdBy)
+  return !!c?.isDirector || (!!c?.isBodAssistant && !!taskMeta(t).fromBod)
+}
+// Đang tạo task với tư cách BOD? (BOD luôn; trợ lý chỉ khi chọn tab "Giao task từ BOD")
+const actsAsBod = (u: User, fromBod?: boolean) => !!u.isDirector || (!!u.isBodAssistant && !!fromBod)
 
 // Task BOD giao cho quản lý: quản lý chỉ làm, không có bước duyệt
 const isBodTaskForManager = (t: Task, users: User[]) =>
@@ -4059,7 +4077,7 @@ const isBodTaskForManager = (t: Task, users: User[]) =>
 const canEditTask = (t: Task, user: User, users: User[]) => {
   if (t.selfCreated && t.createdBy === user.id && t.creationApproval === 'draft') return true
   if (user.role !== 'manager') return false
-  if (isBodAssigned(t, users)) return !!user.isDirector
+  if (isBodAssigned(t, users)) return isBodSide(user)
   const assignees = users.filter(u => t.assignedTo.includes(u.id))
   return t.createdBy === user.id || assignees.some(a => a.teamId === user.teamId)
 }
@@ -5210,6 +5228,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   openEditTaskId?: string | null; clearOpenEditTaskId?: () => void
 }) {
   const [filter, setFilter] = useState<'all' | TaskBucket>('all')
+  const [bodOnly, setBodOnly] = useState(false)
   const [search, setSearch] = useState('')
   const [showCollabModal, setShowCollabModal] = useState(false)
   const [viewMode, setViewMode] = useState<'cards' | 'list' | 'tracker'>(() => {
@@ -5353,21 +5372,23 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     assignedTo: [] as string[], projectManager: [] as string[], supporters: [] as string[],
     driveFolderCreated: false, driveFolderName: '',
     slaLevel: '' as '' | 'P1' | 'P2' | 'P3' | 'P4',
+    fromBod: false,
     company: '',
     doc: emptyTaskDoc(),
   })
 
   const isManager = currentUser.role === 'manager'
-  const employees = currentUser.isDirector
+  const asBod = actsAsBod(currentUser, !!form.fromBod && !editingTask)
+  const employees = asBod
     ? users
     : users.filter(u => u.role === 'employee' && u.teamId === currentUser.teamId)
-  const teamUsers = currentUser.isDirector
+  const teamUsers = asBod
     ? users
     : users.filter(u => u.teamId === currentUser.teamId)
 
   const isCountable = (t: Task) => isTaskVisibleTo(t, currentUser, users)
 
-const scoped = tasks.filter(t => {
+const scopedAll = tasks.filter(t => {
     const isMyTask = t.assignedTo.includes(currentUser.id) || (t.selfCreated && t.createdBy === currentUser.id) || t.supporters.includes(currentUser.id) || t.projectManager.includes(currentUser.id)
     const assignees = users.filter(u => t.assignedTo.includes(u.id))
     const deptPrefix = (id?: string) => id?.match(/^t\d+/)?.[0] ?? ''
@@ -5379,12 +5400,15 @@ const scoped = tasks.filter(t => {
     // Task nhân viên tự tạo đã chọn quản lý riêng: chỉ quản lý đó (và người tạo) thấy, không chia cho cả phòng
     const teamSeesIt = !(t.selfCreated && t.projectManager.length > 0)
     const inScope = isManager
-      ? (isMyTask || t.createdBy === currentUser.id || (teamSeesIt && assignees.some(a => a.teamId === currentUser.teamId)) || isCrossDeptForMyDept)
+      ? (isMyTask || t.createdBy === currentUser.id || (teamSeesIt && assignees.some(a => a.teamId === currentUser.teamId)) || isCrossDeptForMyDept
+        || (isBodSide(currentUser) && isBodAssigned(t, users)))
       : (isMyTask && !t.crossDeptRejected)
     if (!inScope) return false
     if (search.trim() && !t.title.toLowerCase().includes(search.trim().toLowerCase()) && !t.description.toLowerCase().includes(search.trim().toLowerCase())) return false
     return true
   })
+const bodCount = scopedAll.filter(t => isBodAssigned(t, users) && isCountable(t)).length
+const scoped = bodOnly ? scopedAll.filter(t => isBodAssigned(t, users)) : scopedAll
 
 const bucketCount = (b: TaskBucket, issue?: boolean) =>
   scoped.filter(t =>
@@ -5613,6 +5637,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
     driveFolderName: task.driveFolderName ?? '',
     slaLevel: task.slaLevel ?? '',
     company: task.company ?? '',
+    fromBod: false,
     doc: { ...emptyTaskDoc(), ...(task.formData ?? {}), canCu: (task.formData?.canCu?.length ? task.formData.canCu : ['']), rows: (task.formData?.rows?.length ? task.formData.rows : emptyTaskDoc().rows) },
   })
   setShowModal(true)
@@ -5672,14 +5697,14 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       const creatingForSelf = !isManager || selfMode
       const needsApproval = creatingForSelf && currentUser.role === 'employee'
       // Giao / phối hợp phòng ban khác: không chọn người thì mặc định giao cho quản lý phòng đó (họ tự làm hoặc phân công)
-      const crossRequested = !creatingForSelf && crossMode && !currentUser.isDirector
+      const crossRequested = !creatingForSelf && crossMode && !asBod
       if (crossRequested && !crossTeamId) { alert('Vui lòng chọn phòng ban cần giao / phối hợp.'); return }
       const targetManagerIds = users.filter(u => u.role === 'manager' && u.teamId === crossTeamId).map(u => u.id)
       const finalAssigned: string[] = crossRequested && form.assignedTo.length === 0 ? targetManagerIds : form.assignedTo
       if (crossRequested && finalAssigned.length === 0) { alert('Phòng ban này chưa có quản lý nào để nhận task, vui lòng chọn người cụ thể.'); return }
       const assignedUsers = finalAssigned.map(uid => users.find(u => u.id === uid)).filter(Boolean) as User[]
       const outsideAssignees = assignedUsers.filter(u => u.teamId !== currentUser.teamId)
-      const isCrossDept = crossRequested || (!creatingForSelf && !currentUser.isDirector && outsideAssignees.length > 0)
+      const isCrossDept = crossRequested || (!creatingForSelf && !asBod && outsideAssignees.length > 0)
       const targetTeamId = crossRequested ? crossTeamId : (isCrossDept ? outsideAssignees[0].teamId : null)
 
       const taskCode = generateTaskCode(form.startDate, tasks)
@@ -5687,7 +5712,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         title: finalTitle, company: form.company || null, description: form.description, exp_reward: form.expReward,
         task_code: taskCode,
         sla_level: form.slaLevel || null,
-        form_data: cleanTaskDoc(form.doc),
+        form_data: withMeta(cleanTaskDoc(form.doc), (currentUser.isBodAssistant && !currentUser.isDirector && form.fromBod && !creatingForSelf) ? { fromBod: true } : undefined),
         work_status: (creatingForSelf && !needsApproval) ? 'processing' : 'received',
         status: (creatingForSelf && !needsApproval) ? 'in-progress' : 'open',
         started_at: (creatingForSelf && !needsApproval) ? new Date().toISOString() : null,
@@ -5758,7 +5783,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
     setSelfMode(false)
     // Sửa xong thì mở lại đúng trang chi tiết của task đó (không bị văng ra ngoài)
     if (returnToTaskId) { setOpenNewTaskId(returnToTaskId); setReturnToTaskId(null) }
-    setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'development', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '', slaLevel: '', company: '', doc: emptyTaskDoc() })
+    setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'development', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '', slaLevel: '', company: '', fromBod: false, doc: emptyTaskDoc() })
   }
 
   const toggleFormArray = (field: 'assignedTo' | 'projectManager' | 'supporters', uid: string) => {
@@ -5831,6 +5856,14 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
           </button>
         ))}
       </div> */}
+      {isManager && (
+        <div className="flex gap-2 mb-3">
+          <button type="button" onClick={() => setBodOnly(v => !v)} className="px-3.5 py-1.5 rounded-lg text-sm font-semibold"
+            style={{ background: bodOnly ? '#b45309' : 'var(--bg-panel)', color: bodOnly ? '#fff' : 'var(--text-muted)', border: `1px solid ${bodOnly ? '#b45309' : 'var(--border)'}` }}>
+            📌 Giao task từ BOD ({bodCount})
+          </button>
+        </div>
+      )}
       <div className={`grid grid-cols-2 ${isManager ? 'sm:grid-cols-5' : 'sm:grid-cols-6'} gap-4 items-start mb-5`}>
         {!isManager && <StatusStatCard icon="📝" label="New" color={BUCKET_META.new.color}
           total={bucketCount('new')} active={filter === 'new'} onClick={() => toggleBucket('new')} />}
@@ -5899,6 +5932,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                     <span className="text-[10px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wider"
                       style={{ background: `${catColor}20`, color: catColor }}>{task.category}</span>
                     {task.selfCreated && <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#10b98122', color: '#10b981' }}>Tự tạo</span>}
+                    {isBodAssigned(task, users) && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#b4530922', color: '#b45309' }}>📌 Từ BOD{getUserById(task.createdBy)?.isBodAssistant ? ` · trợ lý ${getUserById(task.createdBy)?.name}` : ''}</span>}
                     {task.urgent && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold animate-pulse" style={{ background: '#f8717122', color: '#dc2626' }}>⏰ GẤP</span>}
                     {task.important && <span className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#fbbf2422', color: '#d97706' }}>🔥 Quan trọng</span>}
                   </div>
@@ -6144,7 +6178,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                     </span>
 
                   ) : task.status === 'submitted' && currentUser.role === 'manager' && !task.assignedTo.includes(currentUser.id) && !isTargetDeptApprover(task, currentUser)
-                    && (!isBodAssigned(task, users) || !!currentUser.isDirector) ? (
+                    && (!isBodAssigned(task, users) || isBodSide(currentUser)) ? (
                     <div className="flex flex-col gap-1.5 items-end">
                       {task.submissionOwnFolderUrl && (
                         <a href={task.submissionOwnFolderUrl} target="_blank" rel="noopener noreferrer"
@@ -14239,7 +14273,7 @@ export default function App() {
   const [proposalRevisions, setProposalRevisions] = useState<ProposalRevision[]>([])
 
   function mapProfileToUser(p: any): User {
-  return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email, isDirector: p.is_director ?? false, driveFolderUrl: p.drive_folder_url ?? undefined, signatureUrl: p.signature_url ?? undefined, empCode: p.emp_code ?? undefined, position: p.position ?? undefined, internalLine: p.internal_line ?? undefined, company: p.company ?? undefined, mustChangePassword: p.must_change_password ?? false, isItAdmin: p.is_it_admin ?? false, isActive: p.is_active ?? true }
+  return { id: p.id, name: p.name, role: p.role, avatar: p.avatar, exp: p.exp, teamId: p.team_id, department: p.department, email: p.email, isDirector: p.is_director ?? false, driveFolderUrl: p.drive_folder_url ?? undefined, signatureUrl: p.signature_url ?? undefined, empCode: p.emp_code ?? undefined, position: p.position ?? undefined, internalLine: p.internal_line ?? undefined, company: p.company ?? undefined, mustChangePassword: p.must_change_password ?? false, isItAdmin: p.is_it_admin ?? false, isBodAssistant: p.is_bod_assistant ?? false, isActive: p.is_active ?? true }
 }
 
   function mapDbMessage(m: any): Message {
