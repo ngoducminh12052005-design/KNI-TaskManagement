@@ -1723,20 +1723,27 @@ const fmtTaskMoney = (n: number) => Math.round(n).toLocaleString('vi-VN')
 // Bỏ dòng trống trước khi lưu vào cột tasks.form_data
 // Các lần nộp kết quả lưu trong form_data._meta.submissions (không cần thêm cột trong database)
 const taskMeta = (t: { formData?: any }): any => (t.formData && typeof t.formData === 'object' ? (t.formData as any)._meta : undefined) ?? {}
-// ===== Giao chéo phòng ban =====
+// ===== Giao chéo / ủy quyền qua quản lý =====
 const deptPrefix = (id?: string) => id?.match(/^t\d+/)?.[0] ?? ''
 
-// Quản lý phòng ĐÍCH (người duyệt + phân công): duyệt, phân công, nộp kết quả, KHÔNG được Close
-const isTargetDeptApprover = (t: Task, u: User) =>
-  !!t.targetTeamId && u.role === 'manager' && t.createdBy !== u.id &&
+// Chuỗi quản lý trung gian theo thứ tự; người CUỐI là người phân công cho nhân viên (hoặc tự làm)
+const chainOf = (t: { formData?: any }): string[] => (Array.isArray(taskMeta(t).chain) ? taskMeta(t).chain : [])
+const relayIdOf = (t: { formData?: any }): string | undefined => chainOf(t)[chainOf(t).length - 1]
+const crossForwardedAt = (t: { formData?: any }): string | undefined => taskMeta(t).crossForwardedAt || undefined
+
+// Quản lý trung gian: được duyệt / phân công / nộp kết quả, KHÔNG được Close
+const isTargetDeptApprover = (t: Task, u: User) => u.role === 'manager' && chainOf(t).includes(u.id)
+
+// Quản lý phòng đích đang được chờ duyệt (giao chéo hoặc bị chuyển sang)
+const canApproveCrossTask = (t: Task, u: User) =>
+  !!t.crossDeptPending && !!t.targetTeamId && u.role === 'manager' && t.createdBy !== u.id &&
   (u.isDirector ? deptPrefix(u.teamId) === deptPrefix(t.targetTeamId) : u.teamId === t.targetTeamId)
 
-const crossForwardedAt = (t: Task): string | undefined => taskMeta(t).crossForwardedAt
-
-// Task giao chéo, nhân viên đã nộp, nhưng quản lý phòng đích chưa nộp lên người giao
-const isWaitingForward = (t: Task, users: User[]) =>
-  !!t.targetTeamId && t.status === 'submitted' && !crossForwardedAt(t) &&
-  !t.assignedTo.some(id => users.find(u => u.id === id)?.role === 'manager')
+// Nhân viên đã nộp, quản lý cuối chuỗi chưa nộp lên người giao
+const isWaitingForward = (t: Task, _users?: User[]) => {
+  const relay = relayIdOf(t)
+  return t.status === 'submitted' && !!relay && !crossForwardedAt(t) && !t.assignedTo.includes(relay)
+}
 
 async function forwardCrossDeptResult(task: Task, me: User) {
   const { error } = await supabase.from('tasks').update({
@@ -2178,10 +2185,28 @@ function TaskViewFlow({ task, tasks, users, currentUser, readOnly = false, initi
   )
 }
 
-// Quản lý phòng ban đích từ chối task giao chéo (báo lại cho người gửi)
+// Quản lý phòng đích từ chối: task bị chuyển sang thì TRẢ LẠI cho người chuyển; task giao chéo thường thì báo người giao
 async function rejectCrossDept(task: Task, currentUser: User) {
-  const reason = (window.prompt('Lý do từ chối (quản lý đã giao sẽ thấy lý do này):') ?? '').trim()
+  const reason = (window.prompt('Lý do từ chối (người chuyển / người giao sẽ thấy lý do này):') ?? '').trim()
   if (!reason && !window.confirm('Bạn chưa nhập lý do, vẫn muốn từ chối?')) return
+  const meta = taskMeta(task)
+  const tr = meta.transfer
+  const code = task.taskCode ?? task.title
+  if (tr) {
+    const { error } = await supabase.from('tasks').update({
+      cross_dept_pending: false, cross_dept_rejected: false, cross_dept_rejected_reason: null, cross_dept_rejected_by: null,
+      target_team_id: tr.prevTargetTeamId ?? null,
+      assigned_to: Array.isArray(tr.prevAssigned) && tr.prevAssigned.length ? tr.prevAssigned : [tr.by],
+      form_data: { ...(task.formData ?? {}), _meta: { ...meta, transfer: null, chain: Array.isArray(tr.prevChain) ? tr.prevChain : [],
+        transfers: (Array.isArray(meta.transfers) ? meta.transfers : []).map((x: any) => x.at === tr.at ? { ...x, rejected: { by: currentUser.id, reason, at: new Date().toISOString() } } : x) } },
+    }).eq('id', task.id)
+    if (error) { alert('Không từ chối được: ' + error.message); return }
+    await supabase.from('notifications').insert({
+      message: `❌ ${currentUser.name} từ chối nhận task [${code}] bạn chuyển sang${reason ? `. Lý do: ${reason}` : ''}. Task đã trả về cho bạn.`,
+      target_user_id: tr.by, link_task_id: task.id,
+    })
+    return
+  }
   const { error } = await supabase.from('tasks').update({
     cross_dept_pending: false, cross_dept_rejected: true,
     cross_dept_rejected_reason: reason || null, cross_dept_rejected_by: currentUser.id,
@@ -2189,12 +2214,11 @@ async function rejectCrossDept(task: Task, currentUser: User) {
   if (error) { alert('Không từ chối được: ' + error.message); return }
   if (task.createdBy !== currentUser.id) {
     await supabase.from('notifications').insert({
-      message: `❌ ${currentUser.name} đã từ chối task [${task.taskCode ?? task.title}]${reason ? `: ${reason}` : ''}`,
+      message: `❌ ${currentUser.name} đã từ chối task [${code}]${reason ? `: ${reason}` : ''}`,
       target_user_id: task.createdBy, link_task_id: task.id,
     })
   }
 }
-
 // Quản lý phòng đích duyệt: tự làm hoặc phân công cho bất kỳ ai trong phòng
 function CrossDeptApproveModal({ task, currentUser, users, onClose }: { task: Task; currentUser: User; users: User[]; onClose: () => void }) {
   const teamId = task.targetTeamId ?? currentUser.teamId
@@ -2213,7 +2237,8 @@ function CrossDeptApproveModal({ task, currentUser, users, onClose }: { task: Ta
     setError(''); setSaving(true)
     const { error: upErr } = await supabase.from('tasks').update({
       cross_dept_pending: false, assigned_to: assignedTo,
-      form_data: { ...(task.formData ?? {}), _meta: { ...taskMeta(task), crossApprovedBy: currentUser.id, crossApprovedAt: new Date().toISOString() } },
+      form_data: { ...(task.formData ?? {}), _meta: { ...taskMeta(task), crossApprovedBy: currentUser.id, crossApprovedAt: new Date().toISOString(), transfer: null,
+        chain: chainOf(task).includes(currentUser.id) ? chainOf(task) : [...chainOf(task), currentUser.id] } },
     }).eq('id', task.id)
     if (upErr) { setSaving(false); setError('Không duyệt được: ' + upErr.message); return }
 
@@ -2280,6 +2305,130 @@ function CrossDeptApproveModal({ task, currentUser, users, onClose }: { task: Ta
   )
 }
 
+// Quản lý được giao task: phân công cho nhân viên phòng mình, hoặc chuyển sang phòng ban khác (quản lý phòng đó phải duyệt)
+function DelegateTaskModal({ task, currentUser, users, onClose }: { task: Task; currentUser: User; users: User[]; onClose: () => void }) {
+  const allowTransfer = !task.targetTeamId   // task đã là giao chéo/chuyển sang thì chỉ được phân công, không chuyển tiếp
+  const staff = users.filter(u => u.teamId === currentUser.teamId && u.role === 'employee' && u.isActive !== false)
+  const otherTeams = TEAMS.filter(t => t.id !== currentUser.teamId)
+  const [mode, setMode] = useState<'assign' | 'transfer'>('assign')
+  const [picked, setPicked] = useState<string[]>([])
+  const [teamId, setTeamId] = useState('')
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const toggle = (id: string) => setPicked(p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]))
+  const nm = (ids: string[]) => ids.map(id => users.find(u => u.id === id)?.name ?? '—').join(', ') || '—'
+  const code = task.taskCode ?? task.title
+
+  const submit = async () => {
+    const why = reason.trim()
+    const meta = taskMeta(task)
+    const at = new Date().toISOString()
+    const chain = chainOf(task).includes(currentUser.id) ? chainOf(task) : [...chainOf(task), currentUser.id]
+    const pm = Array.from(new Set([...task.projectManager, currentUser.id]))   // để người chuyển/phân công vẫn thấy task
+    let patch: Record<string, any>
+    let changes: TaskChange[]
+    let notifyIds: string[]
+    let notifyText: string
+
+    if (mode === 'assign') {
+      if (picked.length === 0) { setError('Chọn ít nhất 1 nhân viên.'); return }
+      // Lý do khi phân công đang để KHÔNG bắt buộc. Muốn bắt buộc thì bỏ comment dòng dưới:
+      // if (!why) { setError('Vui lòng ghi lý do phân công.'); return }
+      patch = {
+        assigned_to: picked, project_manager: pm,
+        form_data: { ...(task.formData ?? {}), _meta: { ...meta, chain, crossForwardedAt: null,
+          delegations: [...(Array.isArray(meta.delegations) ? meta.delegations : []), { by: currentUser.id, to: picked, reason: why || null, at }] } },
+      }
+      changes = [{ label: 'Phân công cho nhân viên', from: nm(task.assignedTo), to: `${nm(picked)}${why ? ` (Lý do: ${why})` : ''}` }]
+      notifyIds = picked
+      notifyText = `📋 ${currentUser.name} phân công task [${code}] cho bạn${why ? `. Lý do: ${why}` : ''}`
+    } else {
+      if (!teamId) { setError('Chọn phòng ban cần chuyển sang.'); return }
+      if (!why) { setError('Chuyển sang phòng ban khác bắt buộc phải ghi lý do / mô tả.'); return }
+      const mgrs = users.filter(u => u.role === 'manager' && u.teamId === teamId)
+      if (mgrs.length === 0) { setError('Phòng ban này chưa có quản lý để nhận task.'); return }
+      const tr = { by: currentUser.id, fromTeamId: currentUser.teamId, toTeamId: teamId, reason: why, at,
+        prevTargetTeamId: task.targetTeamId ?? null, prevAssigned: task.assignedTo, prevChain: chainOf(task) }
+      patch = {
+        assigned_to: mgrs.map(u => u.id), project_manager: pm, target_team_id: teamId,
+        cross_dept_pending: true, cross_dept_rejected: false, cross_dept_rejected_reason: null, cross_dept_rejected_by: null,
+        form_data: { ...(task.formData ?? {}), _meta: { ...meta, chain, crossForwardedAt: null, transfer: tr,
+          transfers: [...(Array.isArray(meta.transfers) ? meta.transfers : []), tr] } },
+      }
+      const tn = TEAMS.find(t => t.id === teamId)?.name ?? ''
+      changes = [{ label: 'Chuyển phòng ban', from: TEAMS.find(t => t.id === currentUser.teamId)?.name ?? '—', to: `${tn} (Lý do: ${why})` }]
+      notifyIds = mgrs.map(u => u.id)
+      notifyText = `📨 ${currentUser.name} (${TEAMS.find(t => t.id === currentUser.teamId)?.name ?? ''}) chuyển task [${code}] sang phòng ban của bạn. Lý do: ${why}. Bạn duyệt rồi tự làm hoặc phân công người trong phòng.`
+    }
+
+    setError(''); setSaving(true)
+    const { error: upErr } = await supabase.from('tasks').update(patch).eq('id', task.id)
+    if (upErr) { setSaving(false); setError('Không lưu được: ' + upErr.message); return }
+    await supabase.from('task_edit_logs').insert({ task_id: task.id, user_id: currentUser.id, changes })
+    for (const uid of notifyIds) {
+      if (uid === currentUser.id) continue
+      await supabase.from('notifications').insert({ message: notifyText, target_user_id: uid, link_task_id: task.id })
+    }
+    if (task.createdBy !== currentUser.id) {
+      await supabase.from('notifications').insert({
+        message: mode === 'assign'
+          ? `🔀 ${currentUser.name} phân công task [${code}] cho ${nm(picked)}${why ? `. Lý do: ${why}` : ''}`
+          : `🔀 ${currentUser.name} chuyển task [${code}] sang phòng ${TEAMS.find(t => t.id === teamId)?.name ?? ''}. Lý do: ${why}`,
+        target_user_id: task.createdBy, link_task_id: task.id,
+      })
+    }
+    setSaving(false); onClose()
+  }
+
+  const field = { background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
+  return (
+    <div className="fixed inset-0 flex items-center justify-center z-[60] px-4" style={{ background: 'rgba(0,0,0,0.7)' }}>
+      <div className="w-full max-w-md rounded-2xl p-6 max-h-[90vh] overflow-y-auto" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+        <h3 className="font-bold text-lg mb-1" style={{ color: 'var(--text-primary)' }}>Phân công / chuyển phòng ban</h3>
+        <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>{task.title}</p>
+
+        <label className="flex items-center gap-2 p-3 rounded-lg mb-2 cursor-pointer text-sm" style={field}>
+          <input type="radio" checked={mode === 'assign'} onChange={() => setMode('assign')} /> 👥 Phân công cho nhân viên phòng mình
+        </label>
+        {allowTransfer && (
+          <label className="flex items-center gap-2 p-3 rounded-lg mb-3 cursor-pointer text-sm" style={field}>
+            <input type="radio" checked={mode === 'transfer'} onChange={() => setMode('transfer')} /> 🔀 Chuyển sang phòng ban khác (quản lý phòng đó duyệt)
+          </label>
+        )}
+
+        {mode === 'assign' ? (
+          <div className="p-2 rounded-lg mb-3 max-h-44 overflow-y-auto" style={field}>
+            {staff.length === 0 && <p className="text-xs p-2" style={{ color: 'var(--text-muted)' }}>Phòng bạn chưa có nhân viên.</p>}
+            {staff.map(u => (
+              <label key={u.id} className="flex items-center gap-2 py-1 px-1 text-sm cursor-pointer">
+                <input type="checkbox" checked={picked.includes(u.id)} onChange={() => toggle(u.id)} /> <span>{u.name}</span>
+              </label>
+            ))}
+          </div>
+        ) : (
+          <select value={teamId} onChange={e => setTeamId(e.target.value)} className="w-full px-3 py-2.5 mb-3 rounded-xl text-sm outline-none" style={field}>
+            <option value="">— Chọn phòng ban —</option>
+            {otherTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        )}
+
+        <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+          {mode === 'transfer' ? 'Lý do / mô tả *' : 'Lý do phân công'}
+        </label>
+        <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3}
+          className="w-full px-4 py-2.5 mb-3 rounded-xl text-sm outline-none resize-none" style={field} />
+
+        {error && <p className="text-xs mb-3" style={{ color: '#dc2626' }}>{error}</p>}
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl font-semibold text-sm" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>Hủy</button>
+          <button onClick={submit} disabled={saving} className="flex-1 py-2.5 rounded-xl font-bold text-sm disabled:opacity-40"
+            style={{ background: 'linear-gradient(135deg,#059669,#047857)', color: '#fff' }}>{saving ? 'Đang lưu...' : 'Xác nhận'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
 type FlowStep = { label: string; who: string; status: 'done' | 'current' | 'rejected' | 'wait' | 'skip'; at?: string; note?: string }
 
 type TaskChange = { label: string; from: string; to: string }
@@ -2347,11 +2496,15 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   const isAssignee = task.assignedTo.includes(currentUser.id)
   const canComplete = isAssignee && task.status === 'in-progress' && task.workStatus !== 'pending' && !task.pendingRequestedAt && !task.isLocked && !isTaskGated(task)
   const waitFwd = isWaitingForward(task, users)
-  const canForward = task.status === 'submitted' && waitFwd && isTargetDeptApprover(task, currentUser) && !isAssignee
+  const canForward = waitFwd && relayIdOf(task) === currentUser.id && !isAssignee
   const canClose = currentUser.role === 'manager' && !isAssignee && task.status === 'submitted'
     && !isTargetDeptApprover(task, currentUser) && !waitFwd
+    && (!isBodAssigned(task, users) || !!currentUser.isDirector)
   const canReject = canClose || canForward
   const [showCrossApprove, setShowCrossApprove] = useState(false)
+  const [showDelegate, setShowDelegate] = useState(false)
+  const canDelegate = currentUser.role === 'manager' && !currentUser.isDirector && isAssignee
+    && (task.status === 'open' || task.status === 'in-progress') && !task.crossDeptPending && !isTaskGated(task)
   const canApproveCross = !!task.crossDeptPending && isTargetDeptApprover(task, currentUser)
   // Nhân viên được giao: bấm "Bắt đầu" ngay trong chi tiết, bắt đầu rồi mới có nút Complete
   const isBeforeStart = !!task.startDate && task.startDate > new Date().toISOString().split('T')[0]
@@ -2427,18 +2580,18 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
     at: task.startedAt, note: blocked ? undefined : WS[task.workStatus ?? 'received'],
   })
   steps.push({ label: 'Nộp kết quả', who: names(task.assignedTo), status: finished ? 'done' : 'wait', at: task.submittedAt, note: [task.completeIssue, subs.length > 1 ? `Đã nộp ${subs.length} lần` : ''].filter(Boolean).join(' · ') || undefined })
-  if (task.targetTeamId) {
+  if (chainOf(task).length > 0) {
     const m = taskMeta(task)
     steps.push({
-      label: 'Quản lý phòng nhận nộp kết quả',
-      who: m.crossForwardedBy ? nameOf(m.crossForwardedBy) : (m.crossApprovedBy ? nameOf(m.crossApprovedBy) : 'Quản lý phòng nhận'),
-      status: m.crossForwardedAt || task.status === 'completed' ? 'done' : task.status === 'submitted' ? 'current' : 'wait',
+      label: 'Quản lý trung gian nộp kết quả',
+      who: m.crossForwardedBy ? nameOf(m.crossForwardedBy) : nameOf(relayIdOf(task)),
+      status: m.crossForwardedAt || task.status === 'completed' ? 'done' : task.status === 'submitted' ? (isWaitingForward(task) ? 'current' : 'skip') : 'wait',
       at: m.crossForwardedAt,
     })
   }
   steps.push({
     label: 'Quản lý duyệt & đóng',
-    who: task.approvedBy ? nameOf(task.approvedBy) : (task.targetTeamId ? nameOf(task.createdBy) : names(task.projectManager)),
+    who: task.approvedBy ? nameOf(task.approvedBy) : (chainOf(task).length > 0 || task.targetTeamId ? nameOf(task.createdBy) : names(task.projectManager)),
     status: task.status === 'completed' ? 'done' : task.status === 'submitted' ? 'current' : rejectedResult ? 'rejected' : 'wait',
     at: task.approvedAt,
     note: task.status === 'completed'
@@ -2544,6 +2697,10 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
                 <button type="button" onClick={() => rejectCrossDept(task, currentUser)} className={btn} style={{ background: '#f8717122', color: '#dc2626' }}>Từ chối</button>
                 <button type="button" onClick={() => setShowCrossApprove(true)} className={`${btn} text-white`} style={{ background: '#059669' }}>✓ Duyệt & phân công</button>
               </>
+            )}
+            {canDelegate && (
+              <button type="button" onClick={() => setShowDelegate(true)} className={btn}
+                style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>👥 Phân công / chuyển phòng</button>
             )}
             {canComplete && (
               <button type="button" onClick={() => setShowComplete(true)} className={`${btn} text-white`} style={{ background: '#059669' }}>{getSubs(task).length > 0 ? `📤 Nộp lại (lần ${getSubs(task).length + 1})` : '✓ Complete'}</button>
@@ -2738,6 +2895,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
       </div>
       {showComplete && <SubmitTaskModal task={task} currentUser={currentUser} users={users} onClose={() => setShowComplete(false)} />}
       {showClose && <CloseTaskModal task={task} currentUser={currentUser} users={users} onClose={() => setShowClose(false)} />}
+      {showDelegate && <DelegateTaskModal task={task} currentUser={currentUser} users={users} onClose={() => setShowDelegate(false)} />}
       {showReject && <RejectResultModal task={task} currentUser={currentUser} onClose={() => setShowReject(false)} />}
       {showCrossApprove && <CrossDeptApproveModal task={task} currentUser={currentUser} users={users} onClose={() => setShowCrossApprove(false)} />}
     </div>
@@ -2772,7 +2930,7 @@ function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, canSen
   const para = (text?: string) => (text ? <p className="whitespace-pre-wrap mb-4">{text}</p> : null)
   const doApprove = async () => { await approveSelfTask(task, currentUser); onClose() }
   const [showCross, setShowCross] = useState(false)
-  const canApproveCross = !!task.crossDeptPending && isTargetDeptApprover(task, currentUser)
+  const canApproveCross = canApproveCrossTask(task, currentUser)
   const doReject = async () => { await rejectSelfTask(task, currentUser); onClose() }
 
   return (
@@ -3177,7 +3335,7 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
       note: note.trim() || undefined, link: driveLink.trim() || undefined, files: uploaded,
     }
 
-    const autoClose = isBodTaskForManager(task, users) && task.assignedTo.includes(currentUser.id)
+    const autoClose = false   // task BOD giao: BOD phải là người Close
     const { error: updateError } = await supabase.from('tasks').update({
       status: autoClose ? 'completed' : 'submitted',
       ...(autoClose ? {
@@ -3202,10 +3360,11 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
     setSaving(false)
     if (updateError) { setError(updateError.message); return }
 
-    const isCrossFirstHop = !!task.targetTeamId && currentUser.role !== 'manager'
+    const relayId = relayIdOf(task)
+    const toRelay = !!relayId && relayId !== currentUser.id && !task.assignedTo.includes(relayId)
     const recipientIds = new Set(
-      isCrossFirstHop
-        ? users.filter(u => u.role === 'manager' && u.teamId === task.targetTeamId && u.id !== currentUser.id).map(u => u.id)
+      toRelay
+        ? [relayId as string]
         : Array.from(new Set([task.createdBy, ...task.projectManager])).filter(uid => uid && uid !== currentUser.id)
     )
 
@@ -3305,7 +3464,8 @@ async function closeTask(
   attachments: { name: string; path: string; size: number; type: string }[],
   currentUser: User, users: User[],
 ): Promise<boolean> {
-  if (isTargetDeptApprover(task, currentUser)) { alert('Quản lý phòng nhận chỉ nộp kết quả, người giao task mới được Close.'); return false }
+  if (isTargetDeptApprover(task, currentUser)) { alert('Quản lý trung gian chỉ nộp kết quả, người giao task mới được Close.'); return false }
+  if (isBodAssigned(task, users) && !currentUser.isDirector) { alert('Task do BOD giao, chỉ BOD được Close.'); return false }
   const closeLabel = result === 'with_issue' ? 'Close with issue' : 'Close successful'
   const approvedAt = new Date().toISOString()
 
@@ -5960,7 +6120,11 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                     </div>
 
                   ) : task.status === 'submitted' && isTargetDeptApprover(task, currentUser) && !task.assignedTo.includes(currentUser.id) ? (
-                    crossForwardedAt(task) ? (
+                    relayIdOf(task) !== currentUser.id && isWaitingForward(task, users) ? (
+                      <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#fbbf2422', color: '#d97706' }}>
+                        ⏳ Chờ {getUserById(relayIdOf(task))?.name} nộp kết quả
+                      </span>
+                    ) : crossForwardedAt(task) || !isWaitingForward(task, users) ? (
                       <span className="px-3 py-1.5 rounded-xl text-xs font-semibold" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>
                         ✅ Đã nộp kết quả, chờ {getUserById(task.createdBy)?.name} Close
                       </span>
@@ -5976,7 +6140,8 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                       ⏳ Chờ quản lý phòng nhận nộp kết quả
                     </span>
 
-                  ) : task.status === 'submitted' && currentUser.role === 'manager' && !task.assignedTo.includes(currentUser.id) && !isTargetDeptApprover(task, currentUser) ? (
+                  ) : task.status === 'submitted' && currentUser.role === 'manager' && !task.assignedTo.includes(currentUser.id) && !isTargetDeptApprover(task, currentUser)
+                    && (!isBodAssigned(task, users) || !!currentUser.isDirector) ? (
                     <div className="flex flex-col gap-1.5 items-end">
                       {task.submissionOwnFolderUrl && (
                         <a href={task.submissionOwnFolderUrl} target="_blank" rel="noopener noreferrer"
