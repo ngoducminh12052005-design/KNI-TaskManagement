@@ -2196,6 +2196,16 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   const canComplete = isAssignee && task.status === 'in-progress' && task.workStatus !== 'pending' && !task.pendingRequestedAt && !task.isLocked && !isTaskGated(task)
   const canClose = currentUser.role === 'manager' && !isAssignee && task.status === 'submitted'
   const canReject = canClose
+  // Nhân viên được giao: bấm "Bắt đầu" ngay trong chi tiết, bắt đầu rồi mới có nút Complete
+  const isBeforeStart = !!task.startDate && task.startDate > new Date().toISOString().split('T')[0]
+  const canStart = isAssignee && task.status === 'open' && !task.crossDeptPending && !task.crossDeptRejected && !isTaskGated(task) && !isBeforeStart
+  const startTask = async () => {
+    const now = new Date().toISOString()
+    const { error } = await supabase.from('tasks').update({
+      status: 'in-progress', started_at: now, work_status: 'processing', processing_started_at: now,
+    }).eq('id', task.id)
+    if (error) alert('Không bắt đầu được task: ' + error.message)
+  }
   const f: any = task.formData ?? {}
   const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
   const names = (ids: string[]) => (ids.length ? ids.map(nameOf).join(', ') : '—')
@@ -2349,6 +2359,14 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
                 <button type="button" onClick={() => rejectSelfTask(task, currentUser)} className={btn} style={{ background: '#f8717122', color: '#dc2626' }}>Từ chối</button>
                 <button type="button" onClick={() => approveSelfTask(task, currentUser)} className={`${btn} text-white`} style={{ background: '#059669' }}>✓ Duyệt cho làm</button>
               </>
+            )}
+            {canStart && (
+              <button type="button" onClick={startTask} className={`${btn} text-white`} style={{ background: '#2563eb' }}>▶️ Bắt đầu</button>
+            )}
+            {isAssignee && task.status === 'open' && isBeforeStart && !isTaskGated(task) && (
+              <span className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
+                🔒 Chưa tới ngày bắt đầu ({fmtD(task.startDate)})
+              </span>
             )}
             {canComplete && (
               <button type="button" onClick={() => setShowComplete(true)} className={`${btn} text-white`} style={{ background: '#059669' }}>{getSubs(task).length > 0 ? `📤 Nộp lại (lần ${getSubs(task).length + 1})` : '✓ Complete'}</button>
@@ -5265,6 +5283,16 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       alert('Không lưu được thay đổi: ' + updateError.message)
     } else if (editChanges.length > 0 && !isOwnDraftEdit) {
       await supabase.from('task_edit_logs').insert({ task_id: editingTask.id, user_id: currentUser.id, changes: editChanges })
+      // Báo cho người phụ trách / hỗ trợ / PM biết task vừa bị sửa gì (bấm thông báo mở thẳng task, xem chi tiết ở Lịch sử)
+      const summary = editChanges.map(c => c.label).join(', ')
+      const notifyIds = Array.from(new Set([...form.assignedTo, ...editingTask.assignedTo, ...form.supporters, ...form.projectManager]))
+        .filter(uid => uid && uid !== currentUser.id)
+      for (const uid of notifyIds) {
+        await supabase.from('notifications').insert({
+          message: `✏️ ${currentUser.name} vừa chỉnh sửa task [${editingTask.taskCode ?? finalTitle}] — đã đổi: ${summary}`,
+          target_user_id: uid, link_task_id: editingTask.id,
+        })
+      }
     }
     if (resubmit) {
       for (const mgrId of getTaskApproverIds(currentUser.id, form.projectManager, users)) {
