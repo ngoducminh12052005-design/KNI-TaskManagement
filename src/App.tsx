@@ -8441,6 +8441,9 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
           <p className="text-[11px] text-gray-500 mt-1">
             {approvalMode === 'par' ? '⚡ P1, P2: các người duyệt được gửi cùng lúc (song song).' : '➡️ P3, P4: duyệt lần lượt từng người (nối tiếp).'}
           </p>
+          <p className="text-[11px] text-gray-500 mt-0.5">
+            🏛️ Ban Giám đốc Tập đoàn duyệt thì tờ trình coi như đã được duyệt, những người còn lại không cần duyệt nữa.
+          </p>
         </div>
       </div>
 
@@ -8485,7 +8488,7 @@ function ProposalDocView({ p, users, currentUserId, onClose, canAct, onApprove, 
     note: undefined as string | undefined,
   }]
   const STATUS: Record<string, string> = {
-    approved: '✓ Đã duyệt', pending: 'Chờ duyệt', waiting: 'Chưa đến lượt', rejected: '✕ Từ chối', revision: '🔁 Yêu cầu xem xét lại', skipped: 'Bỏ qua',
+    approved: '✓ Đã duyệt', pending: 'Chờ duyệt', waiting: 'Chưa đến lượt', rejected: '✕ Từ chối', revision: '🔁 Yêu cầu xem xét lại', skipped: 'Không cần duyệt',
   }
   const STATUS_COLOR: Record<string, string> = {
     approved: '#059669', pending: '#b45309', waiting: '#6b7280', rejected: '#dc2626', revision: '#b45309', skipped: '#6b7280',
@@ -9638,7 +9641,7 @@ function ProposalFormDocView({ p, users, currentUserId, onClose, canAct, onAppro
     decidedAt: undefined as string | undefined, note: undefined as string | undefined,
   }]
   const STATUS: Record<string, string> = {
-    approved: '✓ Đã duyệt', pending: 'Chờ duyệt', waiting: 'Chưa đến lượt', rejected: '✕ Từ chối', revision: '🔁 Yêu cầu xem xét lại', skipped: 'Bỏ qua',
+    approved: '✓ Đã duyệt', pending: 'Chờ duyệt', waiting: 'Chưa đến lượt', rejected: '✕ Từ chối', revision: '🔁 Yêu cầu xem xét lại', skipped: 'Không cần duyệt',
   }
   const STATUS_COLOR: Record<string, string> = {
     approved: '#059669', pending: '#b45309', waiting: '#6b7280', rejected: '#dc2626', revision: '#b45309', skipped: '#6b7280',
@@ -9804,7 +9807,7 @@ function ProposalDnttView({ p, users, currentUserId, onClose, canAct, onApprove,
     note: undefined as string | undefined,
   }]
   const STATUS: Record<string, string> = {
-    approved: '✓ Đã duyệt', pending: 'Chờ duyệt', waiting: 'Chưa đến lượt', rejected: '✕ Từ chối', revision: '🔁 Yêu cầu xem xét lại', skipped: 'Bỏ qua',
+    approved: '✓ Đã duyệt', pending: 'Chờ duyệt', waiting: 'Chưa đến lượt', rejected: '✕ Từ chối', revision: '🔁 Yêu cầu xem xét lại', skipped: 'Không cần duyệt',
   }
   const STATUS_COLOR: Record<string, string> = {
     approved: '#059669', pending: '#b45309', waiting: '#6b7280', rejected: '#dc2626', revision: '#b45309', skipped: '#6b7280',
@@ -10342,7 +10345,7 @@ function ProposalPlanSection({ p, users, currentUser, flow }: {
     approved: ['Đã duyệt', '#34d39922', '#059669'],
     rejected: ['Từ chối', '#ef444422', '#dc2626'],
         revision: ['Yêu cầu xem xét lại', '#f59e0b22', '#b45309'],
-    skipped: ['Bỏ qua', '#64748b22', '#64748b'],
+    skipped: ['Không cần duyệt', '#64748b22', '#64748b'],
   }
   const Badge = ({ s }: { s: string }) => {
     const l = LABEL[s] ?? [s, '#64748b22', '#64748b']
@@ -10455,7 +10458,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
     waiting: ['Chưa đến lượt', '#64748b22', '#64748b'],
     approved: ['Đã duyệt', '#34d39922', '#059669'],
     rejected: ['Từ chối', '#ef444422', '#dc2626'],
-    skipped: ['Bỏ qua', '#64748b22', '#64748b'],
+    skipped: ['Không cần duyệt', '#64748b22', '#64748b'],
   }
   const Badge = ({ s }: { s: string }) => {
     const l = LABEL[s] ?? [s, '#64748b22', '#64748b']
@@ -11542,7 +11545,34 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
 
     await supabase.from('proposal_steps').update({ status: 'approved', decided_at: new Date().toISOString(), note: note || null }).eq('id', mine.id)
     await supabase.from('proposal_approvals').insert({ proposal_id: p.id, approver_id: currentUser.id, action: 'approved', note: note || null })
-
+    
+        // Ban Giám đốc Tập đoàn duyệt = tờ trình coi như đã được duyệt, những người còn lại không cần duyệt nữa
+    const signRoles: string[] = Array.isArray(p.formData?.signRoles) ? p.formData!.signRoles : []
+    const myRole = signRoles[mine.step_order - 1] ?? (p.kind === 'totrinh' ? docRoleLabel(mine.step_order - 1, steps.length) : '')
+    if (myRole === 'Ban Giám đốc Tập đoàn') {
+      const open = steps.filter(s => s.id !== mine.id && (s.status === 'pending' || s.status === 'waiting'))
+      if (open.length > 0) {
+        await supabase.from('proposal_steps')
+          .update({ status: 'skipped', decided_at: new Date().toISOString(), note: 'Ban Giám đốc Tập đoàn đã duyệt' })
+          .in('id', open.map(s => s.id))
+      }
+      await supabase.from('proposals').update({ status: 'approved' }).eq('id', p.id)
+      await supabase.from('notifications').insert({
+        message: `✅ Ban Giám đốc Tập đoàn (${currentUser.name}) đã duyệt tờ trình "${p.title}" — các cấp còn lại không cần duyệt, tờ trình đã được thông qua`,
+        target_user_id: p.submittedBy,
+        link_proposal_id: p.id,
+      })
+      for (const s of open) {
+        if (s.approver_id === p.submittedBy || s.approver_id === currentUser.id) continue
+        await supabase.from('notifications').insert({
+          message: `ℹ️ Tờ trình "${p.title}" đã được Ban Giám đốc Tập đoàn duyệt, bạn không cần duyệt nữa`,
+          target_user_id: s.approver_id,
+          link_proposal_id: p.id,
+        })
+      }
+      loadPendingMine()
+      return
+    }
     const rest = steps.filter(s => s.id !== mine.id)
     let nextStep: StepRow | undefined
     let allDone = false
