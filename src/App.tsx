@@ -721,13 +721,13 @@ const REWARDS: Reward[] = [
 
 
 const TEAMS = [
-  { id: 't1a', name: 'KNI Office - Ban Giám đốc', emoji: '👑' },
-  { id: 't1b', name: 'KNI Office - Văn phòng HĐQT', emoji: '📋' },
-  { id: 't1c', name: 'KNI Office - Nhân sự-IT-Pháp chế', emoji: '🧑‍💻' },
-  { id: 't1d', name: 'KNI Office - Truyền thông-Marketing', emoji: '📣' },
-  { id: 't1e', name: 'KNI Office - Kế toán', emoji: '💰' },
-  { id: 't1f', name: 'KNI Office - Dự án', emoji: '🏗️' },
-  { id: 't1g', name: 'KNI Office - Hỗ trợ', emoji: '🚗' },
+  { id: 't1a', name: 'KNI - Ban Giám đốc', emoji: '👑' },
+  { id: 't1b', name: 'KNI - Văn phòng HĐQT', emoji: '📋' },
+  { id: 't1c', name: 'KNI - Nhân sự-IT-Pháp chế', emoji: '🧑‍💻' },
+  { id: 't1d', name: 'KNI - Truyền thông-Marketing', emoji: '📣' },
+  { id: 't1e', name: 'KNI - Kế toán', emoji: '💰' },
+  { id: 't1f', name: 'KNI - Dự án', emoji: '🏗️' },
+  { id: 't1g', name: 'KNI - Hỗ trợ', emoji: '🚗' },
   { id: 't2', name: 'First Steps', emoji: '🌱' },
   { id: 't3a', name: 'Genki House - Điều hành', emoji: '👑' },
   { id: 't3b', name: 'Genki House - Bếp', emoji: '🍳' },
@@ -807,7 +807,8 @@ function generateTaskCode(startDate: string, existingTasks: Task[]) {
 }
 // Mã viết tắt của công ty, dùng làm tiền tố tên task (sửa lại cho đúng ý bạn)
 const COMPANY_CODES: Record<string, string> = {
-  'KNI Office': 'KNI',
+  'KNI': 'KNI',
+  'KNI Office': 'KNI',   // dữ liệu cũ
   'Genki House': 'GH',
   'Genki Farm': 'GF',
   'First Steps': 'FS',
@@ -2048,7 +2049,7 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
             onChange={e => { const v = e.target.value; setForm((f: any) => ({ ...f, company: v, title: withCompanyPrefix(f.title, v, f.company) })) }}
             className="border-b border-dashed border-gray-300 bg-transparent outline-none font-bold" style={ink}>
             <option value="">-- chọn --</option>
-            {COMPANIES.map(c => <option key={c} value={c}>{COMPANY_CODES[c] ? `${COMPANY_CODES[c]} · ${c.toUpperCase()}` : c.toUpperCase()}</option>)}
+            {COMPANIES.map(c => <option key={c} value={c}>{COMPANY_CODES[c] && COMPANY_CODES[c] !== c ? `${COMPANY_CODES[c]} · ${c.toUpperCase()}` : c.toUpperCase()}</option>)}
           </select>
           <span>– {(currentUser.department || '').toUpperCase()}</span>
         </div>
@@ -5994,13 +5995,6 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{visible.length} task</p>
         </div>
         <div className="flex gap-2">
-          {isManager && (
-            <button onClick={() => setShowCollabModal(true)}
-              className="px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition-all hover:scale-105"
-              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#8b5cf6' }}>
-              🤝 Phối hợp phòng ban
-            </button>
-          )}
           <button onClick={() => setShowModal(true)}
             className="px-4 py-2.5 rounded-xl font-bold text-white text-sm flex items-center gap-2 transition-all hover:scale-105"
             style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', boxShadow: '0 0 20px #7c3aed40' }}>
@@ -8023,8 +8017,8 @@ function ProposalAttachments({ p, users }: { p: Proposal; users: User[] }) {
 }
 // Tên chức danh ở phần ký của tờ trình: 1 Trưởng bộ phận, 2 Kế toán trưởng, 3 Giám đốc, người cuối (từ 4 người trở lên) là Ban Giám đốc
 const docRoleLabel = (i: number, n: number) => {
-  if (n >= 4 && i === n - 1) return 'Ban Giám đốc'
-  return ['Trưởng bộ phận', 'Kế toán trưởng', 'Giám đốc'][i] ?? `Người duyệt ${i + 1}`
+  if (n >= 4 && i === n - 1) return 'Ban Giám đốc Tập đoàn'
+  return ['Trưởng bộ phận', 'Kế toán trưởng', 'Giám đốc công ty'][i] ?? `Người duyệt ${i + 1}`
 }
 // P1, P2 = duyệt song song; P3, P4 = duyệt nối tiếp
 const docModeOf = (priority: string): 'seq' | 'par' => (priority === 'P1' || priority === 'P2' ? 'par' : 'seq')
@@ -8149,8 +8143,8 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
   const slots = [
     { role: 'Trưởng bộ phận', id: recipientId },
     { role: 'Kế toán trưởng', id: kttId },
-    { role: gdCompany.trim() ? `Giám đốc ${gdCompany.trim()}` : 'Giám đốc', id: gdId },
-    ...bgdIds.map(id => ({ role: 'Ban Giám đốc KNI', id })),
+    { role: gdCompany.trim() ? `Giám đốc công ty ${gdCompany.trim()}` : 'Giám đốc công ty', id: gdId },
+    ...bgdIds.map(id => ({ role: 'Ban Giám đốc Tập đoàn', id })),
   ].filter((s, i, arr) => s.id && arr.findIndex(x => x.id === s.id) === i)
   const approverIds = slots.map(s => s.id)
   const signRoles = slots.map(s => s.role)
@@ -8407,9 +8401,9 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
             <DeptUserSelect users={users} excludeId={currentUser.id} value={kttId} onChange={setKttId} />
           </div>
           <div>
-            <p className="font-bold">Giám đốc</p>
+            <p className="font-bold">Giám đốc công ty</p>
             <input list="gd-companies" value={gdCompany} onChange={e => setGdCompany(e.target.value)}
-              placeholder="Chọn công ty hoặc tự điền"
+              placeholder="Chọn tên công ty"
               className="mt-1 w-full border-b border-dashed border-gray-300 bg-transparent outline-none text-center text-xs" style={ink} />
             <datalist id="gd-companies">
               {COMPANIES.map(c => <option key={c} value={c} />)}
@@ -8418,7 +8412,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
             <DeptUserSelect users={users} excludeId={currentUser.id} value={gdId} onChange={setGdId} />
           </div>
           <div>
-            <p className="font-bold">Ban Giám đốc KNI</p>
+            <p className="font-bold">Ban Giám đốc Tập đoàn</p>
             <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
             <div className="mt-6 space-y-1">
               {bgdIds.map(id => (
@@ -10648,7 +10642,7 @@ async function openProposalFile(path: string) {
 }
 
 const PROPOSAL_GROUPS = ['Mua sắm', 'Nghỉ phép', 'Đi công tác', 'Đề nghị thanh toán', 'Khác']
-const COMPANIES = ['KNI Office', 'Genki House', 'Genki Farm', 'First Steps', 'Les Sens Phú Quốc', 'ACVN']
+const COMPANIES = ['KNI', 'Genki House', 'Genki Farm', 'First Steps', 'Les Sens Phú Quốc', 'ACVN']
 
 async function generateProposalCode(userId: string): Promise<string> {
   const d = new Date()
