@@ -2881,9 +2881,6 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
             {canClose && (
               <button type="button" onClick={() => setShowClose(true)} className={`${btn} text-white`} style={{ background: '#7c3aed' }}>🔒 Close</button>
             )}
-            {onOpenInTasks && (
-              <button type="button" onClick={onOpenInTasks} className={`${btn} text-white`} style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>🗂 Mở thẻ thao tác</button>
-            )}
           </div>
         </div>
 
