@@ -3239,12 +3239,8 @@ function DashboardView({ currentUser, tasks, users, proposals, setView, onOpenPr
   const isManager = currentUser.role === 'manager'
   const showPeople = !readOnly && (isManager || !!currentUser.isDirector)
   const needMyApproval = (t: Task) => !readOnly && canApproveSelfTask(t, currentUser, users)
-const myTasks = tasks.filter(t =>
-  t.assignedTo.includes(currentUser.id) ||
-  (t.selfCreated && t.createdBy === currentUser.id) ||
-  t.supporters.includes(currentUser.id) ||
-  needMyApproval(t)   // task nhân viên tự tạo đang chờ mình duyệt
-)
+// Cùng phạm vi với trang Task; task nhân viên tự tạo đang chờ mình duyệt vẫn luôn hiện
+const myTasks = tasks.filter(t => taskInScope(t, currentUser, users) || needMyApproval(t))
     const [dateFilter, setDateFilter] = useState<DateFilterValue>(EMPTY_DATE_FILTER)
   const dateActive = dateFilter.year !== null || dateFilter.month !== null || dateFilter.day !== null
 
@@ -4339,6 +4335,24 @@ const canEditTask = (t: Task, user: User, users: User[]) => {
 // Ai được thấy task chưa duyệt: người tạo, hoặc quản lý đang cần duyệt nó
 const isTaskVisibleTo = (t: Task, user: User, users: User[]) =>
   !isTaskGated(t) || t.createdBy === user.id || canApproveSelfTask(t, user, users)
+
+// Phạm vi task của một người: dùng cho Dashboard để số liệu khớp với trang Task
+// (quản lý thấy cả task của nhân viên mình duyệt / cùng phòng, không chỉ task giao riêng cho mình)
+function taskInScope(t: Task, user: User, users: User[]): boolean {
+  const isMyTask = t.assignedTo.includes(user.id) || (t.selfCreated && t.createdBy === user.id) || t.supporters.includes(user.id) || t.projectManager.includes(user.id)
+  if (user.role !== 'manager') return isMyTask && !t.crossDeptRejected
+  const assignees = users.filter(u => t.assignedTo.includes(u.id))
+  const deptPrefix = (id?: string) => id?.match(/^t\d+/)?.[0] ?? ''
+  const isCrossDeptForMyDept = !!t.targetTeamId && (
+    user.isDirector
+      ? deptPrefix(user.teamId) === deptPrefix(t.targetTeamId)
+      : t.targetTeamId === user.teamId
+  )
+  // Task nhân viên tự tạo đã chọn quản lý riêng: chỉ quản lý đó (và người tạo) thấy, không chia cho cả phòng
+  const teamSeesIt = !(t.selfCreated && t.projectManager.length > 0)
+  return isMyTask || t.createdBy === user.id || (teamSeesIt && assignees.some(a => a.teamId === user.teamId)) || isCrossDeptForMyDept
+    || (isBodSide(user) && isBodAssigned(t, users))
+}
 
 // Những người được quyền duyệt: quản lý cùng phòng ban với người tạo + quản lý được chọn làm PM của task
 const getTaskApproverIds = (creatorId: string, projectManagerIds: string[], users: User[]) => {
