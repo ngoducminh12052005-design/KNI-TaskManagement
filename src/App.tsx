@@ -12041,7 +12041,9 @@ const projectApproverIds = (p: { createdBy?: string; managerId?: string; manager
   return users.filter(u => u.role === 'manager' && u.teamId === (creator?.teamId ?? p.teamId) && u.id !== p.createdBy).map(u => u.id)
 }
 const projectGateOk = (p: Project, u: User, users: User[]) =>
-  p.approvalStatus === 'approved' || p.createdBy === u.id || !!u.isDirector || projectApproverIds(p, users).includes(u.id)
+  p.approvalStatus === 'draft'
+    ? p.createdBy === u.id                       // nháp: chỉ người tạo thấy
+    : p.approvalStatus === 'approved' || p.createdBy === u.id || !!u.isDirector || projectApproverIds(p, users).includes(u.id)
 
 function ProjectMemberPicker({ users, excludeIds, value, onChange }: {
   users: User[]; excludeIds: string[]; value: string[]; onChange: (v: string[]) => void
@@ -12115,9 +12117,13 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  const box = 'w-full border border-gray-300 rounded px-2 py-1.5 bg-white text-sm outline-none focus:border-blue-500'
   const ink = { color: '#111827' }
-  const label = 'block text-xs font-semibold text-gray-600 mb-1'
+  const line = 'w-full bg-transparent outline-none border-b border-dashed border-gray-300 py-0.5'
+  const lab = 'shrink-0 w-44 font-bold pt-0.5'
+  const rowCls = 'flex gap-3 mb-3'
+  const sec = (t: string) => <p className="font-bold uppercase mt-6 mb-3">{t}</p>
+  const d0 = new Date()
+  const dateText = `ngày ${d0.getDate()} tháng ${d0.getMonth() + 1} năm ${d0.getFullYear()}`
   const userOptions = (
     <>
       <option value="">-- Chọn --</option>
@@ -12131,7 +12137,9 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
       })}
     </>
   )
+  // Nhân viên tạo dự án: lưu nháp, vào chi tiết bấm "Gửi quản lý duyệt". Quản lý / BOD: được duyệt luôn.
   const needsApproval = !currentUser.isDirector && currentUser.role !== 'manager'
+
   const submit = async () => {
     if (!name.trim()) { setError('Vui lòng nhập tên dự án.'); return }
     if (!company) { setError('Vui lòng chọn công ty.'); return }
@@ -12154,7 +12162,7 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
         affected: affected.trim() || null, planned_start: plannedStart || null, planned_end: plannedEnd || null,
         budget: Number(budget) || 0, supplier_name: supplierName.trim() || null, supplier_ref: supplierRef.trim() || null,
         risk_level: riskLevel, created_by: currentUser.id,
-        approval_status: needsApproval ? 'pending' : 'approved',
+        approval_status: needsApproval ? 'draft' : 'approved',
       }).select('id').single()
       created = res.data; insertError = res.error
       if (!insertError || insertError.code !== '23505') break
@@ -12162,16 +12170,6 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
     if (insertError || !created) { setSaving(false); setError(insertError?.message ?? 'Không tạo được dự án.'); return }
     const memberIds = Array.from(new Set([...managerIds, ...(ownerId ? [ownerId] : []), ...members]))
     await supabase.from('project_members').insert(memberIds.map(uid => ({ project_id: created.id, user_id: uid, role: managerIds.includes(uid) ? 'manager' : 'member' })))
-        if (needsApproval) {
-      const approverIds = projectApproverIds({ createdBy: currentUser.id, managerId, managerIds, teamId: currentUser.teamId }, users)
-      const approvers = users.filter(u => approverIds.includes(u.id))
-      if (approvers.length > 0) {
-        await supabase.from('notifications').insert(approvers.map(u => ({
-          message: `🗂️ ${currentUser.name} đề xuất dự án "${name.trim()}" và chờ bạn duyệt`,
-          target_user_id: u.id,
-        })))
-      }
-    }
     setSaving(false)
     onCreated(created.id)
     onClose()
@@ -12184,55 +12182,69 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
         <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
       </div>
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-[860px] mx-auto my-4 bg-white shadow-xl p-6 sm:p-8 space-y-5 text-[13px]" style={ink}>
-          <div>
-            <label className={label}>Tên dự án *</label>
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="VD: Nâng cấp hạ tầng mạng văn phòng ACVN Hà Nội" className={box} style={ink} />
+        <div className="max-w-[860px] mx-auto my-4 bg-white shadow-xl p-6 sm:p-12 text-[13px] leading-relaxed" style={{ ...ink, fontFamily: 'Arial, Helvetica, sans-serif' }}>
+          <p className="font-bold text-gray-500">TẬP ĐOÀN KHÔI NGUYÊN INVESTMENT (KNI)</p>
+          <div className="flex items-center gap-2 font-bold text-gray-500 flex-wrap">
+            <span>CÔNG TY *</span>
+            <select value={company} onChange={e => setCompany(e.target.value)} className="border-b border-dashed border-gray-300 bg-transparent outline-none font-bold" style={ink}>
+              <option value="">-- chọn --</option>
+              {PROJECT_COMPANIES.map(c => <option key={c} value={c}>{COMPANY_CODES[c] ? `${COMPANY_CODES[c]} · ${c.toUpperCase()}` : c.toUpperCase()}</option>)}
+            </select>
+            <span>– {(currentUser.department || '').toUpperCase()}</span>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div>
-              <label className={label}>Công ty *</label>
-              <select value={company} onChange={e => setCompany(e.target.value)} className={box} style={ink}>
-                <option value="">-- Chọn --</option>
-                {PROJECT_COMPANIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className={label}>Loại</label>
-              <select value={cls} onChange={e => setCls(e.target.value)} className={box} style={ink}>
-                <option value="project">Dự án (Project)</option>
-                <option value="bau">Vận hành thường xuyên (BAU)</option>
-              </select>
-            </div>
-            <div>
-              <label className={label}>Ưu tiên</label>
-              <select value={priority} onChange={e => setPriority(e.target.value)} className={box} style={ink}>
-                {['P1', 'P2', 'P3', 'P4'].map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className={label}>Trạng thái</label>
-              <select value={status} onChange={e => setStatus(e.target.value)} className={box} style={ink}>
-                {Object.entries(PROJECT_STATUS).map(([k, v]) => <option key={k} value={k}>{v[0]}</option>)}
-              </select>
-            </div>
+
+          <div className="grid grid-cols-3 border border-black my-5">
+            <div className="p-3 text-xs border-r border-black flex items-center">Số/No: <span className="ml-1 font-mono text-gray-500">PTASK… (tự sinh khi tạo)</span></div>
+            <div className="col-span-2 p-3 text-center text-3xl font-bold">PHIẾU DỰ ÁN<span className="text-blue-400">/ PROJECT</span></div>
           </div>
-          <div>
-            <label className={label}>Mục tiêu và lý do thực hiện</label>
-            <textarea value={objective} onChange={e => setObjective(e.target.value)} rows={3} className={`${box} resize-none`} style={ink}
+
+          <textarea value={name} onChange={e => setName(e.target.value)} rows={2}
+            placeholder="(V/V: TÊN DỰ ÁN — VD: NÂNG CẤP HẠ TẦNG MẠNG VĂN PHÒNG ACVN HÀ NỘI)"
+            className={`${line} resize-none text-center text-base font-bold uppercase`} style={ink} />
+          <div className="text-right italic my-3">…, {dateText}</div>
+
+          {sec('I. Thông tin chung')}
+          <div className={rowCls}><b className={lab}>Loại:</b>
+            <select value={cls} onChange={e => setCls(e.target.value)} className={line} style={ink}>
+              <option value="project">Dự án (Project)</option>
+              <option value="bau">Vận hành thường xuyên (BAU)</option>
+            </select>
+          </div>
+          <div className={rowCls}><b className={lab}>Ưu tiên:</b>
+            <select value={priority} onChange={e => setPriority(e.target.value)} className={line} style={ink}>
+              {['P1', 'P2', 'P3', 'P4'].map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
+          <div className={rowCls}><b className={lab}>Trạng thái:</b>
+            <select value={status} onChange={e => setStatus(e.target.value)} className={line} style={ink}>
+              {Object.entries(PROJECT_STATUS).map(([k, v]) => <option key={k} value={k}>{v[0]}</option>)}
+            </select>
+          </div>
+          <div className={rowCls}><b className={lab}>Phòng ban chịu trách nhiệm chính:</b>
+            <select value={teamId} onChange={e => setTeamId(e.target.value)} className={line} style={ink}>
+              <option value="">-- Chọn --</option>
+              {TEAMS.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
+            </select>
+          </div>
+
+          {sec('II. Mục tiêu và mô tả')}
+          <div className={rowCls}><b className={lab}>Mục tiêu và lý do thực hiện:</b>
+            <textarea value={objective} onChange={e => setObjective(e.target.value)} rows={3} className={`${line} resize-none`} style={ink}
               placeholder="Lợi ích mang lại có vượt trội rủi ro không? Mục tiêu cần đạt?" />
           </div>
-          <div>
-            <label className={label}>Mô tả chi tiết</label>
-            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={4} className={`${box} resize-none`} style={ink} />
+          <div className={rowCls}><b className={lab}>Mô tả chi tiết:</b>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={4} className={`${line} resize-none`} style={ink} />
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label className={label}>Người yêu cầu / chủ dự án</label>
-              <select value={ownerId} onChange={e => setOwnerId(e.target.value)} className={box} style={ink}>{userOptions}</select>
-            </div>
-            <div>
-              <label className={label}>Quản lý dự án (PM) * (chọn được nhiều người)</label>
+          <div className={rowCls}><b className={lab}>Công ty / khách hàng bị ảnh hưởng:</b>
+            <input value={affected} onChange={e => setAffected(e.target.value)} className={line} style={ink} />
+          </div>
+
+          {sec('III. Nhân sự')}
+          <div className={rowCls}><b className={lab}>Người yêu cầu / chủ dự án:</b>
+            <select value={ownerId} onChange={e => setOwnerId(e.target.value)} className={line} style={ink}>{userOptions}</select>
+          </div>
+          <div className={rowCls}><b className={lab}>Quản lý dự án (PM) *:</b>
+            <div className="flex-1">
               <div className="flex flex-wrap gap-1.5 mb-1.5">
                 {managerIds.map(id => (
                   <span key={id} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full" style={{ background: '#ede9fe', color: '#5b21b6' }}>
@@ -12241,58 +12253,44 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
                   </span>
                 ))}
               </div>
-              <select value="" onChange={e => { const v = e.target.value; if (v && !managerIds.includes(v)) setManagerIds([...managerIds, v]) }} className={box} style={ink}>
-                <option value="">＋ Thêm quản lý dự án</option>
+              <select value="" onChange={e => { const v = e.target.value; if (v && !managerIds.includes(v)) setManagerIds([...managerIds, v]) }} className={line} style={ink}>
+                <option value="">＋ Thêm quản lý dự án (chọn được nhiều người)</option>
                 {users.filter(u => !managerIds.includes(u.id)).map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
               </select>
             </div>
-            <div>
-              <label className={label}>Phòng ban chịu trách nhiệm chính</label>
-              <select value={teamId} onChange={e => setTeamId(e.target.value)} className={box} style={ink}>
-                <option value="">-- Chọn --</option>
-                {TEAMS.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
-              </select>
-            </div>
           </div>
-          <div>
-            <label className={label}>Thành viên tham gia (chọn phòng ban rồi chọn người)</label>
-            <ProjectMemberPicker users={users} excludeIds={[...managerIds, ownerId]} value={members} onChange={setMembers} />
+          <div className={rowCls}><b className={lab}>Thành viên tham gia:</b>
+            <div className="flex-1"><ProjectMemberPicker users={users} excludeIds={[...managerIds, ownerId]} value={members} onChange={setMembers} /></div>
           </div>
-          <div>
-            <label className={label}>Công ty / khách hàng bị ảnh hưởng</label>
-            <input value={affected} onChange={e => setAffected(e.target.value)} className={box} style={ink} />
+
+          {sec('IV. Thời gian, ngân sách, rủi ro')}
+          <div className={rowCls}><b className={lab}>Dự kiến bắt đầu:</b>
+            <input type="date" value={plannedStart} onChange={e => setPlannedStart(e.target.value)} className={line} style={ink} />
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div>
-              <label className={label}>Dự kiến bắt đầu</label>
-              <input type="date" value={plannedStart} onChange={e => setPlannedStart(e.target.value)} className={box} style={ink} />
-            </div>
-            <div>
-              <label className={label}>Dự kiến kết thúc</label>
-              <input type="date" value={plannedEnd} onChange={e => setPlannedEnd(e.target.value)} className={box} style={ink} />
-            </div>
-            <div>
-              <label className={label}>Ngân sách (VNĐ)</label>
-              <input type="number" min="0" value={budget} onChange={e => setBudget(e.target.value)} className={box} style={ink} />
-            </div>
-            <div>
-              <label className={label}>Mức rủi ro</label>
-              <select value={riskLevel} onChange={e => setRiskLevel(e.target.value)} className={box} style={ink}>
-                {Object.entries(PROJECT_RISK).map(([k, v]) => <option key={k} value={k}>{v[0]}</option>)}
-              </select>
-            </div>
+          <div className={rowCls}><b className={lab}>Dự kiến kết thúc:</b>
+            <input type="date" value={plannedEnd} onChange={e => setPlannedEnd(e.target.value)} className={line} style={ink} />
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className={label}>Nhà cung cấp (nếu có)</label>
-              <input value={supplierName} onChange={e => setSupplierName(e.target.value)} className={box} style={ink} />
-            </div>
-            <div>
-              <label className={label}>Mã tham chiếu nhà cung cấp</label>
-              <input value={supplierRef} onChange={e => setSupplierRef(e.target.value)} className={box} style={ink} />
-            </div>
+          <div className={rowCls}><b className={lab}>Ngân sách (VNĐ):</b>
+            <input type="number" min="0" value={budget} onChange={e => setBudget(e.target.value)} className={line} style={ink} />
           </div>
-          <p className="text-xs text-gray-500">Mã dự án <b>PTASKngàytháng năm-số thứ tự</b> (ví dụ PTASK201026-01) sẽ tự sinh khi lưu.</p>
+          <div className={rowCls}><b className={lab}>Mức rủi ro:</b>
+            <select value={riskLevel} onChange={e => setRiskLevel(e.target.value)} className={line} style={ink}>
+              {Object.entries(PROJECT_RISK).map(([k, v]) => <option key={k} value={k}>{v[0]}</option>)}
+            </select>
+          </div>
+
+          {sec('V. Nhà cung cấp (nếu có)')}
+          <div className={rowCls}><b className={lab}>Nhà cung cấp:</b>
+            <input value={supplierName} onChange={e => setSupplierName(e.target.value)} className={line} style={ink} />
+          </div>
+          <div className={rowCls}><b className={lab}>Mã tham chiếu nhà cung cấp:</b>
+            <input value={supplierRef} onChange={e => setSupplierRef(e.target.value)} className={line} style={ink} />
+          </div>
+
+          <p className="text-xs text-gray-500 mt-6">
+            Mã dự án <b>PTASKngàytháng năm-số thứ tự</b> (ví dụ PTASK201026-01) sẽ tự sinh khi tạo.
+            {needsApproval && ' Sau khi tạo, vào chi tiết dự án để thêm thông tin rồi bấm "Gửi quản lý duyệt".'}
+          </p>
         </div>
       </div>
       <div className="shrink-0 px-4 py-3 flex items-center justify-end gap-3" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
@@ -12300,13 +12298,12 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
         <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600">Hủy</button>
         <button type="button" onClick={submit} disabled={saving}
           className="px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
-          {saving ? 'Đang lưu...' : needsApproval ? 'Gửi trưởng bộ phận duyệt' : 'Tạo dự án'}
+          {saving ? 'Đang lưu...' : 'Tạo dự án'}
         </button>
       </div>
     </div>
   )
 }
-
 // Mã task con: TASK-<mã dự án>.<số thứ tự>, ví dụ TASK-PTASK201026-01.1
 async function generateProjectTaskCode(projectId: string, projectCode: string, skip = 0): Promise<string> {
   const prefix = `TASK-${projectCode}.`
@@ -12677,12 +12674,77 @@ function ProjectProposals({ project, proposals, users, currentUser, canManage, o
   )
 }
 
+// Tờ thông tin dự án (chỉ đọc), cùng kiểu với phiếu giao task
+function ProjectInfoSheet({ project, users }: { project: Project; users: User[] }) {
+  const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
+  const st = PROJECT_STATUS[project.status] ?? PROJECT_STATUS.planning
+  const rk = PROJECT_RISK[project.riskLevel] ?? PROJECT_RISK.medium
+  const team = TEAMS.find(t => t.id === project.teamId)
+  const fmtD = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN') : '')
+  const d = new Date(project.createdAt)
+  const sec = (t: string) => <p className="font-bold uppercase mt-6 mb-3">{t}</p>
+  const row = (k: string, v: any) => (
+    <div className="flex gap-3 mb-2">
+      <b className="shrink-0 w-44">{k}:</b>
+      <div className="flex-1 whitespace-pre-wrap break-words">{v || '—'}</div>
+    </div>
+  )
+  const companyText = project.company ? (COMPANY_CODES[project.company] ? `${COMPANY_CODES[project.company]} · ${project.company.toUpperCase()}` : project.company.toUpperCase()) : ''
+  const memberOnly = project.memberIds.filter(id => !project.managerIds.includes(id) && id !== project.ownerId)
+  return (
+    <div className="max-w-[860px] mx-auto bg-white shadow-xl rounded p-6 sm:p-12 text-[13px] leading-relaxed" style={{ color: '#111827', fontFamily: 'Arial, Helvetica, sans-serif' }}>
+      <p className="font-bold text-gray-500">TẬP ĐOÀN KHÔI NGUYÊN INVESTMENT (KNI)</p>
+      <p className="font-bold text-gray-500">CÔNG TY {companyText || '—'} – {(team?.name ?? '').toUpperCase()}</p>
+      <div className="grid grid-cols-3 border border-black my-5">
+        <div className="p-3 text-xs border-r border-black flex items-center">Số/No: <span className="ml-1 font-mono text-gray-600">{project.code || '—'}</span></div>
+        <div className="col-span-2 p-3 text-center text-3xl font-bold">PHIẾU DỰ ÁN<span className="text-blue-400">/ PROJECT</span></div>
+      </div>
+      <p className="text-center text-base font-bold uppercase">{project.name}</p>
+      <p className="text-right italic my-3">…, ngày {d.getDate()} tháng {d.getMonth() + 1} năm {d.getFullYear()}</p>
+
+      {sec('I. Thông tin chung')}
+      {row('Công ty', companyText)}
+      {row('Loại', project.cls === 'bau' ? 'Vận hành thường xuyên (BAU)' : 'Dự án (Project)')}
+      {row('Ưu tiên', project.priority)}
+      {row('Trạng thái', st[0])}
+      {row('Phòng ban chính', team ? `${team.emoji} ${team.name}` : '')}
+
+      {sec('II. Mục tiêu và mô tả')}
+      {row('Mục tiêu và lý do', project.objective)}
+      {row('Mô tả chi tiết', project.description)}
+      {row('Bên bị ảnh hưởng', project.affected)}
+
+      {sec('III. Nhân sự')}
+      {row('Chủ dự án', project.ownerId ? nameOf(project.ownerId) : '')}
+      {row('Quản lý dự án (PM)', project.managerIds.map(nameOf).join(', '))}
+      {row(`Thành viên (${memberOnly.length})`, memberOnly.map(nameOf).join(', '))}
+
+      {sec('IV. Thời gian, ngân sách, rủi ro')}
+      {row('Dự kiến bắt đầu', fmtD(project.plannedStart))}
+      {row('Dự kiến kết thúc', fmtD(project.plannedEnd))}
+      {row('Ngân sách', project.budget ? `${Number(project.budget).toLocaleString('vi-VN')} VNĐ` : '')}
+      {row('Mức rủi ro', <span style={{ color: rk[1], fontWeight: 600 }}>{rk[0]}</span>)}
+
+      {sec('V. Nhà cung cấp')}
+      {row('Nhà cung cấp', project.supplierName)}
+      {row('Mã tham chiếu', project.supplierRef)}
+
+      <div className="grid grid-cols-3 gap-4 mt-8 text-center">
+        <div><b>Người đề xuất</b><p className="mt-10 text-gray-600">{nameOf(project.createdBy)}</p></div>
+        <div><b>Quản lý dự án</b><p className="mt-10 text-gray-600">{project.managerIds.map(nameOf).join(', ')}</p></div>
+        <div><b>Người duyệt</b><p className="mt-10 text-gray-600">{project.approvalStatus === 'approved' ? 'Đã duyệt' : '—'}</p></div>
+      </div>
+    </div>
+  )
+}
+
 function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit, onClose, onChanged, onOpenTask, onOpenProposal }: {
   project: Project; users: User[]; tasks: Task[]; proposals: Proposal[]; currentUser: User; canEdit: boolean
   onClose: () => void; onChanged: () => void; onOpenTask?: (taskId: string) => void; onOpenProposal?: (proposalId: string) => void
 }) {
   const [showTaskForm, setShowTaskForm] = useState(false)
   const [taskFilter, setTaskFilter] = useState<'all' | 'mine' | 'waiting' | 'overdue' | 'done'>('all')
+  const [tab, setTab] = useState<'info' | 'tasks' | 'proposals'>('info')
   const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
   const money = (n: number) => Number(n || 0).toLocaleString('vi-VN')
   const fmtD = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN') : '—')
@@ -12757,6 +12819,16 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
     if (project.createdBy) await notifyUsers([project.createdBy], `❌ ${currentUser.name} đã từ chối dự án "${project.name}": ${reason}`)
     onChanged()
   }
+  // Dự án nháp: người tạo bấm gửi quản lý duyệt
+  const submitProject = async () => {
+    if (approverIds.length === 0) { alert('Chưa có quản lý nào để duyệt dự án này (chọn PM là quản lý khác bạn, hoặc nhờ quản lý cùng phòng).'); return }
+    const { error } = await supabase.from('projects')
+      .update({ approval_status: 'pending', approval_note: null })
+      .eq('id', project.id).eq('approval_status', 'draft')
+    if (error) { alert('Không gửi duyệt được: ' + error.message); return }
+    await notifyUsers(approverIds, `🗂️ ${currentUser.name} đề xuất dự án "${project.name}" và chờ bạn duyệt`)
+    onChanged()
+  }
   const resubmitProject = async () => {
     const { error } = await supabase.from('projects')
       .update({ approval_status: 'pending', approval_note: null })
@@ -12777,6 +12849,14 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
       style={{ background: taskFilter === id ? '#7c3aed' : 'var(--bg-card-alt)', color: taskFilter === id ? '#fff' : 'var(--text-muted)' }}>{label}</button>
   )
 
+    const tabBtn = (id: 'info' | 'tasks' | 'proposals', label: string) => (
+    <button key={id} type="button" onClick={() => setTab(id)} className="px-4 py-2 rounded-t-lg text-sm font-semibold"
+      style={{ background: tab === id ? 'var(--bg-panel)' : 'transparent', color: tab === id ? '#7c3aed' : 'var(--text-muted)',
+        borderBottom: tab === id ? '2px solid #7c3aed' : '2px solid transparent' }}>{label}</button>
+  )
+  const proposalCount = proposals.filter(p => p.projectId === project.id).length
+  const pendingSelf = list.filter(t => canApproveSelfTask(t, currentUser, users))
+
   return (
     <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 md:left-[var(--sidebar-w)] z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
       <div className="max-w-5xl mx-auto">
@@ -12788,14 +12868,28 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
           <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
           <span className="text-xs font-bold" style={{ color: 'var(--text-muted)' }}>{project.priority}</span>
           <span className="text-xs font-semibold" style={{ color: rk[1] }}>Rủi ro: {rk[0]}</span>
-          {canEdit &&  approved && (
+          {canEdit && approved && (
             <select value={project.status} onChange={e => changeStatus(e.target.value)} className="ml-auto px-2 py-1 rounded-lg text-xs outline-none"
               style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
               {Object.entries(PROJECT_STATUS).map(([k, v]) => <option key={k} value={k}>{v[0]}</option>)}
             </select>
           )}
         </div>
-                {project.approvalStatus === 'pending' && (
+
+        {project.approvalStatus === 'draft' && (
+          <div className="rounded-xl p-4 mb-4 flex items-center justify-between gap-3 flex-wrap" style={{ background: '#0284c71a', border: '1px solid #0284c766' }}>
+            <div>
+              <p className="text-sm font-bold" style={{ color: '#0284c7' }}>📝 Dự án đang ở dạng nháp</p>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                {isCreator ? 'Kiểm tra thông tin rồi bấm "Gửi quản lý duyệt". Duyệt xong mới thêm được task.' : 'Dự án chưa được người tạo gửi duyệt.'}
+              </p>
+            </div>
+            {isCreator && (
+              <button type="button" onClick={submitProject} className="px-4 py-2 rounded-lg text-sm font-bold text-white" style={{ background: '#7c3aed' }}>📤 Gửi quản lý duyệt</button>
+            )}
+          </div>
+        )}
+        {project.approvalStatus === 'pending' && (
           <div className="rounded-xl p-4 mb-4 flex items-center justify-between gap-3 flex-wrap" style={{ background: '#f59e0b1a', border: '1px solid #f59e0b66' }}>
             <div>
               <p className="text-sm font-bold" style={{ color: '#b45309' }}>⏳ Dự án đang chờ trưởng bộ phận duyệt</p>
@@ -12822,109 +12916,85 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
             )}
           </div>
         )}
-        <div className="grid md:grid-cols-3 gap-4">
-          <div className="md:col-span-2 space-y-4">
-            <section className="rounded-xl p-4" style={card}>
-              <h3 className="text-sm font-bold mb-2" style={{ color: 'var(--text-primary)' }}>Thông tin dự án</h3>
-              {row('Công ty', project.company ?? '')}
-              {row('Loại', project.cls === 'bau' ? 'Vận hành thường xuyên (BAU)' : 'Dự án (Project)')}
-              {row('Mục tiêu và lý do', project.objective ?? '')}
-              {row('Mô tả', project.description ?? '')}
-              {row('Bên bị ảnh hưởng', project.affected ?? '')}
-              {row('Nhà cung cấp', [project.supplierName, project.supplierRef].filter(Boolean).join(' · '))}
-            </section>
 
-            <section className="rounded-xl p-4" style={card}>
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Task của dự án ({list.length})</h3>
-                {projectOpen ? (
-                  <button type="button" onClick={() => setShowTaskForm(true)} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#7c3aed' }}>＋ Thêm task</button>
-                ) : (
-                  <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{approved ? 'Dự án đã đóng, không thêm task mới' : 'Dự án chưa được duyệt, chưa thêm task được'}</span>
-                )}
-              </div>
-              <div className="flex gap-2 mb-3 flex-wrap">
-                {tile('Tổng', list.length, 'var(--text-primary)')}
-                {tile('Đang làm', working, '#2563eb')}
-                {tile('Chờ duyệt', waiting, waiting > 0 ? '#7c3aed' : 'var(--text-muted)')}
-                {tile('Quá hạn', overdue, overdue > 0 ? '#dc2626' : 'var(--text-muted)')}
-                {tile('Hoàn thành', done, '#059669')}
-              </div>
-              <div className="flex gap-1.5 mb-2 flex-wrap">
-                {filterBtn('all', 'Tất cả')}
-                {filterBtn('mine', 'Của tôi')}
-                {filterBtn('waiting', 'Chờ duyệt')}
-                {filterBtn('overdue', 'Quá hạn')}
-                {filterBtn('done', 'Hoàn thành')}
-              </div>
-              {shown.length === 0 && (
-                <p className="text-xs py-2" style={{ color: 'var(--text-muted)' }}>
-                  {list.length === 0 ? 'Chưa có task nào. Bấm "＋ Thêm task" để tạo task đầu tiên của dự án.' : 'Không có task nào khớp bộ lọc.'}
-                </p>
-              )}
-              {shown.map(t => {
-                const [stLabel, stColor] = stateOf(t)
-                return (
-                  <div key={t.id} className="py-2" style={{ borderTop: '1px solid var(--border)' }}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
-                          <span className="font-mono text-[11px] mr-2" style={{ color: 'var(--text-muted)' }}>{t.taskCode ?? ''}</span>{t.title}
-                        </p>
-                        <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                          {t.assignedTo.length > 0 ? t.assignedTo.map(id => nameOf(id)).join(', ') : 'Chưa giao'}
-                          {t.selfCreated ? ' · tự tạo' : ''} · Hạn {fmtD(t.dueDate)}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {isOverdue(t) && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#dc262618', color: '#dc2626' }}>⚠️ Quá hạn</span>}
-                        <span className="text-[11px] font-semibold" style={{ color: stColor }}>{stLabel}</span>
-                        {canApproveSelfTask(t, currentUser, users) && (
-                          <>
-                            <button type="button" onClick={() => approveSelfTask(t, currentUser)} className="text-[11px] font-bold" style={{ color: '#059669' }}>✓ Duyệt</button>
-                            <button type="button" onClick={() => rejectSelfTask(t, currentUser)} className="text-[11px] font-bold" style={{ color: '#dc2626' }}>Từ chối</button>
-                          </>
-                        )}
-                        {onOpenTask && canOpen(t) && (
-                          <button type="button" onClick={() => onOpenTask(t.id)} className="text-[11px] underline" style={{ color: '#2563eb' }}>Mở</button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </section>
+        {/* Tóm tắt tiến độ: luôn hiện trên cả 3 tab */}
+        <section className="rounded-xl p-4 mb-4" style={card}>
+          <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--bg-card-alt)' }}>
+            <div className="h-full" style={{ width: `${pct}%`, background: '#059669' }} />
           </div>
+          <p className="text-xs mt-1 mb-3" style={{ color: 'var(--text-muted)' }}>{pct}% · {done}/{list.length} task hoàn thành</p>
+          <div className="flex gap-2 flex-wrap">
+            {tile('Tổng', list.length, 'var(--text-primary)')}
+            {tile('Đang làm', working, '#2563eb')}
+            {tile('Chờ duyệt', waiting, waiting > 0 ? '#7c3aed' : 'var(--text-muted)')}
+            {tile('Quá hạn', overdue, overdue > 0 ? '#dc2626' : 'var(--text-muted)')}
+            {tile('Hoàn thành', done, '#059669')}
+          </div>
+        </section>
 
-          <div className="space-y-4">
-            <section className="rounded-xl p-4" style={card}>
-              <h3 className="text-sm font-bold mb-2" style={{ color: 'var(--text-primary)' }}>Tiến độ</h3>
-              <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--bg-card-alt)' }}>
-                <div className="h-full" style={{ width: `${pct}%`, background: '#059669' }} />
-              </div>
-              <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{pct}% · {done}/{list.length} task hoàn thành</p>
-              {row('Dự kiến bắt đầu', fmtD(project.plannedStart))}
-              {row('Dự kiến kết thúc', fmtD(project.plannedEnd))}
-              {row('Ngân sách', `${money(project.budget)} VNĐ`)}
-            </section>
-            <section className="rounded-xl p-4" style={card}>
-              <h3 className="text-sm font-bold mb-2" style={{ color: 'var(--text-primary)' }}>Con người</h3>
-              {row('Chủ dự án', nameOf(project.ownerId))}
-              {row('Quản lý dự án', project.managerIds.map(nameOf).join(', '))}
-              {row('Phòng ban chính', team ? `${team.emoji} ${team.name}` : '')}
-              <p className="text-xs mt-2 mb-1 font-semibold" style={{ color: 'var(--text-muted)' }}>Thành viên ({project.memberIds.length})</p>
-              <div className="flex flex-wrap gap-1.5">
-                {project.memberIds.map(id => (
-                  <span key={id} className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-primary)' }}>{nameOf(id)}</span>
+        <div className="flex gap-1 mb-4 flex-wrap" style={{ borderBottom: '1px solid var(--border)' }}>
+          {tabBtn('info', '📄 Thông tin dự án')}
+          {tabBtn('tasks', `✅ Task trong dự án (${list.length})`)}
+          {tabBtn('proposals', `📑 Tờ trình liên quan (${proposalCount})`)}
+        </div>
+
+        {tab === 'info' && <ProjectInfoSheet project={project} users={users} />}
+
+        {tab === 'tasks' && (
+          <section className="rounded-xl p-4" style={card}>
+            <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+              <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Task trong dự án ({list.length})</h3>
+              {projectOpen ? (
+                <button type="button" onClick={() => setShowTaskForm(true)} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#7c3aed' }}>＋ Thêm task</button>
+              ) : (
+                <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                  {approved ? 'Dự án đã đóng, không thêm task mới' : 'Dự án chưa được duyệt, chưa thêm task được'}
+                </span>
+              )}
+            </div>
+            <div className="flex gap-1.5 mb-3 flex-wrap">
+              {filterBtn('all', 'Tất cả')}
+              {filterBtn('mine', 'Của tôi')}
+              {filterBtn('waiting', 'Chờ duyệt')}
+              {filterBtn('overdue', 'Quá hạn')}
+              {filterBtn('done', 'Hoàn thành')}
+            </div>
+            {pendingSelf.length > 0 && (
+              <div className="rounded-lg p-3 mb-3" style={{ background: '#f59e0b1a', border: '1px solid #f59e0b55' }}>
+                <p className="text-xs font-bold mb-1" style={{ color: '#b45309' }}>⏳ Task tự tạo đang chờ bạn duyệt ({pendingSelf.length})</p>
+                {pendingSelf.map(t => (
+                  <div key={t.id} className="flex items-center justify-between gap-2 py-1 text-xs">
+                    <span style={{ color: 'var(--text-primary)' }}>
+                      <span className="font-mono mr-1" style={{ color: 'var(--text-muted)' }}>{t.taskCode ?? ''}</span>{t.title}
+                    </span>
+                    <span className="flex gap-3 shrink-0">
+                      <button type="button" onClick={() => approveSelfTask(t, currentUser)} className="font-bold" style={{ color: '#059669' }}>✓ Duyệt</button>
+                      <button type="button" onClick={() => rejectSelfTask(t, currentUser)} className="font-bold" style={{ color: '#dc2626' }}>Từ chối</button>
+                    </span>
+                  </div>
                 ))}
               </div>
-            </section>
-          </div>
-        </div>
-      </div>
-      <div className="max-w-5xl mx-auto grid md:grid-cols-3 gap-4 mt-4 pb-8">
-        <div className="md:col-span-2 space-y-4">
+            )}
+            {shown.length === 0 ? (
+              <p className="text-xs py-2" style={{ color: 'var(--text-muted)' }}>
+                {list.length === 0 ? 'Chưa có task nào. Bấm "＋ Thêm task" để tạo task đầu tiên của dự án.' : 'Không có task nào khớp bộ lọc.'}
+              </p>
+            ) : (
+              <TaskListTable tasks={shown} users={users} currentUser={currentUser}
+                onOpen={t => {
+                  if (!onOpenTask) return
+                  if (!canOpen(t)) { alert('Bạn không phải người tham gia task này nên không mở được chi tiết.'); return }
+                  onOpenTask(t.id)
+                }} />
+            )}
+          </section>
+        )}
+
+        {tab === 'proposals' && (
           <ProjectProposals project={project} proposals={proposals} users={users} currentUser={currentUser} canManage={canAssign} onOpenProposal={onOpenProposal} />
+        )}
+
+        <div className="mt-4 pb-8">
           <ProjectDiscussion project={project} currentUser={currentUser} users={users} />
         </div>
       </div>
@@ -12971,7 +13041,9 @@ function ProjectListTable({ projects, tasks, users, currentUser, canSee, onOpen 
                   <p className="font-mono text-[11px] font-bold break-all" style={{ color: 'var(--text-muted)' }}>{p.code || '—'}</p>
                   <p className="text-sm font-semibold leading-snug break-words mt-0.5">{p.name}</p>
                 </div>
-                {p.approvalStatus === 'pending'
+                {p.approvalStatus === 'draft'
+                  ? <span className="px-2 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap shrink-0" style={{ background: '#0284c722', color: '#0284c7' }}>📝 Nháp</span>
+                  : p.approvalStatus === 'pending'
                   ? <span className="px-2 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap shrink-0" style={{ background: '#f59e0b22', color: '#b45309' }}>⏳ Chờ duyệt</span>
                   : p.approvalStatus === 'rejected'
                   ? <span className="px-2 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap shrink-0" style={{ background: '#dc262622', color: '#dc2626' }}>❌ Bị từ chối</span>
@@ -13041,7 +13113,9 @@ function ProjectListTable({ projects, tasks, users, currentUser, canSee, onOpen 
                   </p>
                 </td>
                 <td className={td}>
-                  {p.approvalStatus === 'pending'
+                  {p.approvalStatus === 'draft'
+                    ? <span className="inline-block px-2 py-1 rounded-lg font-semibold whitespace-nowrap" style={{ background: '#0284c722', color: '#0284c7' }}>📝 Nháp</span>
+                    : p.approvalStatus === 'pending'
                     ? <span className="inline-block px-2 py-1 rounded-lg font-semibold whitespace-nowrap" style={{ background: '#f59e0b22', color: '#b45309' }}>⏳ Chờ duyệt</span>
                     : p.approvalStatus === 'rejected'
                     ? <span className="inline-block px-2 py-1 rounded-lg font-semibold whitespace-nowrap" style={{ background: '#dc262622', color: '#dc2626' }}>❌ Bị từ chối</span>
