@@ -8484,9 +8484,11 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
           <p className="text-[11px] text-gray-500 mt-1">
             {approvalMode === 'par' ? '⚡ P1, P2: các người duyệt được gửi cùng lúc (song song).' : '➡️ P3, P4: duyệt lần lượt từng người (nối tiếp).'}
           </p>
-          <p className="text-[11px] text-gray-500 mt-0.5">
-            🏛️ Ban Giám đốc Tập đoàn duyệt thì tờ trình coi như đã được duyệt, những người còn lại không cần duyệt nữa.
-          </p>
+          {approvalMode === 'par' && (
+            <p className="text-[11px] text-gray-500 mt-0.5">
+              🏛️ Ban Giám đốc Tập đoàn duyệt thì tờ trình coi như đã được duyệt, những người còn lại không cần duyệt nữa.
+            </p>
+          )}
         </div>
       </div>
 
