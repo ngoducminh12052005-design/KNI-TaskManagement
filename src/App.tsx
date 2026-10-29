@@ -4232,6 +4232,7 @@ const isBodTaskForManager = (t: Task, users: User[]) =>
 // ===== Tạm dừng (Pending): ai được duyệt =====
 // Nhân viên xin  -> quản lý duyệt. Task giao chéo phòng ban: trưởng bộ phận của phòng ban GIAO duyệt.
 // Quản lý xin    -> BOD duyệt, hoặc trợ lý BOD (quyền BOD) nếu chính trợ lý đó giao task.
+// Task BOD giao + quản lý đã phân công cho nhân viên: nhân viên xin -> chính quản lý đã phân công duyệt (không lên BOD).
 const pendingApproverIds = (t: Task, users: User[], requesterId?: string): string[] => {
   const req = users.find(u => u.id === (requesterId ?? t.pendingRequestedBy))
   if (!req) return []
@@ -4241,6 +4242,9 @@ const pendingApproverIds = (t: Task, users: User[], requesterId?: string): strin
     ids = users.filter(u => u.isDirector).map(u => u.id)
     if (creator?.isBodAssistant && isBodAssigned(t, users)) ids.push(creator.id)
   } else {
+    // Task BOD (hoặc trợ lý BOD có quyền BOD) giao, quản lý đã phân công xuống nhân viên: người duyệt tạm dừng là quản lý đã phân công
+    const relay = relayIdOf(t)
+    if (isBodAssigned(t, users) && relay && relay !== req.id && users.some(u => u.id === relay)) return [relay]
     const cross = !!t.targetTeamId || (!!creator && !isBodSide(creator) && creator.teamId !== req.teamId)
     const teamId = cross && creator ? creator.teamId : req.teamId
     ids = users.filter(u => u.role === 'manager' && !u.isDirector && u.teamId === teamId).map(u => u.id)
