@@ -12015,6 +12015,7 @@ interface Project {
   memberIds: string[]
   approvalStatus: string
   approvalNote?: string
+  plannedTasks: PlannedTask[]
 }
 
 function mapDbProject(p: any, memberIds: string[], managerIds: string[] = []): Project {
@@ -12028,6 +12029,7 @@ function mapDbProject(p: any, memberIds: string[], managerIds: string[] = []): P
     createdAt: p.created_at, memberIds,
     managerIds: Array.from(new Set([...(p.manager_id ? [p.manager_id as string] : []), ...managerIds])),
     approvalStatus: p.approval_status ?? 'approved', approvalNote: p.approval_note ?? undefined,
+    plannedTasks: Array.isArray(p.planned_tasks) ? p.planned_tasks : [],
   }
 }
 
@@ -12092,9 +12094,15 @@ function ProjectMemberPicker({ users, excludeIds, value, onChange }: {
   )
 }
 
-function ProjectForm({ currentUser, users, onClose, onCreated }: {
-  currentUser: User; users: User[]; onClose: () => void; onCreated: (id: string) => void
+function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
+  currentUser: User; users: User[]; proposals: Proposal[]; onClose: () => void; onCreated: (id: string) => void
 }) {
+  const [part, setPart] = useState<'info' | 'tasks' | 'proposals'>('info')
+  const [plan, setPlan] = useState<PlannedTask[]>([])               // task dự kiến
+  const [proposalCodes, setProposalCodes] = useState<string[]>([])  // tờ trình có sẵn muốn gắn
+  const [codeInput, setCodeInput] = useState('')
+  const [codeMsg, setCodeMsg] = useState('')
+  const [pt, setPt] = useState<PlannedTask>({ title: '', description: '', assigneeId: '', dueDate: '' })
   const [name, setName] = useState('')
   const [company, setCompany] = useState('')
   const [cls, setCls] = useState('project')
@@ -12140,6 +12148,34 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
   // Nhân viên tạo dự án: lưu nháp, vào chi tiết bấm "Gửi quản lý duyệt". Quản lý / BOD: được duyệt luôn.
   const needsApproval = !currentUser.isDirector && currentUser.role !== 'manager'
 
+  const partBtn = (id: 'info' | 'tasks' | 'proposals', label: string) => (
+    <button key={id} type="button" onClick={() => setPart(id)} className="px-3 py-2 rounded-lg text-xs font-semibold"
+      style={{ background: part === id ? '#ede9fe' : 'transparent', color: part === id ? '#5b21b6' : '#6b7280', border: part === id ? '1px solid #c4b5fd' : '1px solid transparent' }}>{label}</button>
+  )
+
+  // ----- Tờ trình có sẵn: chọn hoặc dán mã -----
+  const involved = (p: Proposal) => p.submittedBy === currentUser.id || p.recipientId === currentUser.id || p.participants.includes(currentUser.id)
+  const proposalCandidates = proposals.filter(p => !p.projectId && p.code && (currentUser.isDirector || involved(p)))
+  const proposalOf = (c: string) => proposals.find(x => (x.code ?? '').toUpperCase() === c)
+  const addCode = () => {
+    const c = codeInput.trim().toUpperCase()
+    if (!c) return
+    const p = proposalOf(c)
+    if (!p || !(currentUser.isDirector || involved(p))) { setCodeMsg(`Không tìm thấy tờ trình ${c}, hoặc bạn không có quyền gắn.`); return }
+    if (p.projectId) { setCodeMsg('Tờ trình này đã gắn vào một dự án khác.'); return }
+    if (proposalCodes.includes(c)) { setCodeMsg('Bạn đã thêm tờ trình này rồi.'); return }
+    setProposalCodes([...proposalCodes, c]); setCodeInput(''); setCodeMsg('')
+  }
+
+  // ----- Task dự kiến -----
+  const addPlan = () => {
+    if (!pt.title.trim()) { setError('Nhập tên task dự kiến.'); return }
+    if (!pt.assigneeId) { setError('Chọn người phụ trách task dự kiến.'); return }
+    setError('')
+    setPlan([...plan, { ...pt, title: pt.title.trim() }])
+    setPt({ title: '', description: '', assigneeId: '', dueDate: '' })
+  }
+
   const submit = async () => {
     if (!name.trim()) { setError('Vui lòng nhập tên dự án.'); return }
     if (!company) { setError('Vui lòng chọn công ty.'); return }
@@ -12161,15 +12197,27 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
         owner_id: ownerId || null, manager_id: managerId, team_id: needsApproval ? currentUser.teamId : (teamId || null),
         affected: affected.trim() || null, planned_start: plannedStart || null, planned_end: plannedEnd || null,
         budget: Number(budget) || 0, supplier_name: supplierName.trim() || null, supplier_ref: supplierRef.trim() || null,
-        risk_level: riskLevel, created_by: currentUser.id,
+        risk_level: riskLevel, created_by: currentUser.id, planned_tasks: needsApproval ? plan : [],
         approval_status: needsApproval ? 'draft' : 'approved',
-      }).select('id').single()
+      }).select('id, code').single()
       created = res.data; insertError = res.error
       if (!insertError || insertError.code !== '23505') break
     }
     if (insertError || !created) { setSaving(false); setError(insertError?.message ?? 'Không tạo được dự án.'); return }
     const memberIds = Array.from(new Set([...managerIds, ...(ownerId ? [ownerId] : []), ...members]))
     await supabase.from('project_members').insert(memberIds.map(uid => ({ project_id: created.id, user_id: uid, role: managerIds.includes(uid) ? 'manager' : 'member' })))
+
+    // Gắn các tờ trình có sẵn vào dự án
+    for (const c of proposalCodes) {
+      const p = proposalOf(c)
+      if (p) await supabase.from('proposals').update({ project_id: created.id }).eq('id', p.id)
+    }
+    // Quản lý / BOD: dự án duyệt luôn nên tạo task thật ngay. Nhân viên: task dự kiến đã lưu cùng dự án (nháp)
+    if (!needsApproval && plan.length > 0) {
+      const res = await createProjectTasksFromPlan(
+        { id: created.id, code: created.code, name: name.trim(), managerIds, memberIds: [...memberIds] }, plan, currentUser)
+      if (res.error) alert(res.error)
+    }
     setSaving(false)
     onCreated(created.id)
     onClose()
@@ -12182,6 +12230,7 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
         <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
       </div>
       <div className="flex-1 overflow-y-auto">
+        {part === 'info' && (
         <div className="max-w-[860px] mx-auto my-4 bg-white shadow-xl p-6 sm:p-12 text-[13px] leading-relaxed" style={{ ...ink, fontFamily: 'Arial, Helvetica, sans-serif' }}>
           <p className="font-bold text-gray-500">TẬP ĐOÀN KHÔI NGUYÊN INVESTMENT (KNI)</p>
           <div className="flex items-center gap-2 font-bold text-gray-500 flex-wrap">
@@ -12238,6 +12287,29 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
           <div className={rowCls}><b className={lab}>Công ty / khách hàng bị ảnh hưởng:</b>
             <input value={affected} onChange={e => setAffected(e.target.value)} className={line} style={ink} />
           </div>
+          <div className={rowCls}><b className={lab}>Tờ trình liên quan:</b>
+            <div className="flex-1">
+              <div className="flex flex-wrap gap-1.5 mb-1.5">
+                {proposalCodes.map(c => (
+                  <span key={c} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full" style={{ background: '#e0f2fe', color: '#075985' }}>
+                    {c}{proposalOf(c)?.title ? ` · ${proposalOf(c)!.title}` : ''}
+                    <button type="button" onClick={() => setProposalCodes(proposalCodes.filter(x => x !== c))} className="font-bold">✕</button>
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input list="project-form-proposal-codes" value={codeInput} onChange={e => setCodeInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCode() } }}
+                  placeholder="Chọn hoặc dán mã tờ trình có sẵn (VD: RTASK201026-01), không cần tạo tờ trình mới"
+                  className={line} style={ink} />
+                <datalist id="project-form-proposal-codes">
+                  {proposalCandidates.map(p => <option key={p.id} value={p.code}>{p.title}</option>)}
+                </datalist>
+                <button type="button" onClick={addCode} className="shrink-0 px-3 text-xs font-bold text-blue-600">＋ Gắn</button>
+              </div>
+              {codeMsg && <p className="text-[11px] text-red-600 mt-1">{codeMsg}</p>}
+            </div>
+          </div>
 
           {sec('III. Nhân sự')}
           <div className={rowCls}><b className={lab}>Người yêu cầu / chủ dự án:</b>
@@ -12292,10 +12364,77 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
             {needsApproval && ' Sau khi tạo, vào chi tiết dự án để thêm thông tin rồi bấm "Gửi quản lý duyệt".'}
           </p>
         </div>
+        )}
+
+        {part === 'tasks' && (
+          <div className="max-w-[860px] mx-auto my-4 bg-white shadow-xl p-6 sm:p-12 text-[13px] leading-relaxed" style={{ ...ink, fontFamily: 'Arial, Helvetica, sans-serif' }}>
+            <p className="font-bold uppercase mb-1">Task của dự án</p>
+            <p className="text-xs text-gray-500 mb-4">
+              {needsApproval
+                ? 'Liệt kê các task dự kiến. Dự án cần được quản lý duyệt trước, sau đó bấm "Tạo các task này" trong chi tiết dự án để tạo thành task thật.'
+                : 'Các task bên dưới sẽ được tạo thành task thật ngay khi bạn bấm "Tạo dự án".'}
+            </p>
+            {plan.length === 0 && <p className="text-xs text-gray-400 mb-2">Chưa có task nào.</p>}
+            {plan.map((t, i) => (
+              <div key={i} className="flex items-start justify-between gap-3 py-2 border-t border-gray-200">
+                <div className="min-w-0">
+                  <p className="font-semibold">{i + 1}. {t.title}</p>
+                  <p className="text-xs text-gray-500">
+                    {users.find(u => u.id === t.assigneeId)?.name ?? '—'}
+                    {t.dueDate ? ` · Hạn ${new Date(t.dueDate).toLocaleDateString('vi-VN')}` : ''}
+                    {t.description ? ` · ${t.description}` : ''}
+                  </p>
+                </div>
+                <button type="button" onClick={() => setPlan(plan.filter((_, j) => j !== i))} className="text-red-600 text-xs shrink-0">Xoá</button>
+              </div>
+            ))}
+            <div className="mt-4 p-3 rounded border border-dashed border-gray-300">
+              <input value={pt.title} onChange={e => setPt({ ...pt, title: e.target.value })} placeholder="Tên task" className={`${line} mb-2`} style={ink} />
+              <input value={pt.description ?? ''} onChange={e => setPt({ ...pt, description: e.target.value })} placeholder="Mô tả ngắn (không bắt buộc)" className={`${line} mb-2`} style={ink} />
+              <div className="flex gap-3 mb-3">
+                <select value={pt.assigneeId} onChange={e => setPt({ ...pt, assigneeId: e.target.value })} className={line} style={ink}>{userOptions}</select>
+                <input type="date" value={pt.dueDate ?? ''} onChange={e => setPt({ ...pt, dueDate: e.target.value })} className={line} style={ink} />
+              </div>
+              <button type="button" onClick={addPlan} className="px-3 py-1.5 rounded text-xs font-bold text-white" style={{ background: '#7c3aed' }}>＋ Thêm task</button>
+            </div>
+          </div>
+        )}
+
+        {part === 'proposals' && (
+          <div className="max-w-[860px] mx-auto my-4 bg-white shadow-xl p-6 sm:p-12 text-[13px] leading-relaxed" style={{ ...ink, fontFamily: 'Arial, Helvetica, sans-serif' }}>
+            <p className="font-bold uppercase mb-1">Tờ trình của dự án</p>
+            <p className="text-xs text-gray-500 mb-4">
+              Gắn tờ trình / đề xuất có sẵn bằng mã. Cần tờ trình mới thì tạo ở mục Tờ trình rồi dán mã vào đây, hoặc gắn sau trong chi tiết dự án.
+            </p>
+            {proposalCodes.length === 0 && <p className="text-xs text-gray-400 mb-2">Chưa gắn tờ trình nào.</p>}
+            {proposalCodes.map(c => (
+              <div key={c} className="flex items-center justify-between gap-3 py-2 border-t border-gray-200">
+                <p><span className="font-mono text-xs text-gray-500 mr-2">{c}</span>{proposalOf(c)?.title ?? ''}</p>
+                <button type="button" onClick={() => setProposalCodes(proposalCodes.filter(x => x !== c))} className="text-red-600 text-xs shrink-0">Gỡ</button>
+              </div>
+            ))}
+            <div className="flex gap-2 mt-4">
+              <input list="project-form-proposal-codes-2" value={codeInput} onChange={e => setCodeInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCode() } }}
+                placeholder="Chọn hoặc dán mã tờ trình (VD: RTASK201026-01)" className={line} style={ink} />
+              <datalist id="project-form-proposal-codes-2">
+                {proposalCandidates.map(p => <option key={p.id} value={p.code}>{p.title}</option>)}
+              </datalist>
+              <button type="button" onClick={addCode} className="shrink-0 px-3 text-xs font-bold text-blue-600">＋ Gắn</button>
+            </div>
+            {codeMsg && <p className="text-[11px] text-red-600 mt-1">{codeMsg}</p>}
+          </div>
+        )}
       </div>
-      <div className="shrink-0 px-4 py-3 flex items-center justify-end gap-3" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
+      <div className="shrink-0 px-4 py-3 flex items-center gap-3 flex-wrap" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
         {error && <span className="text-xs text-red-600 mr-auto">{error}</span>}
+        <span className="flex-1" />
         <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600">Hủy</button>
+        <span className="flex gap-1 p-1 rounded-xl" style={{ background: '#f3f4f6' }}>
+          {partBtn('info', '📄 Thông tin')}
+          {partBtn('tasks', `✅ Task của dự án${plan.length ? ` (${plan.length})` : ''}`)}
+          {partBtn('proposals', `📑 Tờ trình của dự án${proposalCodes.length ? ` (${proposalCodes.length})` : ''}`)}
+        </span>
         <button type="button" onClick={submit} disabled={saving}
           className="px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
           {saving ? 'Đang lưu...' : 'Tạo dự án'}
@@ -12316,6 +12455,52 @@ async function generateProjectTaskCode(projectId: string, projectCode: string, s
     if (!Number.isNaN(n) && n > maxN) maxN = n
   })
   return `${prefix}${maxN + 1 + skip}`
+}
+
+// Task dự kiến của dự án (lập lúc tạo dự án)
+type PlannedTask = { title: string; description?: string; assigneeId: string; dueDate?: string }
+
+// Tạo task thật từ danh sách dự kiến. Trả về số task đã tạo và lỗi (nếu có)
+async function createProjectTasksFromPlan(
+  project: { id: string; code: string; name: string; managerIds: string[]; memberIds: string[] },
+  items: PlannedTask[], creator: User,
+): Promise<{ done: number; error: string | null }> {
+  const todayStr = new Date().toISOString().split('T')[0]
+  let done = 0
+  for (const pt of items) {
+    const due = pt.dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]
+    let newTask: any = null
+    let lastError: any = null
+    let code = ''
+    for (let i = 0; i < 3; i++) {
+      code = await generateProjectTaskCode(project.id, project.code, i)
+      const res = await supabase.from('tasks').insert({
+        title: pt.title.trim(), description: (pt.description ?? '').trim(), exp_reward: getExpRange('medium', false, false).suggested,
+        task_code: code, project_id: project.id, work_status: 'received', status: 'open',
+        assigned_to: [pt.assigneeId], project_manager: project.managerIds, supporters: [],
+        created_by: creator.id, start_date: todayStr, due_date: due,
+        category: 'development', priority: 'medium', self_created: false,
+        important: false, urgent: false, is_team_project: false,
+        cross_dept_pending: false, target_team_id: null, creation_approval: 'approved',
+        drive_folder_created: false, drive_folder_name: null,
+      }).select('id').single()
+      newTask = res.data; lastError = res.error
+      if (!lastError || lastError.code !== '23505') break
+    }
+    if (lastError || !newTask) return { done, error: `Không tạo được task "${pt.title}": ${lastError?.message ?? ''}` }
+    done++
+    if (!project.memberIds.includes(pt.assigneeId)) {
+      await supabase.from('project_members').insert({ project_id: project.id, user_id: pt.assigneeId, role: 'member' })
+      project.memberIds.push(pt.assigneeId)
+    }
+    if (pt.assigneeId !== creator.id) {
+      await supabase.from('notifications').insert({
+        message: `📋 ${creator.name} vừa giao task [${code}] cho bạn trong dự án [${project.code}] ${project.name}: ${pt.title.trim()}`,
+        target_user_id: pt.assigneeId, link_task_id: newTask.id,
+      })
+    }
+  }
+  return { done, error: null }
 }
 
 function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
@@ -12819,6 +13004,17 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
     if (project.createdBy) await notifyUsers([project.createdBy], `❌ ${currentUser.name} đã từ chối dự án "${project.name}": ${reason}`)
     onChanged()
   }
+  // Task dự kiến (nhân viên lập lúc tạo dự án): dự án được duyệt rồi thì tạo thành task thật
+  const createPlanned = async () => {
+    if (!window.confirm(`Tạo ${project.plannedTasks.length} task thật cho dự án này?`)) return
+    const res = await createProjectTasksFromPlan(
+      { id: project.id, code: project.code, name: project.name, managerIds: project.managerIds, memberIds: [...project.memberIds] },
+      project.plannedTasks, currentUser)
+    // Giữ lại phần chưa tạo được (nếu có lỗi giữa chừng) để không bị tạo trùng
+    await supabase.from('projects').update({ planned_tasks: project.plannedTasks.slice(res.done) }).eq('id', project.id)
+    if (res.error) alert(res.error)
+    onChanged()
+  }
   // Dự án nháp: người tạo bấm gửi quản lý duyệt
   const submitProject = async () => {
     if (approverIds.length === 0) { alert('Chưa có quản lý nào để duyệt dự án này (chọn PM là quản lý khác bạn, hoặc nhờ quản lý cùng phòng).'); return }
@@ -12959,6 +13155,22 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
               {filterBtn('overdue', 'Quá hạn')}
               {filterBtn('done', 'Hoàn thành')}
             </div>
+            {project.plannedTasks.length > 0 && (
+              <div className="rounded-lg p-3 mb-3" style={{ background: '#0284c71a', border: '1px solid #0284c755' }}>
+                <p className="text-xs font-bold mb-1" style={{ color: '#0284c7' }}>📝 Task dự kiến ({project.plannedTasks.length}) — chưa phải task thật</p>
+                {project.plannedTasks.map((t, i) => (
+                  <p key={i} className="text-xs py-0.5" style={{ color: 'var(--text-primary)' }}>
+                    {i + 1}. {t.title}{' '}
+                    <span style={{ color: 'var(--text-muted)' }}>· {nameOf(t.assigneeId)}{t.dueDate ? ` · Hạn ${fmtD(t.dueDate)}` : ''}</span>
+                  </p>
+                ))}
+                {projectOpen && canAssign ? (
+                  <button type="button" onClick={createPlanned} className="mt-2 px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#7c3aed' }}>▶ Tạo các task này</button>
+                ) : (
+                  <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>Dự án được duyệt xong mới tạo được task thật.</p>
+                )}
+              </div>
+            )}
             {pendingSelf.length > 0 && (
               <div className="rounded-lg p-3 mb-3" style={{ background: '#f59e0b1a', border: '1px solid #f59e0b55' }}>
                 <p className="text-xs font-bold mb-1" style={{ color: '#b45309' }}>⏳ Task tự tạo đang chờ bạn duyệt ({pendingSelf.length})</p>
@@ -13262,7 +13474,7 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
         : <ProjectListTable projects={visible} tasks={tasks} users={users} currentUser={currentUser}
             canSee={canSee} onOpen={p => setOpenId(p.id)} />}
 
-      {showForm && <ProjectForm currentUser={currentUser} users={users} onClose={() => setShowForm(false)} onCreated={async (id) => { await load(); setOpenId(id) }} />}
+      {showForm && <ProjectForm currentUser={currentUser} users={users} proposals={proposals} onClose={() => setShowForm(false)} onCreated={async (id) => { await load(); setOpenId(id) }} />}
       {open && <ProjectDetail project={open} users={users} tasks={tasks} proposals={proposals} currentUser={currentUser} canEdit={canEditProject(open)} onClose={() => setOpenId(null)} onChanged={load} onOpenTask={onOpenTask} onOpenProposal={onOpenProposal} />}
     </div>
   )
