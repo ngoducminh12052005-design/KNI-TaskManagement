@@ -1486,12 +1486,15 @@ function DashboardProposals({ proposals, currentUser, users, onOpen, onViewAll, 
   dateFilter?: DateFilterValue
 }) {
   const [myPendingIds, setMyPendingIds] = useState<string[]>([])
+  const [myDoneIds, setMyDoneIds] = useState<string[]>([])
   const [statusFilter, setStatusFilter] = useState<'all' | 'need' | 'pending' | 'approved' | 'rejected'>('all')
   const [noteFor, setNoteFor] = useState<Proposal | null>(null)
   useEffect(() => {
     const load = async () => {
-      const { data } = await supabase.from('proposal_steps').select('proposal_id').eq('approver_id', currentUser.id).eq('status', 'pending')
-      setMyPendingIds((data ?? []).map((x: any) => x.proposal_id))
+      const { data } = await supabase.from('proposal_steps').select('proposal_id, status').eq('approver_id', currentUser.id)
+      setMyPendingIds((data ?? []).filter((x: any) => x.status === 'pending').map((x: any) => x.proposal_id))
+      // Tờ trình mình đã duyệt / từ chối / yêu cầu xem xét lại vẫn hiện ở Dashboard
+      setMyDoneIds((data ?? []).filter((x: any) => ['approved', 'rejected', 'revision'].includes(x.status)).map((x: any) => x.proposal_id))
     }
     load()
     const ch = supabase.channel(`dash-steps-${Math.random().toString(36).slice(2)}`)
@@ -1505,7 +1508,7 @@ function DashboardProposals({ proposals, currentUser, users, onOpen, onViewAll, 
   const dateActive = df.year !== null || df.month !== null || df.day !== null
   const inRange = (p: Proposal) => matchDateFilter({ createdAt: p.createdAt } as unknown as Task, df)
 
-  const mine = proposals.filter(p => p.submittedBy === currentUser.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const mine = proposals.filter(p => p.submittedBy === currentUser.id || myDoneIds.includes(p.id)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const base = mine.filter(inRange)
   const needMeList = proposals
     .filter(p => p.status === 'pending' && myPendingIds.includes(p.id))
@@ -8147,33 +8150,90 @@ function DeptUserSelect({ users, excludeId, value, onChange }: {
     </div>
   )
 }
-function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void }) {
+// So sánh nội dung tờ trình cũ/mới -> chuỗi ghi vào lịch sử
+function docDiff(oldP: { title: string; company?: string; driveUrl?: string; formData?: Record<string, any> }, nw: { title: string; company: string; driveUrl: string; fd: Record<string, any>; newFiles: number }) {
+  const o = oldP.formData ?? {}
+  const cut = (v: any) => { const t = (Array.isArray(v) ? v.join(' | ') : String(v ?? '')).replace(/\s+/g, ' ').trim(); return t.length > 70 ? t.slice(0, 70) + '…' : t }
+  const added: string[] = []; const edited: string[] = []
+  const chk = (label: string, a: any, b: any) => {
+    const x = cut(a), y = cut(b)
+    if (x === y) return
+    if (!x) added.push(`${label}: "${y}"`)
+    else if (!y) edited.push(`${label}: đã xóa "${x}"`)
+    else edited.push(`${label}: "${x}" → "${y}"`)
+  }
+  chk('Tiêu đề', oldP.title, nw.title)
+  chk('Công ty', oldP.company, nw.company)
+  chk('Kính gửi', o.kinhGui, nw.fd.kinhGui)
+  chk('Căn cứ', o.canCu, nw.fd.canCu)
+  chk('Mở đầu', o.intro, nw.fd.intro)
+  chk('Nội dung', o.noiDung, nw.fd.noiDung)
+  chk('Thông tin khác', o.thongTinKhac, nw.fd.thongTinKhac)
+  chk('Đề nghị', o.deNghi, nw.fd.deNghi)
+  chk('Mức ưu tiên', o.priority, nw.fd.priority)
+  chk('Link Drive', oldP.driveUrl, nw.driveUrl)
+  chk('Người ký', o.signRoles, nw.fd.signRoles)
+  const oc: any[] = o.costRows ?? [], nc: any[] = nw.fd.costRows ?? []
+  const rowTxt = (r: any) => `${r.item} (${r.qty || ''} ${r.unit || ''} × ${r.price || ''})`.replace(/\s+/g, ' ')
+  nc.forEach((r, i) => {
+    const old = oc[i]
+    if (!old) added.push(`Chi phí: thêm dòng "${rowTxt(r)}"`)
+    else if (rowTxt(old) !== rowTxt(r)) edited.push(`Chi phí dòng ${i + 1}: "${rowTxt(old)}" → "${rowTxt(r)}"`)
+  })
+  if (oc.length > nc.length) edited.push(`Chi phí: đã xóa ${oc.length - nc.length} dòng`)
+  if (nw.newFiles > 0) added.push(`Đính kèm thêm ${nw.newFiles} file`)
+  return { added: added.join('\n'), edited: edited.join('\n') }
+}
+
+function ProposalDocForm({ currentUser, users, onClose, onCreated, editing }: { currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void; editing?: Proposal | null }) {
   const now = new Date()
   const dateText = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()}`
   const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)
 
-  const [title, setTitle] = useState('')
-  const [company, setCompany] = useState('')
-  const [place, setPlace] = useState('HCMC')
-  const [kinhGui, setKinhGui] = useState<string[]>(['Ban Giám đốc Tập đoàn KNI'])
-  const [canCu, setCanCu] = useState<string[]>([''])
-  const [intro, setIntro] = useState('')
-  const [noiDung, setNoiDung] = useState('')
-  const [rows, setRows] = useState<DocCostRow[]>([{ item: '', unit: '', qty: '', price: '', note: '' }])
+  const efd: Record<string, any> = editing?.formData ?? {}
+  const [title, setTitle] = useState(editing?.title ?? '')
+  const [company, setCompany] = useState(editing?.company ?? '')
+  const [place, setPlace] = useState<string>(efd.place ?? 'HCMC')
+  const [kinhGui, setKinhGui] = useState<string[]>(efd.kinhGui?.length ? efd.kinhGui : ['Ban Giám đốc Tập đoàn KNI'])
+  const [canCu, setCanCu] = useState<string[]>(efd.canCu?.length ? efd.canCu : [''])
+  const [intro, setIntro] = useState<string>(efd.intro ?? '')
+  const [noiDung, setNoiDung] = useState<string>(efd.noiDung ?? '')
+  const [rows, setRows] = useState<DocCostRow[]>(efd.costRows?.length
+    ? efd.costRows.map((r: any) => ({ item: r.item ?? '', unit: r.unit ?? '', qty: String(r.qty ?? ''), price: String(r.price ?? ''), note: r.note ?? '' }))
+    : [{ item: '', unit: '', qty: '', price: '', note: '' }])
   const [bangChu, setBangChu] = useState('')
-  const [thongTinKhac, setThongTinKhac] = useState('')
-  const [deNghi, setDeNghi] = useState('')
+  const [thongTinKhac, setThongTinKhac] = useState<string>(efd.thongTinKhac ?? '')
+  const [deNghi, setDeNghi] = useState<string>(efd.deNghi ?? '')
   const [files, setFiles] = useState<File[]>([])
-  const [driveUrl, setDriveUrl] = useState('')
+  const [driveUrl, setDriveUrl] = useState(editing?.driveUrl ?? '')
   const [recipientId, setRecipientId] = useState('')
   const [kttId, setKttId] = useState('')                 // Kế toán trưởng
   const [gdId, setGdId] = useState('')                   // Giám đốc
   const [gdCompany, setGdCompany] = useState('')         // Công ty của Giám đốc (chọn hoặc tự điền)
   const [bgdIds, setBgdIds] = useState<string[]>([])     // Ban Giám đốc KNI (chọn 1 hoặc nhiều người)
-  const [priority, setPriority] = useState('P3')
+  const [priority, setPriority] = useState<string>(efd.priority ?? 'P3')
   const approvalMode = docModeOf(priority)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
+  // Chế độ sửa: nạp lại người ký từ các bước duyệt cũ
+  useEffect(() => {
+    if (!editing) return
+    supabase.from('proposal_steps').select('*').eq('proposal_id', editing.id).order('step_order').then(({ data }) => {
+      const roles: string[] = Array.isArray(efd.signRoles) ? efd.signRoles : []
+      const bgd: string[] = []
+      ;(data ?? []).forEach((st: any, i: number) => {
+        const r = roles[i] ?? ''
+        if (r === 'Trưởng bộ phận') setRecipientId(st.approver_id)
+        else if (r === 'Kế toán trưởng') setKttId(st.approver_id)
+        else if (r.startsWith('Giám đốc công ty')) { setGdId(st.approver_id); setGdCompany(r.replace('Giám đốc công ty', '').trim()) }
+        else if (r === 'Ban Giám đốc Tập đoàn') bgd.push(st.approver_id)
+        else if (i === 0) setRecipientId(st.approver_id)
+      })
+      setBgdIds(bgd)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing?.id])
 
   const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? ''
   const rowAmount = (r: DocCostRow) => toVnd((Number(r.qty) || 0) * (Number(r.price) || 0))
@@ -8258,6 +8318,52 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
       thongTinKhac: thongTinKhac.trim(), deNghi: deNghi.trim(),
     }
 
+    if (editing) {
+      // ===== SỬA & GỬI LẠI =====
+      const diff = docDiff(editing, { title: title.trim(), company, driveUrl: driveUrl.trim(), fd: formData, newFiles: uploaded.length })
+      const { error: upErr } = await supabase.from('proposals').update({
+        title: title.trim(), brief: title.trim(),
+        description: (intro.trim() || noiDung.trim()).slice(0, 200),
+        drive_url: driveUrl.trim(), company: company || null,
+        recipient_id: recipientId, status: 'pending', rejected_reason: null,
+        participants: Array.from(new Set([currentUser.id, ...approverIds])),
+        approval_mode: approvalMode,
+        attachments: [...(editing.attachments ?? []), ...uploaded],
+        items, form_data: { ...formData, dateText: efd.dateText ?? dateText },
+      }).eq('id', editing.id)
+      if (upErr) { setSaving(false); setError(upErr.message); return }
+
+      // Làm lại các bước duyệt từ đầu (lịch sử duyệt cũ vẫn giữ trong proposal_approvals)
+      await supabase.from('proposal_steps').delete().eq('proposal_id', editing.id)
+      const { data: left } = await supabase.from('proposal_steps').select('*').eq('proposal_id', editing.id)
+      const stat = (k: number) => (k === 0 || approvalMode === 'par' ? 'pending' : 'waiting')
+      for (const [k, id] of approverIds.entries()) {
+        const ex = (left ?? []).find((x: any) => x.approver_id === id)
+        if (ex) await supabase.from('proposal_steps').update({ step_order: k + 1, status: stat(k), note: null, decided_at: null }).eq('id', ex.id)
+        else await supabase.from('proposal_steps').insert({ proposal_id: editing.id, approver_id: id, step_order: k + 1, status: stat(k) })
+      }
+      for (const x of (left ?? []).filter((x: any) => !approverIds.includes(x.approver_id))) {
+        await supabase.from('proposal_steps').update({ status: 'skipped' }).eq('id', x.id)
+      }
+
+      // Ghi lịch sử: sửa gì ghi đó
+      await supabase.from('proposal_revisions').insert({
+        proposal_id: editing.id, edited_by: currentUser.id,
+        added_note: diff.added || null,
+        edited_note: diff.edited || (diff.added ? null : 'Gửi lại, không thay đổi nội dung'),
+      })
+      for (const id of (approvalMode === 'par' ? approverIds : [recipientId])) {
+        await supabase.from('notifications').insert({
+          message: `📜 ${currentUser.name} đã chỉnh sửa và gửi lại tờ trình "${title.trim()}" cho bạn`,
+          target_user_id: id, link_proposal_id: editing.id,
+        })
+      }
+      setSaving(false)
+      onCreated?.(editing.id)
+      onClose()
+      return
+    }
+
     let data: any = null
     let insertError: any = null
     for (let i = 0; i < 3; i++) {
@@ -8304,7 +8410,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto" style={{ background: '#d1d5db' }}>
       <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
-        <span className="text-sm font-bold text-gray-800">📜 Tạo tờ trình mới (RTASK)</span>
+        <span className="text-sm font-bold text-gray-800">{editing ? `✏️ Chỉnh sửa & gửi lại tờ trình ${editing.code ?? ''}` : '📜 Tạo tờ trình mới (RTASK)'}</span>
         <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
       </div>
 
@@ -8498,14 +8604,14 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated }: { currentUs
         <button type="button" onClick={submit} disabled={saving}
           className="px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40"
           style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
-          {saving ? 'Đang gửi...' : 'Gửi tờ trình'}
+          {saving ? 'Đang gửi...' : editing ? 'Gửi lại tờ trình' : 'Gửi tờ trình'}
         </button>
       </div>
     </div>
   )
 }
-function ProposalDocView({ p, users, currentUserId, onClose, canAct, onApprove, onReject, onRequestReview }: {
-  p: Proposal; users: User[]; currentUserId: string; onClose: () => void; canAct: boolean
+function ProposalDocView({ p, users, currentUserId, onClose, canAct, onApprove, onReject, onRequestReview, onEdit }: {
+  p: Proposal; users: User[]; currentUserId: string; onClose: () => void; canAct: boolean; onEdit?: () => void
   onApprove: (note: string) => Promise<void>; onReject: (note: string) => Promise<void>; onRequestReview: (note: string) => Promise<void>
 }) {
   const f: any = p.formData ?? {}
@@ -8563,7 +8669,12 @@ function ProposalDocView({ p, users, currentUserId, onClose, canAct, onApprove, 
     <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 md:left-[var(--sidebar-w)] z-50 flex flex-col" style={{ background: '#d1d5db' }}>
       <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
         <span className="text-sm font-bold text-gray-800">📄 Tờ trình {p.code ?? ''}</span>
-        <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
+        <div className="flex items-center gap-2">
+          {onEdit && p.submittedBy === currentUserId && p.status === 'rejected' && (
+            <button type="button" onClick={onEdit} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#d97706' }}>✏️ Chỉnh sửa & gửi lại</button>
+          )}
+          <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto">
 
@@ -10528,7 +10639,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
       text: `${userOf(a.approverId)?.name ?? ''} ${a.action === 'approved' ? 'đã duyệt' : a.action === 'rejected' ? (a.note?.startsWith('[REVIEW]') ? 'yêu cầu xem xét lại' : 'đã từ chối') : 'đã chuyển tiếp'}${a.note ? `: ${a.note.replace('[REVIEW]', '').trim()}` : ''}`,
     })),
     ...revisions.filter(r => r.proposalId === p.id).map(r => ({
-      at: r.createdAt, text: `${userOf(r.editedBy)?.name ?? ''} đã gửi lại đề xuất`,
+      at: r.createdAt, text: `${userOf(r.editedBy)?.name ?? ''} đã chỉnh sửa & gửi lại${r.addedNote ? `\n➕ Bổ sung:\n${r.addedNote}` : ''}${r.editedNote ? `\n✏️ Chỉnh sửa:\n${r.editedNote}` : ''}`,
     })),
   ].sort((a, b) => a.at.localeCompare(b.at))
 
@@ -10633,7 +10744,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
               <div className="space-y-2">
                 {events.map((e, i) => (
                   <div key={i}>
-                    <p className="text-xs" style={{ color: 'var(--text-primary)' }}>{e.text}</p>
+                    <p className="text-xs whitespace-pre-line" style={{ color: 'var(--text-primary)' }}>{e.text}</p>
                     <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{fmt(e.at)}</p>
                   </div>
                 ))}
@@ -11497,6 +11608,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   const [showModal, setShowModal] = useState(false)
   const [forwardingProposal, setForwardingProposal] = useState<Proposal | null>(null)
   const [editingProposal, setEditingProposal] = useState<Proposal | null>(null)
+  const [editingDoc, setEditingDoc] = useState<Proposal | null>(null)
   const [detailProposal, setDetailProposal] = useState<Proposal | null>(null)
   const [docProposal, setDocProposal] = useState<Proposal | null>(null)
   const [createKind, setCreateKind] = useState<'dexuat' | 'totrinh' | null>(null)
@@ -11844,7 +11956,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
             </button>
           )}
           {p.submittedBy === currentUser.id && p.status === 'rejected' && (
-            <button onClick={() => setEditingProposal(p)}
+            <button onClick={() => (p.kind === 'totrinh' ? setEditingDoc(p) : setEditingProposal(p))}
               className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#f59e0b22', color: '#b45309' }}>
               ✏️ Chỉnh sửa & Gửi lại
             </button>
@@ -11990,8 +12102,11 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
           onReject: async (note: string) => { await handleReject(cur, note) },
           onRequestReview: async (note: string) => { await handleRequestReview(cur, note) },
         }
-        return cur.kind === 'dntt' ? <ProposalDnttView {...common} /> : isFormDoc(cur) ? <ProposalFormDocView {...common} /> : <ProposalDocView {...common} />
+        return cur.kind === 'dntt' ? <ProposalDnttView {...common} /> : isFormDoc(cur) ? <ProposalFormDocView {...common} /> : <ProposalDocView {...common} onEdit={cur.kind === 'totrinh' ? () => { setDocProposal(null); setEditingDoc(cur) } : undefined} />
       })()}
+      {editingDoc && (
+        <ProposalDocForm currentUser={currentUser} users={users} editing={editingDoc} onClose={() => setEditingDoc(null)} />
+      )}
       {editingProposal && (
         <ProposalModal currentUser={currentUser} users={users} editingProposal={editingProposal} onClose={() => setEditingProposal(null)} />
       )}
