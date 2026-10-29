@@ -2538,6 +2538,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   onClose: () => void; onOpenPhieu: () => void; onEdit?: () => void; onOpenInTasks?: () => void
 }) {
   const [showComplete, setShowComplete] = useState(false)
+  const canDeleteTask = !!onEdit && task.createdBy === currentUser.id
   const [showClose, setShowClose] = useState(false)
   const [showReject, setShowReject] = useState(false)
   const isAssignee = task.assignedTo.includes(currentUser.id)
@@ -2777,6 +2778,10 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
               <span className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: '#fbbf2422', color: '#d97706' }}>
                 ⏳ Chờ {users.filter(u => u.role === 'manager' && u.teamId === task.targetTeamId).map(u => u.name).join(', ') || 'quản lý phòng nhận'} duyệt
               </span>
+            )}
+            {canDeleteTask && (
+              <button type="button" className={btn} style={{ background: '#f8717122', color: '#dc2626' }}
+                onClick={async () => { if (await deleteTask(task, currentUser)) onClose() }}>🗑 Xóa task</button>
             )}
             {canDelegate && (
               <button type="button" onClick={() => setShowDelegate(true)} className={btn}
@@ -3124,6 +3129,10 @@ function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, canSen
         )}
         {showCross && <CrossDeptApproveModal task={task} currentUser={currentUser} users={users} onClose={() => setShowCross(false)} />}
         {canEdit && onEdit && <button type="button" onClick={onEdit} className="px-4 py-2 rounded-lg text-sm font-bold" style={{ background: '#f3f4f6', color: '#111827' }}>✏️ Sửa</button>}
+        {task.createdBy === currentUser.id && (
+          <button onClick={() => deleteTask(task, currentUser)} className="px-3 py-1.5 rounded-lg text-xs font-bold"
+            style={{ background: '#f8717122', color: '#dc2626' }}>🗑 Xóa</button>
+        )}
         {canSend && <button type="button" onClick={async () => { await sendSelfTask(task, currentUser, users); onClose() }} className="px-5 py-2 rounded-lg text-sm font-bold text-white" style={{ background: '#0ea5e9' }}>📤 Gửi task cho quản lý</button>}
         {canApprove ? (
           <>
@@ -4213,6 +4222,24 @@ async function rejectPendingTask(task: Task, currentUser: User) {
       target_user_id: task.pendingRequestedBy, link_task_id: task.id,
     })
   }
+}
+
+// Xóa task do chính mình tạo (không cần ai duyệt)
+async function deleteTask(task: Task, me: User): Promise<boolean> {
+  if (task.createdBy !== me.id) return false
+  const label = task.taskCode ? `${task.taskCode} · ${task.title}` : task.title
+  if (!window.confirm(`Xóa task "${label}"?\nXóa rồi không khôi phục được.`)) return false
+  const notify = Array.from(new Set([...task.assignedTo, ...task.supporters, ...task.projectManager])).filter(id => id && id !== me.id)
+  if (notify.length > 0) {
+    await supabase.from('notifications').insert(notify.map(id => ({ message: `🗑 ${me.name} đã xóa task [${label}]`, target_user_id: id })))
+  }
+  for (const tbl of ['task_work_notes', 'task_comments', 'task_edit_logs']) {
+    await supabase.from(tbl).delete().eq('task_id', task.id)
+  }
+  await supabase.from('notifications').delete().eq('link_task_id', task.id)
+  const { error } = await supabase.from('tasks').delete().eq('id', task.id)
+  if (error) { alert('Không xóa được task: ' + error.message); return false }
+  return true
 }
 async function resumeTask(task: Task, me?: User) {
   const updates: Record<string, any> = { work_status: 'processing', pending_reason: null, pending_requested_by: null, pending_requested_at: null }
