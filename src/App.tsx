@@ -2641,7 +2641,11 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   const isBeforeStart = !!task.startDate && task.startDate > new Date().toISOString().split('T')[0]
   const canStart = isAssignee && task.status === 'open' && !task.crossDeptPending && !task.crossDeptRejected && !isTaskGated(task) && !isBeforeStart
   const canPending = isAssignee && task.status === 'in-progress' && task.workStatus === 'processing' && !task.pendingRequestedAt && !task.isLocked && !isTaskGated(task)
-  const canResume = isAssignee && task.status === 'in-progress' && task.workStatus === 'pending' && !task.pendingRequestedAt && !task.isLocked && !isTaskGated(task)
+  // Người được giao, hoặc quản lý liên quan (BOD, người giao task, PM, quản lý phòng của người làm) đều được bấm Tiếp tục
+  const isMgrOfTask = currentUser.role === 'manager' && (
+    !!currentUser.isDirector || task.createdBy === currentUser.id || task.projectManager.includes(currentUser.id) ||
+    users.some(u => task.assignedTo.includes(u.id) && u.teamId === currentUser.teamId))
+  const canResume = (isAssignee || isMgrOfTask) && task.status === 'in-progress' && task.workStatus === 'pending' && !task.pendingRequestedAt && !task.isLocked && !isTaskGated(task)
   const canDecide = canDecidePending(task, currentUser, users)
   const startTask = async () => {
     const now = new Date().toISOString()
@@ -4321,7 +4325,15 @@ async function resumeTask(task: Task, me?: User) {
   if (me) Object.assign(updates, withPendLog(task, { kind: 'resume', by: me.id, at: new Date().toISOString() }))
   if (!task.processingStartedAt) updates.processing_started_at = new Date().toISOString()
   const { error } = await supabase.from('tasks').update(updates).eq('id', task.id)
-  if (error) alert('Không tiếp tục được task: ' + error.message)
+  if (error) { alert('Không tiếp tục được task: ' + error.message); return }
+  if (me) {
+    for (const uid of task.assignedTo.filter(id => id !== me.id)) {
+      await supabase.from('notifications').insert({
+        message: `▶️ ${me.name} đã mở lại task "${task.title}", bạn có thể tiếp tục làm.`,
+        target_user_id: uid, link_task_id: task.id,
+      })
+    }
+  }
 }
 
 // Quyền sửa: task BOD giao thì chỉ BOD được sửa
