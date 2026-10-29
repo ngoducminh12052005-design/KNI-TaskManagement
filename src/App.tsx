@@ -906,7 +906,34 @@ function getSlaDoneLateSeconds(task: Task): number {
   if (!deadline || !task.submittedAt) return 0
   return Math.max(0, Math.floor((new Date(task.submittedAt).getTime() - deadline.getTime()) / 1000))
 }
-// Tổng thời gian đã "Đang xử lý" (cộng dồn qua các lần tạm dừng/tiếp tục), tính bằng giây
+// Ai chịu trách nhiệm khi trễ SLA: người duyệt chậm (task chờ/duyệt sau hạn), hoặc người duyệt đầu tiên nếu task đã chuyển phòng ban
+type SlaBlame = { kind: 'assignee' | 'approver' | 'first-approver'; ids: string[] }
+function slaBlameOf(t: Task, users: User[]): SlaBlame {
+  const meta = taskMeta(t)
+  if (Array.isArray(meta.transfers) && meta.transfers.length > 0) {
+    return { kind: 'first-approver', ids: [chainOf(t)[0]].filter(Boolean) as string[] }
+  }
+  const dl = getSlaDeadline(t)
+  const waitingCross = !!t.crossDeptPending
+  const waitingSelf = t.creationApproval === 'pending'
+  const approvedAt: string | undefined = meta.crossApprovedAt ?? (t.selfCreated ? t.creationApprovedAt : undefined)
+  const approvedLate = !!dl && !!approvedAt && new Date(approvedAt) > dl
+  const waitedLate = !!dl && (waitingCross || waitingSelf) && new Date() > dl
+  if (waitedLate || approvedLate) {
+    const ids = waitingCross
+      ? users.filter(u => u.role === 'manager' && u.teamId === t.targetTeamId).map(u => u.id)
+      : waitingSelf
+        ? getTaskApproverIds(t.createdBy, t.projectManager, users)
+        : ([meta.crossApprovedBy ?? t.creationApprovedBy].filter(Boolean) as string[])
+    return { kind: 'approver', ids }
+  }
+  return { kind: 'assignee', ids: t.assignedTo }
+}
+// Lý do chưa tính giờ (chỉ còn khi giao chéo chờ duyệt, nhân viên chưa gửi, hoặc chưa có người nhận)
+const slaIdleText = (t: Task) =>
+  t.crossDeptPending ? 'Chờ quản lý phòng ban nhận duyệt'
+  : t.creationApproval === 'draft' ? 'Chưa gửi quản lý'
+  : 'Chưa giao người thực hiện'
 function getElapsedProcessingSeconds(task: Task): number {
   const base = task.totalProcessingSeconds ?? 0
   if (task.workStatus === 'processing' && task.processingStartedAt) {
@@ -2339,7 +2366,8 @@ function CrossDeptApproveModal({ task, currentUser, users, onClose }: { task: Ta
     setError(''); setSaving(true)
     const { error: upErr } = await supabase.from('tasks').update({
       cross_dept_pending: false, assigned_to: assignedTo,
-      sla_start_at: task.slaLevel ? new Date(Math.max(Date.now(), task.startDate ? new Date(`${task.startDate}T00:00:00`).getTime() : 0)).toISOString() : null,   // được duyệt xong mới tính giờ SLA
+      // BOD giao: giữ mốc lúc BOD giao (quản lý duyệt chậm thì trễ là của quản lý). Giao chéo thường: tính từ lúc được duyệt
+      sla_start_at: task.slaLevel ? (task.slaStartAt ?? new Date(Math.max(Date.now(), task.startDate ? new Date(`${task.startDate}T00:00:00`).getTime() : 0)).toISOString()) : null,
       form_data: { ...(task.formData ?? {}), _meta: { ...taskMeta(task), crossApprovedBy: currentUser.id, crossApprovedAt: new Date().toISOString(), transfer: null,
         chain: chainOf(task).includes(currentUser.id) ? chainOf(task) : [...chainOf(task), currentUser.id] } },
     }).eq('id', task.id)
@@ -2883,7 +2911,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
               {info('Ngày bắt đầu', fmtD(task.startDate))}
               {info('Hạn hoàn thành', fmtD(task.dueDate))}
               {info('Mức độ SLA', task.slaLevel ? SLA_LEVELS[task.slaLevel].label : 'Không áp dụng SLA')}
-              {task.slaLevel && info('Hạn SLA', getSlaDeadline(task) ? fmtClockVN(getSlaDeadline(task)!.toISOString()) : 'Chưa tính giờ (chờ giao / duyệt)')}
+              {task.slaLevel && info('Hạn SLA', getSlaDeadline(task) ? fmtClockVN(getSlaDeadline(task)!.toISOString()) : slaIdleText(task))}
               {info('EXP thưởng', `+${task.expReward}`)}
             </section>
 
@@ -4379,6 +4407,7 @@ async function sendSelfTask(task: Task, sender: User, users: User[]) {
   if (approverIds.length === 0) { alert('Chưa có quản lý nào để nhận task này. Hãy chọn người quản lý (PM) trong phần Sửa.'); return }
   const { error } = await supabase.from('tasks').update({
     creation_approval: 'pending', creation_rejected_reason: null,
+    sla_start_at: task.slaLevel ? (task.slaStartAt ?? new Date().toISOString()) : null,   // gửi quản lý là bắt đầu tính, duyệt chậm thì lỗi của quản lý
   }).eq('id', task.id).eq('creation_approval', 'draft')
   if (error) { alert('Không gửi được task: ' + error.message); return }
   for (const id of approverIds) {
@@ -4472,7 +4501,7 @@ const fmtClock = (sec: number) => {
 }
 
 // Ô đếm giờ SLA trong Tracker (tự chạy từng giây, chỉ khi task còn đang tính giờ)
-function SlaCell({ task, compact = false }: { task: Task; compact?: boolean }) {
+function SlaCell({ task, compact = false, users = [] }: { task: Task; compact?: boolean; users?: User[] }) {
   const [, setTick] = useState(0)
   const done = task.status === 'completed' || task.workStatus === 'complete'
   const deadline = getSlaDeadline(task)
@@ -4491,7 +4520,7 @@ function SlaCell({ task, compact = false }: { task: Task; compact?: boolean }) {
     const lv = SLA_LEVELS[task.slaLevel]
     if (task.isLocked) { text = '🔒 Đã khoá — quá hạn SLA'; color = '#dc2626'; bg = '#dc262618' }
     else if (done) { text = '✅ Đã hoàn tất'; color = '#059669' }
-    else if (!deadline) { text = `Chưa tính giờ (chờ giao / duyệt) · SLA ${lv.label}` }
+    else if (!deadline) { text = `${slaIdleText(task)} · SLA ${lv.label}` }
     else {
       const remain = Math.floor((deadline.getTime() - Date.now()) / 1000)
       if (remain < 0) { text = `⚠️ Quá hạn ${fmtClock(-remain)}`; color = '#dc2626'; bg = '#dc262618' }
@@ -4509,6 +4538,12 @@ function SlaCell({ task, compact = false }: { task: Task; compact?: boolean }) {
   if (task.slaLevel && done) {
     const doneLate = getSlaDoneLateSeconds(task)
     if (doneLate > 0) sub += `${sub ? ' · ' : ''}hoàn tất trễ ${formatLate(doneLate)}`
+  }
+  if (task.slaLevel && (isSlaOverdue(task) || getSlaStartLateSeconds(task) > 0 || getSlaDoneLateSeconds(task) > 0)) {
+    const b = slaBlameOf(task, users)
+    if (b.kind !== 'assignee' && b.ids.length > 0) {
+      sub += `${sub ? ' · ' : ''}Trễ do ${b.kind === 'first-approver' ? 'người duyệt đầu tiên' : 'người duyệt'}: ${b.ids.map(id => users.find(u => u.id === id)?.name ?? '—').join(', ')}`
+    }
   }
   const showElapsed = task.workStatus === 'processing' || task.workStatus === 'pending' || task.workStatus === 'complete' || done
 
@@ -4689,7 +4724,7 @@ function TaskTracker({ tasks: rawTasks, users, currentUser }: { tasks: Task[]; u
                   </td>
                   <td className={`${td} text-center`} style={cellBorder}>{fmtDate(t.startDate)}</td>
                   <td className={`${td} text-center`} style={cellBorder}>{fmtDate(t.dueDate)}</td>
-                  <td className={td} style={cellBorder}><SlaCell task={t} /></td>
+                  <td className={td} style={cellBorder}><SlaCell task={t} users={users} /></td>
                   <td className={td} style={cellBorder}>
                     {days.length === 0 && <p className="mb-1.5" style={{ color: 'var(--text-muted)' }}>Chưa có cập nhật.</p>}
                     {days.map(([day, list]) => (
@@ -5358,7 +5393,7 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
                 ))}
                 {pics.length > 2 && <span style={{ color: 'var(--text-muted)' }}>+{pics.length - 2}</span>}
               </div>
-              <div className="mt-1.5 text-xs"><SlaCell task={t} compact /></div>
+              <div className="mt-1.5 text-xs"><SlaCell task={t} compact users={users} /></div>
               <div className="mt-2">
                 <button type="button" onClick={e => { e.stopPropagation(); setUpdateTask(t) }}
                   className="relative px-2.5 py-1.5 rounded-lg text-[11px] font-bold"
@@ -5426,7 +5461,7 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
                   <span className="text-[11px] font-bold" style={{ color: pri.color }}>{pri.label}</span>
                 </td>
                 <td className={td}>
-                  <SlaCell task={t} compact />
+                  <SlaCell task={t} compact users={users} />
                 </td>
                 <td className={td}>
                   {pics.length === 0 && '—'}
@@ -5865,7 +5900,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         sla_level: form.slaLevel || null,
         // Quản lý / BOD giao task có SLA: đồng hồ SLA chạy ngay từ lúc giao (nếu có ngày bắt đầu ở tương lai thì tính từ ngày đó).
         // Task chờ quản lý phòng khác duyệt thì tính giờ sau khi được duyệt.
-        sla_start_at: (form.slaLevel && !creatingForSelf && !isCrossDept && finalAssigned.length > 0)
+        sla_start_at: (form.slaLevel && !creatingForSelf && (!isCrossDept || asBod) && finalAssigned.length > 0)
           ? new Date(Math.max(Date.now(), form.startDate ? new Date(`${form.startDate}T00:00:00`).getTime() : 0)).toISOString() : null,
         form_data: withMeta(cleanTaskDoc(form.doc), {
           ...((currentUser.isBodAssistant && !currentUser.isDirector && form.fromBod && !creatingForSelf) ? { fromBod: true } : {}),
