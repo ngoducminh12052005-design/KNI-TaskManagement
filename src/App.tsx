@@ -2557,6 +2557,9 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   // Nhân viên được giao: bấm "Bắt đầu" ngay trong chi tiết, bắt đầu rồi mới có nút Complete
   const isBeforeStart = !!task.startDate && task.startDate > new Date().toISOString().split('T')[0]
   const canStart = isAssignee && task.status === 'open' && !task.crossDeptPending && !task.crossDeptRejected && !isTaskGated(task) && !isBeforeStart
+  const canPending = isAssignee && task.status === 'in-progress' && task.workStatus === 'processing' && !task.pendingRequestedAt && !task.isLocked && !isTaskGated(task)
+  const canResume = isAssignee && task.status === 'in-progress' && task.workStatus === 'pending' && !task.pendingRequestedAt && !task.isLocked && !isTaskGated(task)
+  const canDecide = canDecidePending(task, currentUser, users)
   const startTask = async () => {
     const now = new Date().toISOString()
     const { error } = await supabase.from('tasks').update({
@@ -2734,6 +2737,23 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
             )}
             {canStart && (
               <button type="button" onClick={startTask} className={`${btn} text-white`} style={{ background: '#2563eb' }}>▶️ Bắt đầu</button>
+            )}
+            {canPending && (
+              <button type="button" onClick={() => requestPendingTask(task, currentUser, users)} className={btn}
+                style={{ background: '#d9770622', border: '1px solid #d9770666', color: '#b45309' }}>⏸ Pending</button>
+            )}
+            {canResume && (
+              <button type="button" onClick={() => resumeTask(task)} className={`${btn} text-white`} style={{ background: '#2563eb' }}>▶️ Tiếp tục</button>
+            )}
+            {!!task.pendingRequestedAt && !canDecide && (
+              <span className="text-xs font-semibold px-2 py-1 rounded-lg" style={{ background: '#d9770622', color: '#b45309' }}>⏳ Chờ duyệt tạm dừng</span>
+            )}
+            {canDecide && (
+              <>
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Xin tạm dừng: {task.pendingReason}</span>
+                <button type="button" onClick={() => rejectPendingTask(task, currentUser)} className={btn} style={{ background: '#f8717122', color: '#dc2626' }}>✕ Từ chối tạm dừng</button>
+                <button type="button" onClick={() => approvePendingTask(task, currentUser)} className={`${btn} text-white`} style={{ background: '#059669' }}>✓ Duyệt tạm dừng</button>
+              </>
             )}
             {isAssignee && task.status === 'open' && isBeforeStart && !isTaskGated(task) && (
               <span className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
@@ -4110,6 +4130,79 @@ const actsAsBod = (u: User, fromBod?: boolean) => !!u.isDirector || (!!u.isBodAs
 const isBodTaskForManager = (t: Task, users: User[]) =>
   isBodAssigned(t, users) && t.assignedTo.length > 0 &&
   t.assignedTo.every(id => users.find(u => u.id === id)?.role === 'manager')
+
+// ===== Tạm dừng (Pending): ai được duyệt =====
+// Nhân viên xin  -> quản lý duyệt. Task giao chéo phòng ban: trưởng bộ phận của phòng ban GIAO duyệt.
+// Quản lý xin    -> BOD duyệt, hoặc trợ lý BOD (quyền BOD) nếu chính trợ lý đó giao task.
+const pendingApproverIds = (t: Task, users: User[], requesterId?: string): string[] => {
+  const req = users.find(u => u.id === (requesterId ?? t.pendingRequestedBy))
+  if (!req) return []
+  const creator = users.find(u => u.id === t.createdBy)
+  let ids: string[] = []
+  if (req.role === 'manager') {
+    ids = users.filter(u => u.isDirector).map(u => u.id)
+    if (creator?.isBodAssistant && isBodAssigned(t, users)) ids.push(creator.id)
+  } else {
+    const cross = !!t.targetTeamId || (!!creator && !isBodSide(creator) && creator.teamId !== req.teamId)
+    const teamId = cross && creator ? creator.teamId : req.teamId
+    ids = users.filter(u => u.role === 'manager' && !u.isDirector && u.teamId === teamId).map(u => u.id)
+    if (cross && creator?.role === 'manager' && !ids.includes(creator.id)) ids.push(creator.id)
+  }
+  ids = ids.filter((id, i) => ids.indexOf(id) === i && id !== req.id)
+  if (ids.length === 0) ids = users.filter(u => u.isDirector && u.id !== req.id).map(u => u.id) // không có ai thì chuyển lên BOD
+  return ids
+}
+const canDecidePending = (t: Task, u: User, users: User[]) => !!t.pendingRequestedAt && pendingApproverIds(t, users).includes(u.id)
+
+async function requestPendingTask(task: Task, currentUser: User, users: User[]) {
+  if (task.pendingRequestedAt) return
+  const reason = (window.prompt('Lý do xin tạm dừng (Pending) task này:') ?? '').trim()
+  if (!reason) return
+  const approvers = pendingApproverIds(task, users, currentUser.id)
+  const { error } = await supabase.from('tasks').update({
+    pending_reason: reason, pending_requested_by: currentUser.id, pending_requested_at: new Date().toISOString(),
+  }).eq('id', task.id)
+  if (error) { alert('Không gửi được yêu cầu tạm dừng: ' + error.message); return }
+  if (approvers.length > 0) {
+    await supabase.from('notifications').insert(approvers.map(id => ({
+      message: `⏸ ${currentUser.name} xin tạm dừng task "${task.title}": ${reason}`,
+      target_user_id: id, link_task_id: task.id,
+    })))
+  }
+}
+async function approvePendingTask(task: Task, currentUser: User) {
+  const updates: Record<string, any> = { work_status: 'pending', pending_requested_by: null, pending_requested_at: null, pending_reason: null }
+  if (task.processingStartedAt) {
+    const elapsed = Math.floor((Date.now() - new Date(task.processingStartedAt).getTime()) / 1000)
+    updates.total_processing_seconds = (task.totalProcessingSeconds ?? 0) + elapsed
+    updates.processing_started_at = null
+  }
+  const { error } = await supabase.from('tasks').update(updates).eq('id', task.id)
+  if (error) { alert('Không duyệt được yêu cầu tạm dừng: ' + error.message); return }
+  if (task.pendingRequestedBy && task.pendingRequestedBy !== currentUser.id) {
+    await supabase.from('notifications').insert({
+      message: `✅ ${currentUser.name} đã duyệt yêu cầu tạm dừng task "${task.title}"`,
+      target_user_id: task.pendingRequestedBy, link_task_id: task.id,
+    })
+  }
+}
+async function rejectPendingTask(task: Task, currentUser: User) {
+  const reason = (window.prompt('Lý do từ chối yêu cầu tạm dừng (không bắt buộc):') ?? '').trim()
+  const { error } = await supabase.from('tasks').update({ pending_reason: null, pending_requested_by: null, pending_requested_at: null }).eq('id', task.id)
+  if (error) { alert('Không từ chối được yêu cầu: ' + error.message); return }
+  if (task.pendingRequestedBy && task.pendingRequestedBy !== currentUser.id) {
+    await supabase.from('notifications').insert({
+      message: `❌ ${currentUser.name} đã từ chối yêu cầu tạm dừng task "${task.title}"${reason ? `: ${reason}` : ''}`,
+      target_user_id: task.pendingRequestedBy, link_task_id: task.id,
+    })
+  }
+}
+async function resumeTask(task: Task) {
+  const updates: Record<string, any> = { work_status: 'processing', pending_reason: null, pending_requested_by: null, pending_requested_at: null }
+  if (!task.processingStartedAt) updates.processing_started_at = new Date().toISOString()
+  const { error } = await supabase.from('tasks').update(updates).eq('id', task.id)
+  if (error) alert('Không tiếp tục được task: ' + error.message)
+}
 
 // Quyền sửa: task BOD giao thì chỉ BOD được sửa
 const canEditTask = (t: Task, user: User, users: User[]) => {
@@ -5531,45 +5624,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
   const updateWorkStatus = async (task: Task, newStatus: string) => {
     if (isTaskGated(task)) { alert('Task này chưa được quản lý duyệt nên chưa thể đổi trạng thái.'); return }
     // Xin tạm dừng: phải nhập lý do, và chỉ thực sự chuyển sang "pending" sau khi quản lý duyệt
-    if (newStatus === 'pending') {
-      if (task.pendingRequestedAt) return // đang chờ duyệt rồi, không gửi lại
-      const reason = window.prompt('Lý do xin tạm dừng task này (quản lý sẽ duyệt trước khi chính thức tạm dừng):') ?? ''
-      if (!reason.trim()) return
-      // Task BOD giao cho quản lý: tự tạm dừng, không cần ai duyệt
-      if (isBodTaskForManager(task, users) && task.assignedTo.includes(currentUser.id)) {
-        const updates: Record<string, any> = { work_status: 'pending' }
-        if (task.processingStartedAt) {
-          const elapsed = Math.floor((Date.now() - new Date(task.processingStartedAt).getTime()) / 1000)
-          updates.total_processing_seconds = (task.totalProcessingSeconds ?? 0) + elapsed
-          updates.processing_started_at = null
-        }
-        const { error: pErr } = await supabase.from('tasks').update(updates).eq('id', task.id)
-        if (pErr) { alert('Không đổi được trạng thái: ' + pErr.message); return }
-        if (task.createdBy !== currentUser.id) {
-          await supabase.from('notifications').insert({
-            message: `⏸ ${currentUser.name} tạm dừng task "${task.title}": ${reason.trim()}`,
-            target_user_id: task.createdBy, link_task_id: task.id,
-          })
-        }
-        return
-      }
-      const { error } = await supabase.from('tasks').update({
-        pending_reason: reason.trim(),
-        pending_requested_by: currentUser.id,
-        pending_requested_at: new Date().toISOString(),
-      }).eq('id', task.id)
-      if (error) { alert('Không gửi được yêu cầu tạm dừng: ' + error.message); return }
-
-      const managers = users.filter(u => u.role === 'manager' && (u.teamId === currentUser.teamId || u.isDirector))
-      for (const mgr of managers) {
-        await supabase.from('notifications').insert({
-          message: `⏸ ${currentUser.name} xin tạm dừng task "${task.title}": ${reason.trim()}`,
-          target_user_id: mgr.id,
-          link_task_id: task.id,
-        })
-      }
-      return
-    }
+    if (newStatus === 'pending') { await requestPendingTask(task, currentUser, users); return }
 
     // Chuyển sang / tiếp tục "Đang xử lý": bắt đầu tính giờ nếu chưa chạy, cộng dồn tiếp nếu đang resume từ tạm dừng
     if (newStatus === 'processing') {
@@ -6059,7 +6114,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                 <div className="mb-3 p-2.5 rounded-lg" style={{ background: '#d9770622', border: '1px solid #d9770640' }}>
                   <p className="text-xs font-semibold" style={{ color: '#d97706' }}>⏳ Đang chờ duyệt yêu cầu tạm dừng</p>
                   <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>Lý do: {task.pendingReason}</p>
-                  {currentUser.role === 'manager' && (
+                  {canDecidePending(task, currentUser, users) && (
                     <div className="flex gap-1.5 mt-2">
                       <button onClick={() => handleRejectPending(task)}
                         className="px-2.5 py-1 rounded-lg text-xs font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>
