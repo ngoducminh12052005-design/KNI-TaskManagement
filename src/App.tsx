@@ -94,7 +94,7 @@ interface Task {
   projectId?: string
   formData?: Record<string, any>
   createdAt?: string
-  slaLevel?: 'P1' | 'P2' | 'P3' | 'P4'
+  slaLevel?: 'P1' | 'P2' | 'P3' | 'P4' | 'P5'
   slaStartAt?: string   // mốc bắt đầu tính SLA (lúc được giao / được duyệt), không cần chờ bấm Bắt đầu
   workStatus?: 'received' | 'processing' | 'pending' | 'complete'
   startedAt?: string
@@ -785,6 +785,7 @@ const SLA_LEVELS: Record<string, { label: string; hours: number; color: string }
   P2: { label: 'P2 · 4 giờ', hours: 4, color: '#d97706' },
   P3: { label: 'P3 · 1 ngày', hours: 24, color: '#2563eb' },
   P4: { label: 'P4 · 3 ngày', hours: 72, color: '#059669' },
+  P5: { label: 'P5 · 1 tuần', hours: 168, color: '#64748b' },
 }
 
 const WORK_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
@@ -974,7 +975,16 @@ function suggestExp(priority: TaskPriority, startDate: string, dueDate: string, 
 
   return Math.round(range.min + (range.max - range.min) * ratio)
 }
-// % của EXP gốc mà mỗi người "Hỗ trợ" nhận được khi task hoàn thành (Phụ trách/PM luôn nhận đủ 100%)
+// EXP theo mức SLA: P1,P2 → 150–300 · P3 → 60–150 · P4,P5 → 20–60 (là mặc định, vẫn chỉnh tay được)
+const SLA_EXP: Record<string, { min: number; max: number; suggested: number }> = {
+  P1: { min: 150, max: 300, suggested: 250 },
+  P2: { min: 150, max: 300, suggested: 200 },
+  P3: { min: 60, max: 150, suggested: 100 },
+  P4: { min: 20, max: 60, suggested: 40 },
+  P5: { min: 20, max: 60, suggested: 30 },
+}
+const SLA_EXP_NONE = { min: 60, max: 150, suggested: 80 }   // task không áp dụng SLA
+const slaExpRange = (sla?: string) => (sla && SLA_EXP[sla]) || SLA_EXP_NONE
 const SUPPORTER_EXP_PERCENT = 0.3
 const STATUS_CONFIG = {
   open: { label: 'Chưa bắt đầu', color: '#6b7280' },
@@ -1946,7 +1956,7 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
   const doc: TaskDocData = form.doc
   const setDoc = (patch: Partial<TaskDocData>) => setForm((f: any) => ({ ...f, doc: { ...f.doc, ...patch } }))
   const assigning = isManager && !selfMode
-  const range = getExpRange(form.priority, form.important, form.urgent)
+  const range = slaExpRange(form.slaLevel)
   const expBad = form.expReward < range.min || form.expReward > range.max
   const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? ''
 
@@ -1982,7 +1992,7 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
   const patchForm = (patch: any, recalc?: { priority?: TaskPriority; important?: boolean; urgent?: boolean; startDate?: string; dueDate?: string }) =>
     setForm((f: any) => {
       const next = { ...f, ...patch }
-      return recalc ? { ...next, expReward: suggestExp(next.priority, next.startDate, next.dueDate, next.important, next.urgent) } : next
+      return next
     })
 
   const renderList = (list: string[], set: (v: string[]) => void, bullet: string, placeholder: string) => (
@@ -2174,11 +2184,12 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
               <td className={`${td} font-bold bg-gray-50`} style={{ width: '22%' }}>Hạn hoàn thành</td>
               <td className={td}><input type="date" value={form.dueDate} min={form.startDate || undefined} onChange={e => patchForm({ dueDate: e.target.value }, { dueDate: e.target.value })} className={cell} style={ink} /></td>
             </tr>
-            <tr>
-              <td className={`${td} font-bold bg-gray-50`}>Ưu tiên</td>
+                        <tr>
+              <td className={`${td} font-bold bg-gray-50`}>Mức độ SLA</td>
               <td className={td}>
-                <select value={form.priority} onChange={e => patchForm({ priority: e.target.value }, { priority: e.target.value as TaskPriority })} className={sel} style={ink}>
-                  <option value="low">Thấp</option><option value="medium">Trung bình</option><option value="high">Cao</option>
+                <select value={form.slaLevel} onChange={e => { const v = e.target.value; patchForm(editingTask ? { slaLevel: v } : { slaLevel: v, expReward: slaExpRange(v).suggested }) }} className={sel} style={ink}>
+                  <option value="">-- Không áp dụng SLA --</option>
+                  {Object.entries(SLA_LEVELS).map(([key, cfg]) => <option key={key} value={key}>{cfg.label}</option>)}
                 </select>
               </td>
               <td className={`${td} font-bold bg-gray-50`}>Danh mục</td>
@@ -2190,36 +2201,15 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
               </td>
             </tr>
             <tr>
-              <td className={`${td} font-bold bg-gray-50`}>Mức độ quan trọng</td>
-              <td className={td}>
-                <select value={form.important ? '1' : '0'} onChange={e => patchForm({ important: e.target.value === '1' }, { important: e.target.value === '1' })} className={sel} style={ink}>
-                  <option value="0">Không quan trọng</option><option value="1">Quan trọng</option>
-                </select>
-              </td>
-              <td className={`${td} font-bold bg-gray-50`}>Mức độ gấp</td>
-              <td className={td}>
-                <select value={form.urgent ? '1' : '0'} onChange={e => patchForm({ urgent: e.target.value === '1' }, { urgent: e.target.value === '1' })} className={sel} style={ink}>
-                  <option value="0">Không gấp</option><option value="1">Gấp</option>
-                </select>
-              </td>
-            </tr>
-            <tr>
-              <td className={`${td} font-bold bg-gray-50`}>Mức độ SLA</td>
-              <td className={td}>
-                <select value={form.slaLevel} onChange={e => patchForm({ slaLevel: e.target.value })} className={sel} style={ink}>
-                  <option value="">-- Không áp dụng SLA --</option>
-                  {Object.entries(SLA_LEVELS).map(([key, cfg]) => <option key={key} value={key}>{cfg.label}</option>)}
-                </select>
-              </td>
               <td className={`${td} font-bold bg-gray-50`}>EXP thưởng</td>
-              <td className={td}>
+              <td className={td} colSpan={3}>
                 <input type="number" value={form.expReward} onChange={e => patchForm({ expReward: parseInt(e.target.value) || 0 })}
                   className={cell} style={{ color: expBad ? '#dc2626' : '#b45309', fontWeight: 700 }} />
               </td>
             </tr>
           </tbody>
         </table>
-        <p className="text-[11px] mb-1" style={{ color: expBad ? '#dc2626' : '#6b7280' }}>💡 EXP gợi ý theo độ khó + Quan trọng/Gấp: {range.min}–{range.max}. Đồng hồ SLA tính từ lúc nhân viên bấm "Bắt đầu".</p>
+        <p className="text-[11px] mb-1" style={{ color: expBad ? '#dc2626' : '#6b7280' }}>💡 EXP gợi ý theo mức SLA ({form.slaLevel || 'chưa chọn'}): {range.min}–{range.max}, vẫn chỉnh tay được. Đồng hồ SLA tính từ lúc giao task.</p>
         {assigning && (
           <div className="space-y-1 mb-4 text-xs">
             <label className="flex items-center gap-2 cursor-pointer">
@@ -3180,8 +3170,7 @@ function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, canSen
           <table className="w-full border-collapse mb-4">
             <tbody>
               <tr><td className={lab} style={{ width: '22%' }}>Ngày bắt đầu</td><td className={td}>{fmtD(task.startDate)}</td><td className={lab} style={{ width: '22%' }}>Hạn hoàn thành</td><td className={td}>{fmtD(task.dueDate)}</td></tr>
-              <tr><td className={lab}>Ưu tiên</td><td className={td}>{pri.label}</td><td className={lab}>Danh mục</td><td className={td}>{taskCategoryLabel(task.category)}</td></tr>
-              <tr><td className={lab}>Mức độ quan trọng</td><td className={td}>{task.important ? 'Quan trọng' : 'Bình thường'}</td><td className={lab}>Mức độ gấp</td><td className={td}>{task.urgent ? 'Gấp' : 'Không gấp'}</td></tr>
+              <tr><td className={lab}>Danh mục</td><td className={td} colSpan={3}>{taskCategoryLabel(task.category)}</td></tr>
               <tr><td className={lab}>Mức độ SLA</td><td className={td}>{task.slaLevel ? SLA_LEVELS[task.slaLevel].label : 'Không áp dụng SLA'}</td><td className={lab}>EXP thưởng</td><td className={td}>+{task.expReward}</td></tr>
               <tr><td className={lab}>Trạng thái</td><td className={td} colSpan={3}>{statusText}</td></tr>
             </tbody>
@@ -4491,7 +4480,7 @@ const TRACKER_STATUS: Record<string, [string, string, string]> = {
   complete: ['Complete', '#34d39922', '#059669'],
   closed: ['Closed', '#64748b22', '#64748b'],
 }
-const TRACKER_PRIORITY: Record<string, string> = { P1: '#dc2626', P2: '#ea580c', P3: '#ca8a04', P4: '#16a34a' }
+const TRACKER_PRIORITY: Record<string, string> = { P1: '#dc2626', P2: '#ea580c', P3: '#ca8a04', P4: '#16a34a', P5: '#64748b' }
 
 const fmtClock = (sec: number) => {
   const s = Math.max(0, Math.floor(sec))
@@ -5386,7 +5375,7 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
                 <span className="px-2 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap shrink-0" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
               </div>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs">
-                <span className="font-bold" style={{ color: pri.color }}>{pri.label}</span>
+                <span className="font-bold" style={{ color: t.slaLevel ? TRACKER_PRIORITY[t.slaLevel] : 'var(--text-muted)' }}>{t.slaLevel ?? 'Không SLA'}</span>
                 <span style={{ color: 'var(--text-muted)' }}>{fmtShort(t.startDate)} → {fmtShort(t.dueDate)}</span>
                 {pics.slice(0, 2).map(u => (
                   <span key={u.id} className="flex items-center gap-1"><CharAvatar user={u} size={18} />{u.name}</span>
@@ -5458,7 +5447,7 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
                   <span className="px-2 py-1 rounded-lg font-semibold whitespace-nowrap" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
                 </td>
                 <td className={td}>
-                  <span className="text-[11px] font-bold" style={{ color: pri.color }}>{pri.label}</span>
+                  <span className="text-[11px] font-bold" style={{ color: t.slaLevel ? TRACKER_PRIORITY[t.slaLevel] : 'var(--text-muted)' }}>{t.slaLevel ?? '—'}</span>
                 </td>
                 <td className={td}>
                   <SlaCell task={t} compact users={users} />
@@ -5620,7 +5609,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     important: false, urgent: false, isTeamProject: false,
     assignedTo: [] as string[], projectManager: [] as string[], supporters: [] as string[],
     driveFolderCreated: false, driveFolderName: '',
-    slaLevel: '' as '' | 'P1' | 'P2' | 'P3' | 'P4',
+    slaLevel: '' as '' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5',
     fromBod: false,
     company: '',
     doc: emptyTaskDoc(),
@@ -5820,11 +5809,9 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
     const prefixOnly = form.company && COMPANY_CODES[form.company] ? `${COMPANY_CODES[form.company]}-` : ''
     if (!form.title.trim() || form.title.trim() === prefixOnly) return
     const finalTitle = withCompanyPrefix(form.title, form.company, editingTask?.company)
-    const { min, max } = getExpRange(form.priority, form.important, form.urgent)
-    if (form.expReward < min || form.expReward > max) {
-      alert(`Điểm EXP phải nằm trong khoảng ${min}–${max} cho mức độ "${PRIORITY_CONFIG[form.priority].label}" với lựa chọn Quan trọng/Gấp hiện tại`)
-      return
-    }
+    const { min, max } = slaExpRange(form.slaLevel)
+    if ((form.expReward < min || form.expReward > max)
+      && !window.confirm(`EXP ${form.expReward} nằm ngoài khung gợi ý ${min}–${max} của ${form.slaLevel || 'task không áp dụng SLA'}. Vẫn lưu?`)) return
 
     if (editingTask) {
       const resubmit = false   // sửa xong vẫn ở New; bấm 'Gửi task cho quản lý' mới gửi
@@ -6153,7 +6140,6 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
 
               {/* Priority + date */}
               <div className="flex items-center gap-2 mb-2 flex-wrap">
-                <span className="text-xs px-2 py-0.5 rounded" style={{ background: pri.bg, color: pri.color }}>{pri.label}</span>
                 <span className="text-xs" style={{ color: 'var(--text-muted)' }}>📅 {fmtDate(task.dueDate)}</span>
                 {task.slaLevel && (
                   <span className="text-xs px-2 py-0.5 rounded font-bold" style={{ background: `${SLA_LEVELS[task.slaLevel].color}22`, color: SLA_LEVELS[task.slaLevel].color }}>
