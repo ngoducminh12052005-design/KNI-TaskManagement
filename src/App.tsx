@@ -95,6 +95,7 @@ interface Task {
   formData?: Record<string, any>
   createdAt?: string
   slaLevel?: 'P1' | 'P2' | 'P3' | 'P4'
+  slaStartAt?: string   // mốc bắt đầu tính SLA (lúc được giao / được duyệt), không cần chờ bấm Bắt đầu
   workStatus?: 'received' | 'processing' | 'pending' | 'complete'
   startedAt?: string
   processingStartedAt?: string
@@ -834,9 +835,12 @@ const byCreatedAsc = (a: Task, b: Task) => {
 const byCreatedDesc = (a: Task, b: Task) => byCreatedAsc(b, a)
 // Tính hạn SLA và kiểm tra trễ hạn
 function getSlaDeadline(task: Task): Date | null {
-  if (!task.slaLevel || !task.startedAt) return null
+  // Đồng hồ SLA chạy từ lúc được giao (slaStartAt), không chờ nhân viên bấm Bắt đầu.
+  // Task cũ chưa có slaStartAt thì vẫn tính từ lúc bắt đầu như trước.
+  const startRef = task.slaStartAt ?? task.startedAt
+  if (!task.slaLevel || !startRef) return null
 
-  const start = new Date(task.startedAt)
+  const start = new Date(startRef)
   const slaMs = SLA_LEVELS[task.slaLevel].hours * 3600000
   const now = Date.now()
 
@@ -879,7 +883,29 @@ function isSlaOverdue(task: Task): boolean {
   return Date.now() > deadline.getTime()
 }
 
-
+// "2 giờ 15 phút", "45 phút", "1 ngày 3 giờ"
+function formatLate(sec: number): string {
+  const s = Math.max(0, Math.floor(sec))
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60)
+  const parts: string[] = []
+  if (d > 0) parts.push(`${d} ngày`)
+  if (h > 0) parts.push(`${h} giờ`)
+  if (m > 0 || parts.length === 0) parts.push(m > 0 ? `${m} phút` : 'dưới 1 phút')
+  return parts.join(' ')
+}
+const fmtClockVN = (iso?: string) => (iso ? new Date(iso).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }) : '')
+// Lúc nhân viên bấm Bắt đầu, đã trễ hạn SLA bao nhiêu giây (0 nếu chưa trễ hoặc không có SLA)
+function getSlaStartLateSeconds(task: Task): number {
+  if (!task.slaLevel || !task.slaStartAt || !task.startedAt) return 0
+  const due = new Date(task.slaStartAt).getTime() + SLA_LEVELS[task.slaLevel].hours * 3600000
+  return Math.max(0, Math.floor((new Date(task.startedAt).getTime() - due) / 1000))
+}
+// Lúc nộp kết quả (Complete), đã trễ hạn SLA bao nhiêu giây
+function getSlaDoneLateSeconds(task: Task): number {
+  const deadline = getSlaDeadline(task)
+  if (!deadline || !task.submittedAt) return 0
+  return Math.max(0, Math.floor((new Date(task.submittedAt).getTime() - deadline.getTime()) / 1000))
+}
 // Tổng thời gian đã "Đang xử lý" (cộng dồn qua các lần tạm dừng/tiếp tục), tính bằng giây
 function getElapsedProcessingSeconds(task: Task): number {
   const base = task.totalProcessingSeconds ?? 0
@@ -2313,6 +2339,7 @@ function CrossDeptApproveModal({ task, currentUser, users, onClose }: { task: Ta
     setError(''); setSaving(true)
     const { error: upErr } = await supabase.from('tasks').update({
       cross_dept_pending: false, assigned_to: assignedTo,
+      sla_start_at: task.slaLevel ? new Date(Math.max(Date.now(), task.startDate ? new Date(`${task.startDate}T00:00:00`).getTime() : 0)).toISOString() : null,   // được duyệt xong mới tính giờ SLA
       form_data: { ...(task.formData ?? {}), _meta: { ...taskMeta(task), crossApprovedBy: currentUser.id, crossApprovedAt: new Date().toISOString(), transfer: null,
         chain: chainOf(task).includes(currentUser.id) ? chainOf(task) : [...chainOf(task), currentUser.id] } },
     }).eq('id', task.id)
@@ -2707,7 +2734,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   if (task.creationApproval === 'approved' && task.creationApprovedBy) add(task.creationApprovedAt, `${nameOf(task.creationApprovedBy)} duyệt cho làm`)
   if (task.creationApproval === 'rejected' || (task.creationApproval === 'draft' && task.creationRejectedReason)) add(task.creationApprovedAt, `${nameOf(task.creationApprovedBy)} từ chối task${task.creationRejectedReason ? `: ${task.creationRejectedReason}` : ''}`)
   add(task.ticketReceivedAt, `🔧 Ticket Received: ${task.ticketReceivedText ?? ''}`)
-  add(task.startedAt, `▶️ Bắt đầu làm (${names(task.assignedTo)})`)
+  add(task.startedAt, `▶️ Bắt đầu làm (${names(task.assignedTo)}) lúc ${fmtClockVN(task.startedAt)}${getSlaStartLateSeconds(task) > 0 ? ` — trễ SLA ${formatLate(getSlaStartLateSeconds(task))}` : ''}`)
   add(task.ticketInProcessAt, `🔧 Ticket In-process: ${task.ticketInProcessText ?? ''}`)
   const plog = pendLogOf(task)
   if (!plog.some(e => e.kind === 'request' && e.at === task.pendingRequestedAt)) add(task.pendingRequestedAt, `⏸ ${nameOf(task.pendingRequestedBy)} xin tạm hoãn${task.pendingReason ? `: ${task.pendingReason}` : ''}`)
@@ -2856,6 +2883,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
               {info('Ngày bắt đầu', fmtD(task.startDate))}
               {info('Hạn hoàn thành', fmtD(task.dueDate))}
               {info('Mức độ SLA', task.slaLevel ? SLA_LEVELS[task.slaLevel].label : 'Không áp dụng SLA')}
+              {task.slaLevel && info('Hạn SLA', getSlaDeadline(task) ? fmtClockVN(getSlaDeadline(task)!.toISOString()) : 'Chưa tính giờ (chờ giao / duyệt)')}
               {info('EXP thưởng', `+${task.expReward}`)}
             </section>
 
@@ -4463,7 +4491,7 @@ function SlaCell({ task, compact = false }: { task: Task; compact?: boolean }) {
     const lv = SLA_LEVELS[task.slaLevel]
     if (task.isLocked) { text = '🔒 Đã khoá — quá hạn SLA'; color = '#dc2626'; bg = '#dc262618' }
     else if (done) { text = '✅ Đã hoàn tất'; color = '#059669' }
-    else if (!deadline) { text = `Chưa bắt đầu · SLA ${lv.label}` }
+    else if (!deadline) { text = `Chưa tính giờ (chờ giao / duyệt) · SLA ${lv.label}` }
     else {
       const remain = Math.floor((deadline.getTime() - Date.now()) / 1000)
       if (remain < 0) { text = `⚠️ Quá hạn ${fmtClock(-remain)}`; color = '#dc2626'; bg = '#dc262618' }
@@ -4473,6 +4501,14 @@ function SlaCell({ task, compact = false }: { task: Task; compact?: boolean }) {
         bg = color + '18'
       }
     }
+  }
+  if (task.slaLevel && task.startedAt) {
+    const startLate = getSlaStartLateSeconds(task)
+    sub = `▶️ Bắt đầu ${fmtClockVN(task.startedAt)}${startLate > 0 ? ` · trễ ${formatLate(startLate)}` : ''}`
+  }
+  if (task.slaLevel && done) {
+    const doneLate = getSlaDoneLateSeconds(task)
+    if (doneLate > 0) sub += `${sub ? ' · ' : ''}hoàn tất trễ ${formatLate(doneLate)}`
   }
   const showElapsed = task.workStatus === 'processing' || task.workStatus === 'pending' || task.workStatus === 'complete' || done
 
@@ -5511,38 +5547,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     return () => clearInterval(id)
   }, [hasProcessingTask])
 
-  useEffect(() => {
-  const checkSlaAndLock = async () => {
-    for (const task of tasks) {
-      if (
-        !task.isLocked &&
-        !task.slaUnlockGranted &&
-        task.status !== 'completed' &&
-        isSlaOverdue(task)
-      ) {
-        const { error } = await supabase
-          .from('tasks')
-          .update({
-            is_locked: true,
-            lock_reason: 'Quá hạn SLA',
-          })
-          .eq('id', task.id)
-          .eq('is_locked', false)
-
-        if (error) {
-          console.error(`Không thể khóa task ${task.id}:`, error)
-        }
-      }
-    }
-  }
-
-  checkSlaAndLock()
-
-  // Kiểm tra mỗi 10 giây
-  const interval = setInterval(checkSlaAndLock, 10000)
-
-  return () => clearInterval(interval)
-}, [tasks])
+  // Quá hạn SLA chỉ ghi nhận "quá hạn", không tự khoá task nữa: nhân viên vẫn làm tiếp được.
 
   useEffect(() => {
     if (!highlightTaskId) return
@@ -5858,6 +5863,10 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         title: finalTitle, company: form.company || null, description: form.description, exp_reward: form.expReward,
         task_code: taskCode,
         sla_level: form.slaLevel || null,
+        // Quản lý / BOD giao task có SLA: đồng hồ SLA chạy ngay từ lúc giao (nếu có ngày bắt đầu ở tương lai thì tính từ ngày đó).
+        // Task chờ quản lý phòng khác duyệt thì tính giờ sau khi được duyệt.
+        sla_start_at: (form.slaLevel && !creatingForSelf && !isCrossDept && finalAssigned.length > 0)
+          ? new Date(Math.max(Date.now(), form.startDate ? new Date(`${form.startDate}T00:00:00`).getTime() : 0)).toISOString() : null,
         form_data: withMeta(cleanTaskDoc(form.doc), {
           ...((currentUser.isBodAssistant && !currentUser.isDirector && form.fromBod && !creatingForSelf) ? { fromBod: true } : {}),
           ...(bodGate ? { bodGate: true } : {}),
@@ -6148,6 +6157,11 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                     🔒 Đã khoá — quá hạn SLA
                   </span>
                 )}
+                {task.startedAt && (
+                  <span className="text-xs px-2 py-0.5 rounded" style={{ background: 'var(--bg-card-alt)', color: getSlaStartLateSeconds(task) > 0 ? '#dc2626' : 'var(--text-muted)' }}>
+                    ▶️ Bắt đầu làm lúc {fmtClockVN(task.startedAt)}{getSlaStartLateSeconds(task) > 0 ? ` · trễ SLA ${formatLate(getSlaStartLateSeconds(task))}` : ''}
+                  </span>
+                )}
               </div>
 
               {task.pendingRequestedAt && (
@@ -6368,7 +6382,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                       {task.completeIssue ? '⚠️ Complete with issue, chờ quản lý Close' : '✅ Complete successful, chờ quản lý Close'}
                     </span>
 
-                  ) : (task.isLocked || (isSlaOverdue(task) && !task.slaUnlockGranted)) ? (
+                  ) : false /* quá hạn SLA không khoá task, vẫn cho Bắt đầu / làm tiếp */ ? (
                     <div className="flex flex-col gap-1 items-end">
                       {task.unlockRequestedReason ? (
                         <>
@@ -14758,6 +14772,7 @@ export default function App() {
     formData: t.form_data ?? undefined,
     createdAt: t.created_at ?? undefined,
     slaLevel: t.sla_level ?? undefined,
+    slaStartAt: t.sla_start_at ?? undefined,
     workStatus: t.work_status ?? 'received',
     startedAt: t.started_at ?? undefined,
     processingStartedAt: t.processing_started_at ?? undefined,
@@ -14765,7 +14780,7 @@ export default function App() {
     pendingReason: t.pending_reason ?? undefined,
     pendingRequestedBy: t.pending_requested_by ?? undefined,
     pendingRequestedAt: t.pending_requested_at ?? undefined,
-    isLocked: t.is_locked ?? false,
+    isLocked: false,   // quá hạn SLA chỉ ghi nhận "quá hạn", không khoá task nữa
     lockReason: t.lock_reason ?? undefined,
     unlockRequestedReason: t.unlock_requested_reason ?? undefined,
     unlockRequestedAt: t.unlock_requested_at ?? undefined,
