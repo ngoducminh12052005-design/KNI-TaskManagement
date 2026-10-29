@@ -4466,7 +4466,6 @@ function SlaCell({ task, compact = false }: { task: Task; compact?: boolean }) {
     else if (!deadline) { text = `Chưa bắt đầu · SLA ${lv.label}` }
     else {
       const remain = Math.floor((deadline.getTime() - Date.now()) / 1000)
-      sub = `Hạn: ${deadline.toLocaleString('vi-VN')}`
       if (remain < 0) { text = `⚠️ Quá hạn ${fmtClock(-remain)}`; color = '#dc2626'; bg = '#dc262618' }
       else {
         text = `Còn ${fmtClock(remain)}`
