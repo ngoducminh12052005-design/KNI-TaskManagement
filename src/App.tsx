@@ -741,9 +741,38 @@ const TEAMS = [
 
 
 
+// Danh mục TASK (5 nhóm)
+const TASK_CATEGORIES: { id: string; label: string; en: string; color: string }[] = [
+  { id: 'operations',     label: 'Vận hành Thường nhật',           en: 'Operations',                  color: '#f97316' },
+  { id: 'projects_dev',   label: 'Dự án & Phát triển',             en: 'Projects & Development',      color: '#8b5cf6' },
+  { id: 'admin_legal',    label: 'Quản trị Hành chính & Pháp lý',  en: 'Administration & Legal',      color: '#06b6d4' },
+  { id: 'resource_asset', label: 'Quản lý Tài nguyên & Tài sản',   en: 'Resource & Asset Management', color: '#10b981' },
+  { id: 'reporting',      label: 'Báo cáo & Họp',                  en: 'Reporting & Meetings',        color: '#f59e0b' },
+]
 const CATEGORY_COLORS: Record<string, string> = {
-  development: '#8b5cf6', design: '#06b6d4', marketing: '#f59e0b',
-  research: '#10b981', operations: '#f97316', personal: '#6b7280',
+  ...Object.fromEntries(TASK_CATEGORIES.map(c => [c.id, c.color])),
+  // giá trị cũ (task tạo trước khi đổi danh mục) vẫn giữ màu
+  development: '#8b5cf6', design: '#06b6d4', marketing: '#f59e0b', research: '#10b981', personal: '#6b7280',
+}
+const taskCategoryLabel = (id?: string, short = false) => {
+  const c = TASK_CATEGORIES.find(x => x.id === id)
+  return c ? (short ? c.label : `${c.label} (${c.en})`) : (id ?? '')
+}
+
+// Danh mục DỰ ÁN (5 giai đoạn)
+const PROJECT_CATEGORIES: { id: string; label: string; en: string }[] = [
+  { id: 'initiation',   label: 'Chuẩn bị & Phê duyệt Dự án',      en: 'Project Initiation & Planning' },
+  { id: 'design_eng',   label: 'Thiết kế & Kỹ thuật',             en: 'Design & Engineering' },
+  { id: 'procurement',  label: 'Đấu thầu & Quản lý Chi phí',      en: 'Procurement, Tendering & Cost Control' },
+  { id: 'construction', label: 'Quản lý Thi công & Bàn giao',     en: 'Construction & Site Management' },
+  { id: 'closeout',     label: 'Quyết toán & Bảo hành',           en: 'Post-Construction & Warranty' },
+]
+const projectCategoryLabel = (id?: string) => {
+  const c = PROJECT_CATEGORIES.find(x => x.id === id)
+  if (c) return `${c.label} (${c.en})`
+  if (id === 'bau') return 'Vận hành thường xuyên (BAU)'      // giá trị cũ
+  if (id === 'project') return 'Dự án (Project)'              // giá trị cũ
+  return id ?? ''
 }
 const PRIORITY_CONFIG = {
   high: { label: 'Cao', color: '#ef4444', bg: '#200a0a' },
@@ -2068,7 +2097,8 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
               <td className={`${td} font-bold bg-gray-50`}>Danh mục</td>
               <td className={td}>
                 <select value={form.category} onChange={e => patchForm({ category: e.target.value })} className={sel} style={ink}>
-                  {Object.keys(CATEGORY_COLORS).map(c => <option key={c} value={c}>{c}</option>)}
+                  {TASK_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label} ({c.en})</option>)}
+                  {form.category && !TASK_CATEGORIES.some(c => c.id === form.category) && <option value={form.category}>{form.category} (cũ)</option>}
                 </select>
               </td>
             </tr>
@@ -2475,7 +2505,7 @@ function diffTaskEdit(old: Task, f: {
   if (!sameIds(old.projectManager, f.projectManager)) out.push({ label: 'Quản lý (PM)', from: names(old.projectManager), to: names(f.projectManager) })
   pushVal('Ngày bắt đầu', date(old.startDate), date(f.startDate))
   pushVal('Hạn hoàn thành', date(old.dueDate), date(f.dueDate))
-  pushVal('Danh mục', old.category || '—', f.category || '—')
+  pushVal('Danh mục', taskCategoryLabel(old.category) || '—', taskCategoryLabel(f.category) || '—')
   pushVal('Ưu tiên', PRIORITY_CONFIG[old.priority]?.label ?? old.priority, PRIORITY_CONFIG[f.priority]?.label ?? f.priority)
   pushVal('Mức độ quan trọng', old.important ? 'Quan trọng' : 'Bình thường', f.important ? 'Quan trọng' : 'Bình thường')
   pushVal('Mức độ gấp', old.urgent ? 'Gấp' : 'Không gấp', f.urgent ? 'Gấp' : 'Không gấp')
@@ -2680,7 +2710,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
         </h2>
 
         <div className="flex flex-wrap items-center gap-2 mt-2 mb-4">
-          {chip(task.category || 'Task', '#ede9fe', '#6d28d9')}
+          {chip(taskCategoryLabel(task.category, true) || 'Task', '#ede9fe', '#6d28d9')}
           {chip(statusText, `${bucket.color}22`, bucket.color)}
           {chip(pri.label, pri.bg, pri.color)}
           {task.slaLevel && chip(SLA_LEVELS[task.slaLevel].label, `${SLA_LEVELS[task.slaLevel].color}22`, SLA_LEVELS[task.slaLevel].color)}
@@ -2750,7 +2780,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
           <div className="lg:col-span-2 space-y-4">
             <section className="rounded-xl p-5" style={card}>
               <h3 className={h3} style={{ color: 'var(--text-primary)' }}>Thông tin chung</h3>
-              {info('Nhóm task', task.category)}
+              {info('Nhóm task', taskCategoryLabel(task.category))}
               {info('Phòng ban', phongBan)}
               {info('Công ty', task.company ? `${COMPANY_CODES[task.company] ? `${COMPANY_CODES[task.company]} · ` : ''}${task.company}` : '')}
               {info('Người tạo', `${nameOf(task.createdBy)}${task.selfCreated ? ' (tự tạo)' : ''}`)}
@@ -3028,7 +3058,7 @@ function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, canSen
           <table className="w-full border-collapse mb-4">
             <tbody>
               <tr><td className={lab} style={{ width: '22%' }}>Ngày bắt đầu</td><td className={td}>{fmtD(task.startDate)}</td><td className={lab} style={{ width: '22%' }}>Hạn hoàn thành</td><td className={td}>{fmtD(task.dueDate)}</td></tr>
-              <tr><td className={lab}>Ưu tiên</td><td className={td}>{pri.label}</td><td className={lab}>Danh mục</td><td className={td}>{task.category}</td></tr>
+              <tr><td className={lab}>Ưu tiên</td><td className={td}>{pri.label}</td><td className={lab}>Danh mục</td><td className={td}>{taskCategoryLabel(task.category)}</td></tr>
               <tr><td className={lab}>Mức độ quan trọng</td><td className={td}>{task.important ? 'Quan trọng' : 'Bình thường'}</td><td className={lab}>Mức độ gấp</td><td className={td}>{task.urgent ? 'Gấp' : 'Không gấp'}</td></tr>
               <tr><td className={lab}>Mức độ SLA</td><td className={td}>{task.slaLevel ? SLA_LEVELS[task.slaLevel].label : 'Không áp dụng SLA'}</td><td className={lab}>EXP thưởng</td><td className={td}>+{task.expReward}</td></tr>
               <tr><td className={lab}>Trạng thái</td><td className={td} colSpan={3}>{statusText}</td></tr>
@@ -5375,7 +5405,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   const [form, setForm] = useState({
     title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '',
-    category: 'development', priority: 'medium' as TaskPriority,
+    category: 'operations', priority: 'medium' as TaskPriority,
     important: false, urgent: false, isTeamProject: false,
     assignedTo: [] as string[], projectManager: [] as string[], supporters: [] as string[],
     driveFolderCreated: false, driveFolderName: '',
@@ -5809,7 +5839,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
     setSelfMode(false)
     // Sửa xong thì mở lại đúng trang chi tiết của task đó (không bị văng ra ngoài)
     if (returnToTaskId) { setOpenNewTaskId(returnToTaskId); setReturnToTaskId(null) }
-    setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'development', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '', slaLevel: '', company: '', fromBod: false, doc: emptyTaskDoc() })
+    setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'operations', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '', slaLevel: '', company: '', fromBod: false, doc: emptyTaskDoc() })
   }
 
   const toggleFormArray = (field: 'assignedTo' | 'projectManager' | 'supporters', uid: string) => {
@@ -12105,7 +12135,7 @@ function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
   const [pt, setPt] = useState<PlannedTask>({ title: '', description: '', assigneeId: '', dueDate: '' })
   const [name, setName] = useState('')
   const [company, setCompany] = useState('')
-  const [cls, setCls] = useState('project')
+  const [cls, setCls] = useState('initiation')
   const [priority, setPriority] = useState('P3')
   const [status, setStatus] = useState('planning')
   const [objective, setObjective] = useState('')
@@ -12253,10 +12283,9 @@ function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
           <div className="text-right italic my-3">…, {dateText}</div>
 
           {sec('I. Thông tin chung')}
-          <div className={rowCls}><b className={lab}>Loại:</b>
+          <div className={rowCls}><b className={lab}>Danh mục:</b>
             <select value={cls} onChange={e => setCls(e.target.value)} className={line} style={ink}>
-              <option value="project">Dự án (Project)</option>
-              <option value="bau">Vận hành thường xuyên (BAU)</option>
+              {PROJECT_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.label} ({c.en})</option>)}
             </select>
           </div>
           <div className={rowCls}><b className={lab}>Ưu tiên:</b>
@@ -12479,7 +12508,7 @@ async function createProjectTasksFromPlan(
         task_code: code, project_id: project.id, work_status: 'received', status: 'open',
         assigned_to: [pt.assigneeId], project_manager: project.managerIds, supporters: [],
         created_by: creator.id, start_date: todayStr, due_date: due,
-        category: 'development', priority: 'medium', self_created: false,
+        category: 'projects_dev', priority: 'medium', self_created: false,
         important: false, urgent: false, is_team_project: false,
         cross_dept_pending: false, target_team_id: null, creation_approval: 'approved',
         drive_folder_created: false, drive_folder_name: null,
@@ -12552,7 +12581,7 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
         supporters: [],
         created_by: currentUser.id,
         start_date: startDate, due_date: finalDue,
-        category: 'development', priority, self_created: creatingForSelf,
+        category: 'projects_dev', priority, self_created: creatingForSelf,
         important: false, urgent: false, is_team_project: false,
         cross_dept_pending: false, target_team_id: null,
         creation_approval: creatingForSelf && currentUser.role === 'employee' ? 'pending' : 'approved',
@@ -12889,7 +12918,7 @@ function ProjectInfoSheet({ project, users }: { project: Project; users: User[] 
 
       {sec('I. Thông tin chung')}
       {row('Công ty', companyText)}
-      {row('Loại', project.cls === 'bau' ? 'Vận hành thường xuyên (BAU)' : 'Dự án (Project)')}
+      {row('Danh mục', projectCategoryLabel(project.cls))}
       {row('Ưu tiên', project.priority)}
       {row('Trạng thái', st[0])}
       {row('Phòng ban chính', team ? `${team.emoji} ${team.name}` : '')}
