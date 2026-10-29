@@ -5824,6 +5824,10 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       // Ghi lại người sửa đã đổi những gì (hiện ở Lịch sử trong chi tiết task)
       const editChanges = diffTaskEdit(editingTask, { ...form, title: finalTitle, doc: cleanTaskDoc(form.doc) }, users)
       const isOwnDraftEdit = editingTask.createdBy === currentUser.id && (editingTask.creationApproval === 'draft' || editingTask.creationApproval === 'rejected')
+      // Trước đó chưa có SLA, nay được đặt SLA → tính SLA từ lúc sửa
+      // (task còn chờ quản lý phòng ban duyệt thì chờ duyệt xong mới tính, task tự tạo và task đã Close thì không áp dụng)
+      const slaStartsNow = !!form.slaLevel && !editingTask.slaLevel && !editingTask.selfCreated && !editingTask.crossDeptPending && editingTask.status !== 'completed'
+      if (slaStartsNow) editChanges.push({ label: 'Bắt đầu tính SLA', from: '—', to: new Date().toLocaleString('vi-VN') })
       const { error: updateError } = await supabase.from('tasks').update({
         title: finalTitle, company: form.company || null, description: form.description, exp_reward: form.expReward,
         assigned_to: form.assignedTo, project_manager: form.projectManager, supporters: form.supporters,
@@ -5834,6 +5838,10 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
               drive_folder_created: form.driveFolderCreated,
       drive_folder_name: form.driveFolderCreated ? (form.driveFolderName.trim() || null) : null,
       sla_level: form.slaLevel || null,
+      // Mới đặt SLA → mốc tính là lúc sửa (nếu ngày bắt đầu ở tương lai thì tính từ ngày đó). Bỏ SLA → xoá mốc.
+      // Đổi giữa các mức SLA (VD P3 → P1) thì giữ nguyên mốc cũ.
+      ...(slaStartsNow ? { sla_start_at: new Date(Math.max(Date.now(), form.startDate ? new Date(`${form.startDate}T00:00:00`).getTime() : 0)).toISOString() } : {}),
+      ...(!form.slaLevel ? { sla_start_at: null } : {}),
       form_data: withMeta(cleanTaskDoc(form.doc), taskMeta(editingTask)),
     }).eq('id', editingTask.id)
     if (updateError) {
