@@ -2021,9 +2021,11 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
 
             {isManager && !editingTask && (
         <div className="max-w-[860px] mx-auto mt-4 flex gap-1 p-1 rounded-xl bg-white shadow">
-          <button type="button" onClick={() => { setSelfMode(false); setCrossMode(false); patchForm({ assignedTo: [], fromBod: false }) }} className="flex-1 py-2 rounded-lg text-xs font-semibold"
-            style={{ background: !selfMode && !crossMode && !form.fromBod ? '#7c3aed' : 'transparent', color: !selfMode && !crossMode && !form.fromBod ? '#fff' : '#6b7280' }}>📋 Giao nhân viên phòng ban</button>
-          {!currentUser.isDirector && (
+          {!(currentUser.isBodAssistant && !currentUser.isDirector) && (
+            <button type="button" onClick={() => { setSelfMode(false); setCrossMode(false); patchForm({ assignedTo: [], fromBod: false }) }} className="flex-1 py-2 rounded-lg text-xs font-semibold"
+              style={{ background: !selfMode && !crossMode && !form.fromBod ? '#7c3aed' : 'transparent', color: !selfMode && !crossMode && !form.fromBod ? '#fff' : '#6b7280' }}>📋 Giao nhân viên phòng ban</button>
+          )}
+          {!currentUser.isDirector && !currentUser.isBodAssistant && (
             <button type="button" onClick={() => { setSelfMode(false); setCrossMode(true); patchForm({ assignedTo: [], fromBod: false }) }} className="flex-1 py-2 rounded-lg text-xs font-semibold"
               style={{ background: !selfMode && crossMode ? '#7c3aed' : 'transparent', color: !selfMode && crossMode ? '#fff' : '#6b7280' }}>🤝 Giao / phối hợp phòng ban khác</button>
           )}
@@ -2037,7 +2039,7 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
       )}
       {isManager && !editingTask && currentUser.isBodAssistant && form.fromBod && !selfMode && !crossMode && (
         <p className="max-w-[860px] mx-auto mt-2 text-xs text-center" style={{ color: '#b45309' }}>
-          📌 Task này được ghi nhận là BOD giao: giao thẳng cho quản lý bất kỳ phòng ban nào, quản lý chỉ nộp kết quả, BOD hoặc trợ lý Close.
+          📌 Task này được ghi nhận là BOD giao: quản lý phòng ban của người nhận phải duyệt trước, SLA chỉ tính từ lúc được duyệt. Mỗi task chỉ chọn người thuộc MỘT phòng ban. Người nhận nộp kết quả, BOD hoặc trợ lý Close.
         </p>
       )}
 
@@ -2357,8 +2359,8 @@ function CrossDeptApproveModal({ task, currentUser, users, onClose }: { task: Ta
     setError(''); setSaving(true)
     const { error: upErr } = await supabase.from('tasks').update({
       cross_dept_pending: false, assigned_to: assignedTo,
-      // BOD giao: giữ mốc lúc BOD giao (quản lý duyệt chậm thì trễ là của quản lý). Giao chéo thường: tính từ lúc được duyệt
-      sla_start_at: task.slaLevel ? (task.slaStartAt ?? new Date(Math.max(Date.now(), task.startDate ? new Date(`${task.startDate}T00:00:00`).getTime() : 0)).toISOString()) : null,
+      // SLA chỉ tính từ lúc quản lý phòng ban duyệt (BOD giao cũng vậy); nếu ngày bắt đầu ở tương lai thì tính từ ngày đó
+      sla_start_at: task.slaLevel ? new Date(Math.max(Date.now(), task.startDate ? new Date(`${task.startDate}T00:00:00`).getTime() : 0)).toISOString() : null,
       form_data: { ...(task.formData ?? {}), _meta: { ...taskMeta(task), crossApprovedBy: currentUser.id, crossApprovedAt: new Date().toISOString(), transfer: null,
         chain: chainOf(task).includes(currentUser.id) ? chainOf(task) : [...chainOf(task), currentUser.id] } },
     }).eq('id', task.id)
@@ -2399,7 +2401,7 @@ function CrossDeptApproveModal({ task, currentUser, users, onClose }: { task: Ta
         </p>
         {taskMeta(task).bodGate && (
           <p className="text-xs mb-3 p-2 rounded-lg" style={{ background: '#fbbf2422', color: '#b45309' }}>
-            📌 BOD giao thẳng cho nhân viên phòng bạn. Bạn duyệt rồi chọn: tự làm, giữ nguyên người được giao hoặc phân công lại cho người khác trong phòng.
+            📌 BOD giao task cho phòng bạn. Bạn duyệt rồi chọn: tự làm, giữ nguyên người được giao hoặc phân công lại cho người khác trong phòng. SLA chỉ bắt đầu tính từ lúc bạn duyệt.
           </p>
         )}
 
@@ -2697,7 +2699,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
     const meta = taskMeta(task)
     const tgtMgrs = users.filter(u => u.role === 'manager' && u.teamId === task.targetTeamId).map(u => u.name).join(', ')
     steps.push({
-      label: (meta.bodGate ? `Trưởng phòng ${teamName(task.targetTeamId) ?? ''} duyệt (BOD giao thẳng nhân viên)` : `Trưởng phòng ${teamName(task.targetTeamId) ?? ''} duyệt giao chéo`).trim(),
+      label: (meta.bodGate ? `Trưởng phòng ${teamName(task.targetTeamId) ?? ''} duyệt (BOD giao)` : `Trưởng phòng ${teamName(task.targetTeamId) ?? ''} duyệt giao chéo`).trim(),
       who: task.crossDeptRejectedBy ? nameOf(task.crossDeptRejectedBy)
         : meta.crossApprovedBy ? nameOf(meta.crossApprovedBy)
         : (tgtMgrs || 'Trưởng phòng ban nhận'),
@@ -5608,10 +5610,16 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     assignedTo: [] as string[], projectManager: [] as string[], supporters: [] as string[],
     driveFolderCreated: false, driveFolderName: '',
     slaLevel: '' as '' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5',
-    fromBod: false,
+    fromBod: !!(currentUser.isBodAssistant && !currentUser.isDirector),   // trợ lý BOD mặc định "Giao task từ BOD"
     company: '',
     doc: emptyTaskDoc(),
   })
+  // Trợ lý BOD không có 2 tab giao phòng ban: luôn rơi về "Giao task từ BOD" (trừ khi bấm "Tự tạo cho tôi")
+  useEffect(() => {
+    if (showModal && !editingTask && currentUser.isBodAssistant && !currentUser.isDirector && !selfMode && !crossMode && !form.fromBod) {
+      setForm(f => ({ ...f, fromBod: true }))
+    }
+  }, [showModal, editingTask, selfMode, crossMode, form.fromBod])
 
   const isManager = currentUser.role === 'manager'
   const asBod = actsAsBod(currentUser, !!form.fromBod && !editingTask)
@@ -5864,11 +5872,12 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       const outsideAssignees = assignedUsers.filter(u => u.teamId !== currentUser.teamId)
       // BOD / trợ lý BOD (tab "Giao task từ BOD") giao THẲNG cho nhân viên, không qua quản lý:
       // quản lý phòng ban của nhân viên đó phải duyệt trước (rồi tự làm, giữ nguyên hoặc phân công lại)
-      const bodDirectEmployees = !creatingForSelf && asBod ? assignedUsers.filter(u => u.role !== 'manager') : []
+      // BOD giao cho quản lý hay nhân viên đều phải qua quản lý phòng ban của người nhận duyệt
+      const bodDirectEmployees = !creatingForSelf && asBod ? assignedUsers : []
       const bodGate = bodDirectEmployees.length > 0
       if (bodGate) {
         if (new Set(assignedUsers.map(u => u.teamId)).size > 1) {
-          alert('Giao thẳng cho nhân viên: mỗi task chỉ chọn người thuộc MỘT phòng ban để quản lý phòng đó duyệt. Hãy tách thành nhiều task theo phòng ban.'); return
+          alert('BOD giao task: mỗi task chỉ chọn người nhận thuộc MỘT phòng ban để quản lý phòng đó duyệt. Hãy tách thành nhiều task theo phòng ban.'); return
         }
         const gateTeamId = bodDirectEmployees[0].teamId
         if (!users.some(u => u.role === 'manager' && u.teamId === gateTeamId && u.id !== currentUser.id)) {
@@ -5885,7 +5894,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         sla_level: form.slaLevel || null,
         // Quản lý / BOD giao task có SLA: đồng hồ SLA chạy ngay từ lúc giao (nếu có ngày bắt đầu ở tương lai thì tính từ ngày đó).
         // Task chờ quản lý phòng khác duyệt thì tính giờ sau khi được duyệt.
-        sla_start_at: (form.slaLevel && !creatingForSelf && (!isCrossDept || asBod) && finalAssigned.length > 0)
+        sla_start_at: (form.slaLevel && !creatingForSelf && !isCrossDept && finalAssigned.length > 0)
           ? new Date(Math.max(Date.now(), form.startDate ? new Date(`${form.startDate}T00:00:00`).getTime() : 0)).toISOString() : null,
         form_data: withMeta(cleanTaskDoc(form.doc), {
           ...((currentUser.isBodAssistant && !currentUser.isDirector && form.fromBod && !creatingForSelf) ? { fromBod: true } : {}),
@@ -5937,7 +5946,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
           for (const mgr of targetManagers) {
             await supabase.from('notifications').insert({
               message: bodGate
-                ? `📌 ${currentUser.name} giao thẳng task [${taskCode}] "${form.title}" cho ${outsideAssigneesNames(assignedUsers)} thuộc phòng bạn. Bạn cần DUYỆT trước, rồi chọn giữ nguyên người được giao, tự làm hoặc phân công lại: ${taskContent}`
+                ? `📌 ${currentUser.name} giao thẳng task [${taskCode}] "${form.title}" cho ${outsideAssigneesNames(assignedUsers)} thuộc phòng bạn. Bạn cần DUYỆT trước (SLA tính từ lúc bạn duyệt), rồi chọn giữ nguyên người được giao, tự làm hoặc phân công lại: ${taskContent}`
                 : `📨 ${currentUser.name} (${TEAMS.find(t => t.id === currentUser.teamId)?.name ?? ''}) đề nghị giao / phối hợp task [${taskCode}] "${form.title}" với phòng ban của bạn${assigneeNames ? ` (đề xuất: ${assigneeNames})` : ''}. Bạn duyệt rồi tự làm hoặc phân công người trong phòng: ${taskContent}`,
               target_user_id: mgr.id,
               link_task_id: newTaskId,
@@ -5963,7 +5972,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
     setSelfMode(false)
     // Sửa xong thì mở lại đúng trang chi tiết của task đó (không bị văng ra ngoài)
     if (returnToTaskId) { setOpenNewTaskId(returnToTaskId); setReturnToTaskId(null) }
-    setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'operations', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '', slaLevel: '', company: '', fromBod: false, doc: emptyTaskDoc() })
+    setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'operations', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '', slaLevel: '', company: '', fromBod: !!(currentUser.isBodAssistant && !currentUser.isDirector), doc: emptyTaskDoc() })
   }
 
   const toggleFormArray = (field: 'assignedTo' | 'projectManager' | 'supporters', uid: string) => {
