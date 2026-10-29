@@ -835,16 +835,50 @@ const byCreatedDesc = (a: Task, b: Task) => byCreatedAsc(b, a)
 // Tính hạn SLA và kiểm tra trễ hạn
 function getSlaDeadline(task: Task): Date | null {
   if (!task.slaLevel || !task.startedAt) return null
+
   const start = new Date(task.startedAt)
-  return new Date(start.getTime() + SLA_LEVELS[task.slaLevel].hours * 3600000)
+  const slaMs = SLA_LEVELS[task.slaLevel].hours * 3600000
+  const now = Date.now()
+
+  // Lấy lịch sử duyệt tạm dừng / tiếp tục
+  const logs = pendLogOf(task)
+    .filter(e => e.kind === 'approve' || e.kind === 'resume')
+    .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
+
+  let pausedMs = 0
+  let pauseAt: number | null = null
+
+  for (const log of logs) {
+    const at = new Date(log.at).getTime()
+
+    if (log.kind === 'approve') {
+      if (pauseAt === null) pauseAt = at
+    } else if (log.kind === 'resume' && pauseAt !== null) {
+      pausedMs += Math.max(0, at - pauseAt)
+      pauseAt = null
+    }
+  }
+
+  // Nếu vẫn đang tạm dừng, cộng cả thời gian đến hiện tại
+  if (task.workStatus === 'pending' && pauseAt !== null) {
+    pausedMs += Math.max(0, now - pauseAt)
+  }
+
+  return new Date(start.getTime() + slaMs + pausedMs)
 }
 
+
 function isSlaOverdue(task: Task): boolean {
+  if (task.workStatus === 'pending') return false
   const deadline = getSlaDeadline(task)
   if (!deadline) return false
-  if (task.workStatus === 'complete' || task.status === 'completed') return false
-  return new Date() > deadline
+
+  if (task.workStatus === 'complete' || task.status === 'completed') {
+    return false
+  }
+  return Date.now() > deadline.getTime()
 }
+
 
 // Tổng thời gian đã "Đang xử lý" (cộng dồn qua các lần tạm dừng/tiếp tục), tính bằng giây
 function getElapsedProcessingSeconds(task: Task): number {
