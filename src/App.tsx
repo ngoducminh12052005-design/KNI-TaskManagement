@@ -10487,7 +10487,8 @@ function ProposalCommentsSection({ p, users, currentUser }: { p: Proposal; users
     const ch = supabase.channel(`proposal-comments-${p.id}-${Math.random().toString(36).slice(2)}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'proposal_comments', filter: `proposal_id=eq.${p.id}` }, () => { load() })
       .subscribe()
-    return () => { supabase.removeChannel(ch) }
+    const timer = window.setInterval(() => { if (!document.hidden) load() }, 15000)
+    return () => { supabase.removeChannel(ch); window.clearInterval(timer) }
   }, [p.id])
   const send = async () => {
     const t = text.trim()
@@ -10496,6 +10497,8 @@ function ProposalCommentsSection({ p, users, currentUser }: { p: Proposal; users
     if (error) { alert('Không gửi được bình luận: ' + error.message); return }
     setText('')
     load()
+    // Báo cho mục Lịch sử trong chi tiết tờ trình nạp lại ngay, không chờ realtime
+    window.dispatchEvent(new CustomEvent('proposal-comments-changed', { detail: { proposalId: p.id } }))
   }
   return (
     <section className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
@@ -10675,7 +10678,12 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
     const ch = supabase.channel(`proposal-history-comments-${p.id}-${Math.random().toString(36).slice(2)}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'proposal_comments', filter: `proposal_id=eq.${p.id}` }, () => { load() })
       .subscribe()
-    return () => { alive = false; supabase.removeChannel(ch) }
+    // Vừa gửi bình luận ở mục Trao đổi: nạp lại ngay
+    const onChanged = (e: Event) => { if ((e as CustomEvent).detail?.proposalId === p.id) load() }
+    window.addEventListener('proposal-comments-changed', onChanged)
+    // Dự phòng khi realtime chưa bật: tự làm mới mỗi 15 giây lúc đang mở tab
+    const timer = window.setInterval(() => { if (!document.hidden) load() }, 15000)
+    return () => { alive = false; supabase.removeChannel(ch); window.removeEventListener('proposal-comments-changed', onChanged); window.clearInterval(timer) }
   }, [p.id])
 
   const flow = steps.length > 0 ? steps : [{
