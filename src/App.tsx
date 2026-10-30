@@ -2743,49 +2743,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   const stepIcon = (s: FlowStep['status']) => (s === 'done' ? '✅' : s === 'current' ? '⏳' : s === 'rejected' ? '❌' : s === 'skip' ? '⏭' : '○')
 
   // ----- Lịch sử -----
-  const [editLogs, setEditLogs] = useState<{ id: string; userId: string; changes: TaskChange[]; createdAt: string }[]>([])
-  useEffect(() => {
-    const load = async () => {
-      const { data } = await supabase.from('task_edit_logs').select('*').eq('task_id', task.id).order('created_at')
-      setEditLogs((data ?? []).map((x: any) => ({ id: x.id, userId: x.user_id, changes: Array.isArray(x.changes) ? x.changes : [], createdAt: x.created_at })))
-    }
-    load()
-    const ch = supabase.channel(`task-edit-logs-${task.id}-${Math.random().toString(36).slice(2)}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'task_edit_logs', filter: `task_id=eq.${task.id}` }, () => { load() })
-      .subscribe()
-    return () => { supabase.removeChannel(ch) }
-  }, [task.id])
-
-  const events: { at: string; text: string; lines?: string[] }[] = []
-  const add = (at: string | undefined, text: string) => { if (at) events.push({ at, text }) }
-  add(task.createdAt, `${nameOf(task.createdBy)} ${task.selfCreated ? 'tự tạo task' : 'giao task'}`)
-  if (task.creationApproval === 'approved' && task.creationApprovedBy) add(task.creationApprovedAt, `${nameOf(task.creationApprovedBy)} duyệt cho làm`)
-  if (task.creationApproval === 'rejected' || (task.creationApproval === 'draft' && task.creationRejectedReason)) add(task.creationApprovedAt, `${nameOf(task.creationApprovedBy)} từ chối task${task.creationRejectedReason ? `: ${task.creationRejectedReason}` : ''}`)
-  add(task.ticketReceivedAt, `🔧 Ticket Received: ${task.ticketReceivedText ?? ''}`)
-  add(task.startedAt, `▶️ Bắt đầu làm (${names(task.assignedTo)}) lúc ${fmtClockVN(task.startedAt)}${getSlaStartLateSeconds(task) > 0 ? ` — trễ SLA ${formatLate(getSlaStartLateSeconds(task))}` : ''}`)
-  add(task.ticketInProcessAt, `🔧 Ticket In-process: ${task.ticketInProcessText ?? ''}`)
-  const plog = pendLogOf(task)
-  if (!plog.some(e => e.kind === 'request' && e.at === task.pendingRequestedAt)) add(task.pendingRequestedAt, `⏸ ${nameOf(task.pendingRequestedBy)} xin tạm hoãn${task.pendingReason ? `: ${task.pendingReason}` : ''}`)
-  plog.forEach(e => {
-    if (e.kind === 'request') add(e.at, `⏸ ${nameOf(e.by)} xin tạm dừng (Pending)${e.reason ? `. Lý do: ${e.reason}` : ''}`)
-    else if (e.kind === 'approve') add(e.at, `✅ ${nameOf(e.by)} đã duyệt tạm dừng${e.note ? ` (lý do xin: ${e.note})` : ''}`)
-    else if (e.kind === 'reject') add(e.at, `❌ ${nameOf(e.by)} từ chối tạm dừng${e.reason ? `. Lý do: ${e.reason}` : ''}${e.note ? ` (lý do xin: ${e.note})` : ''}`)
-    else add(e.at, `▶️ ${nameOf(e.by)} mở lại task (tiếp tục xử lý)`)
-  })
-  add(task.unlockRequestedAt, `🔓 Xin mở khóa SLA${task.unlockRequestedReason ? `: ${task.unlockRequestedReason}` : ''}`)
-  add(task.ticketCompletedAt, `🔧 Ticket Completed: ${task.ticketCompletedText ?? ''}`)
-  if (subs.length > 0) {
-    subs.forEach(r => {
-      add(r.at, `📤 Nộp kết quả lần ${r.n} — ${r.result === 'with_issue' ? `Complete with issue: ${r.issue ?? ''}` : 'Complete successful'}${r.note ? ` · Ghi chú: ${r.note}` : ''}${r.link ? ` · Link: ${r.link}` : ''}${r.files.length ? ` · Tệp: ${r.files.map(f => f.name).join(', ')}` : ''}`)
-      if (r.rejected) add(r.rejected.at, `↩️ ${nameOf(r.rejected.by)} từ chối kết quả lần ${r.n}. Lý do: ${r.rejected.reason}`)
-    })
-  } else add(task.submittedAt, `📤 Nộp kết quả${task.submissionNote ? `: ${task.submissionNote}` : ''}`)
-  add(task.approvedAt, `✅ ${nameOf(task.approvedBy)} duyệt & đóng task`)
-  editLogs.forEach(l => {
-    if (l.changes.length === 0) return
-    events.push({ at: l.createdAt, text: `✏️ ${nameOf(l.userId)} đã chỉnh sửa task`, lines: l.changes.map(c => `${c.label}: ${c.from} → ${c.to}`) })
-  })
-  events.sort((a, b) => a.at.localeCompare(b.at))
+  const events = useTaskTimeline(task, users)
 
   const card = { background: 'var(--bg-panel)', border: '1px solid var(--border)' }
   const h3 = 'text-sm font-bold mb-3'
@@ -3020,7 +2978,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
 
             <section className="rounded-xl p-5" style={card}>
               <h3 className={h3} style={{ color: 'var(--text-primary)' }}>📝 Work Note</h3>
-              <TaskWorkNotePanel taskId={task.id} currentUser={currentUser} users={users} />
+              <TaskWorkNotePanel taskId={task.id} task={task} currentUser={currentUser} users={users} />
             </section>
           </div>
 
@@ -4793,7 +4751,80 @@ function TaskTracker({ tasks: rawTasks, users, currentUser }: { tasks: Task[]; u
   )
 }
 
-function TaskWorkNotePanel({ taskId, currentUser, users }: { taskId: string; currentUser: User; users: User[] }) {
+// ===== Dòng thời gian của task: Lịch sử và Work Note dùng chung =====
+type TaskEditLog = { id: string; userId: string; changes: TaskChange[]; createdAt: string }
+type TaskNoteRow = { id: string; userId: string; note: string; createdAt: string }
+// note: có giá trị nếu là dòng Work Note do người dùng ghi; còn lại là sự kiện lịch sử của hệ thống
+type TaskEvent = { at: string; text: string; lines?: string[]; by?: string; note?: string }
+
+function buildTaskEvents(task: Task, users: User[], editLogs: TaskEditLog[], notes: TaskNoteRow[]): TaskEvent[] {
+  const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
+  const names = (ids: string[]) => (ids.length ? ids.map(nameOf).join(', ') : '—')
+  const subs = getSubs(task)
+  const events: TaskEvent[] = []
+  const add = (at: string | undefined, text: string) => { if (at) events.push({ at, text }) }
+  add(task.createdAt, `${nameOf(task.createdBy)} ${task.selfCreated ? 'tự tạo task' : 'giao task'}`)
+  if (task.creationApproval === 'approved' && task.creationApprovedBy) add(task.creationApprovedAt, `${nameOf(task.creationApprovedBy)} duyệt cho làm`)
+  if (task.creationApproval === 'rejected' || (task.creationApproval === 'draft' && task.creationRejectedReason)) add(task.creationApprovedAt, `${nameOf(task.creationApprovedBy)} từ chối task${task.creationRejectedReason ? `: ${task.creationRejectedReason}` : ''}`)
+  add(task.ticketReceivedAt, `🔧 Ticket Received: ${task.ticketReceivedText ?? ''}`)
+  add(task.startedAt, `▶️ Bắt đầu làm (${names(task.assignedTo)}) lúc ${fmtClockVN(task.startedAt)}${getSlaStartLateSeconds(task) > 0 ? ` — trễ SLA ${formatLate(getSlaStartLateSeconds(task))}` : ''}`)
+  add(task.ticketInProcessAt, `🔧 Ticket In-process: ${task.ticketInProcessText ?? ''}`)
+  const plog = pendLogOf(task)
+  if (!plog.some(e => e.kind === 'request' && e.at === task.pendingRequestedAt)) add(task.pendingRequestedAt, `⏸ ${nameOf(task.pendingRequestedBy)} xin tạm hoãn${task.pendingReason ? `: ${task.pendingReason}` : ''}`)
+  plog.forEach(e => {
+    if (e.kind === 'request') add(e.at, `⏸ ${nameOf(e.by)} xin tạm dừng (Pending)${e.reason ? `. Lý do: ${e.reason}` : ''}`)
+    else if (e.kind === 'approve') add(e.at, `✅ ${nameOf(e.by)} đã duyệt tạm dừng${e.note ? ` (lý do xin: ${e.note})` : ''}`)
+    else if (e.kind === 'reject') add(e.at, `❌ ${nameOf(e.by)} từ chối tạm dừng${e.reason ? `. Lý do: ${e.reason}` : ''}${e.note ? ` (lý do xin: ${e.note})` : ''}`)
+    else add(e.at, `▶️ ${nameOf(e.by)} mở lại task (tiếp tục xử lý)`)
+  })
+  add(task.unlockRequestedAt, `🔓 Xin mở khóa SLA${task.unlockRequestedReason ? `: ${task.unlockRequestedReason}` : ''}`)
+  add(task.ticketCompletedAt, `🔧 Ticket Completed: ${task.ticketCompletedText ?? ''}`)
+  if (subs.length > 0) {
+    subs.forEach(r => {
+      add(r.at, `📤 Nộp kết quả lần ${r.n} — ${r.result === 'with_issue' ? `Complete with issue: ${r.issue ?? ''}` : 'Complete successful'}${r.note ? ` · Ghi chú: ${r.note}` : ''}${r.link ? ` · Link: ${r.link}` : ''}${r.files.length ? ` · Tệp: ${r.files.map(f => f.name).join(', ')}` : ''}`)
+      if (r.rejected) add(r.rejected.at, `↩️ ${nameOf(r.rejected.by)} từ chối kết quả lần ${r.n}. Lý do: ${r.rejected.reason}`)
+    })
+  } else add(task.submittedAt, `📤 Nộp kết quả${task.submissionNote ? `: ${task.submissionNote}` : ''}`)
+  add(task.approvedAt, `✅ ${nameOf(task.approvedBy)} duyệt & đóng task`)
+  editLogs.forEach(l => {
+    if (l.changes.length === 0) return
+    events.push({ at: l.createdAt, text: `✏️ ${nameOf(l.userId)} đã chỉnh sửa task`, lines: l.changes.map(c => `${c.label}: ${c.from} → ${c.to}`) })
+  })
+  // Work Note cũng là một dòng trong Lịch sử
+  notes.forEach(n => events.push({ at: n.createdAt, text: `📝 ${nameOf(n.userId)} ghi Work Note: ${n.note}`, by: n.userId, note: n.note }))
+  events.sort((a, b) => a.at.localeCompare(b.at))
+  return events
+}
+
+// Tải log chỉnh sửa + Work Note của task (tự cập nhật realtime) rồi gộp thành một dòng thời gian
+function useTaskTimeline(task: Task | undefined, users: User[]): TaskEvent[] {
+  const taskId = task?.id
+  const [editLogs, setEditLogs] = useState<TaskEditLog[]>([])
+  const [notes, setNotes] = useState<TaskNoteRow[]>([])
+  useEffect(() => {
+    if (!taskId) return
+    let alive = true
+    const load = async () => {
+      const [l, n] = await Promise.all([
+        supabase.from('task_edit_logs').select('*').eq('task_id', taskId).order('created_at'),
+        supabase.from('task_work_notes').select('*').eq('task_id', taskId).order('created_at'),
+      ])
+      if (!alive) return
+      setEditLogs((l.data ?? []).map((x: any) => ({ id: x.id, userId: x.user_id, changes: Array.isArray(x.changes) ? x.changes : [], createdAt: x.created_at })))
+      setNotes((n.data ?? []).map((x: any) => ({ id: x.id, userId: x.user_id, note: x.note, createdAt: x.created_at })))
+    }
+    load()
+    const ch = supabase.channel(`task-timeline-${taskId}-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_edit_logs', filter: `task_id=eq.${taskId}` }, () => { load() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_work_notes', filter: `task_id=eq.${taskId}` }, () => { load() })
+      .subscribe()
+    return () => { alive = false; supabase.removeChannel(ch) }
+  }, [taskId])
+  return task ? buildTaskEvents(task, users, editLogs, notes) : []
+}
+
+function TaskWorkNotePanel({ taskId, task, currentUser, users }: { taskId: string; task: Task; currentUser: User; users: User[] }) {
+  const timeline = useTaskTimeline(task, users)
   const [notes, setNotes] = useState<{ id: string; userId: string; note: string; createdAt: string }[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(true)
@@ -4836,23 +4867,26 @@ function TaskWorkNotePanel({ taskId, currentUser, users }: { taskId: string; cur
           Ghi lại
         </button>
       </div>
-      {loading ? (
+        {loading ? (
         <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Đang tải...</p>
-      ) : notes.length === 0 ? (
+      ) : timeline.length === 0 ? (
         <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>Chưa có cập nhật tiến độ nào.</p>
       ) : (
         <div className="space-y-2 max-h-52 overflow-y-auto">
-          {notes.map(n => {
-            const u = users.find(x => x.id === n.userId)
+          {[...timeline].reverse().map((e, i) => {
+            const u = e.note ? users.find(x => x.id === e.by) : undefined
             return (
-              <div key={n.id} className="flex items-start gap-2">
-                {u && <CharAvatar user={u} size={20} />}
+              <div key={i} className="flex items-start gap-2">
+                {e.note
+                  ? (u ? <CharAvatar user={u} size={20} /> : <span className="w-5 flex-shrink-0" />)
+                  : <span className="w-5 text-center text-[11px] flex-shrink-0">🕘</span>}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline gap-1.5">
-                    <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{u?.name ?? 'Ẩn danh'}</span>
-                    <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{new Date(n.createdAt).toLocaleString('vi-VN')}</span>
+                    {e.note && <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{u?.name ?? 'Ẩn danh'}</span>}
+                    <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{new Date(e.at).toLocaleString('vi-VN')}</span>
                   </div>
-                  <p className="text-xs break-words" style={{ color: 'var(--text-muted)' }}>{n.note}</p>
+                  <p className="text-xs break-words" style={{ color: 'var(--text-muted)', fontStyle: e.note ? 'normal' : 'italic' }}>{e.note ?? e.text}</p>
+                  {e.lines?.map((ln, j) => <p key={j} className="text-[11px] pl-2 break-words" style={{ color: 'var(--text-muted)' }}>- {ln}</p>)}
                 </div>
               </div>
             )
@@ -5196,6 +5230,7 @@ function TaskUpdateDrawer({ task, users, currentUser, canWrite, onClose }: {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const listRef = useRef<HTMLDivElement>(null)
+  const timeline = useTaskTimeline(task, users)
 
   const load = async () => {
     const { data } = await supabase.from('task_work_notes').select('*').eq('task_id', task.id).order('created_at')
@@ -5215,7 +5250,7 @@ function TaskUpdateDrawer({ task, users, currentUser, canWrite, onClose }: {
 
   useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight
-  }, [notes.length])
+  }, [timeline.length])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -5224,9 +5259,9 @@ function TaskUpdateDrawer({ task, users, currentUser, canWrite, onClose }: {
   }, [])
 
   // Gom theo ngày (ngày lấy từ thời điểm ghi, người dùng không chọn được)
-  const groups: { day: string; items: typeof notes }[] = []
-  notes.forEach(n => {
-    const day = new Date(n.createdAt).toLocaleDateString('vi-VN')
+  const groups: { day: string; items: TaskEvent[] }[] = []
+  timeline.forEach(n => {
+    const day = new Date(n.at).toLocaleDateString('vi-VN')
     const last = groups[groups.length - 1]
     if (last && last.day === day) last.items.push(n)
     else groups.push({ day, items: [n] })
@@ -5270,11 +5305,17 @@ function TaskUpdateDrawer({ task, users, currentUser, canWrite, onClose }: {
           ) : groups.map(g => (
             <div key={g.day} className="mb-4">
               <p className="font-bold" style={{ color: 'var(--text-primary)' }}>{g.day}:</p>
-              {g.items.map(n => (
-                <p key={n.id} className="pl-2 mt-0.5 break-words" style={{ color: 'var(--text-primary)' }}>
+              {g.items.map((n, i) => n.note ? (
+                <p key={i} className="pl-2 mt-0.5 break-words" style={{ color: 'var(--text-primary)' }}>
                   - {n.note}{' '}
-                  <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>({users.find(u => u.id === n.userId)?.name ?? '—'})</span>
+                  <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>({users.find(u => u.id === n.by)?.name ?? '—'})</span>
                 </p>
+              ) : (
+                <div key={i} className="pl-2 mt-0.5 break-words text-xs italic" style={{ color: 'var(--text-muted)' }}>
+                  🕘 {n.text}
+                  {n.lines?.map((ln, j) => <div key={j} className="pl-3 not-italic">- {ln}</div>)}
+                  <span className="text-[10px] not-italic"> · {new Date(n.at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
               ))}
             </div>
           ))}
@@ -6523,7 +6564,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                     </button>
                   </div>
                   {openWorkNoteFor === task.id && (
-                    <TaskWorkNotePanel taskId={task.id} currentUser={currentUser} users={users} />
+                    <TaskWorkNotePanel taskId={task.id} task={task} currentUser={currentUser} users={users} />
                   )}
 
                 </>
