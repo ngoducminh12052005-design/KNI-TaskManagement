@@ -11679,6 +11679,21 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   const [dateFilter, setDateFilter] = useState<DateFilterValue>(EMPTY_DATE_FILTER)
   const [signingProposal, setSigningProposal] = useState<Proposal | null>(null)
   const [pendingMine, setPendingMine] = useState<string[]>([])
+  // Nhớ tờ trình đang mở chi tiết: tải lại trang vẫn ở đúng chỗ (sessionStorage = theo từng tab)
+  const [restoreId, setRestoreId] = useState<string | null>(() => { try { return sessionStorage.getItem('proposalDetailId') } catch { return null } })
+  useEffect(() => {
+    if (!restoreId) return
+    const target = proposals.find(x => x.id === restoreId)
+    if (target) { setDetailProposal(target); setRestoreId(null) }
+    else if (proposals.length > 0) setRestoreId(null)   // dữ liệu đã tải mà không còn tờ trình này thì bỏ
+  }, [restoreId, proposals])
+  useEffect(() => {
+    if (restoreId) return   // đang chờ khôi phục, chưa ghi đè
+    try {
+      if (detailProposal) sessionStorage.setItem('proposalDetailId', detailProposal.id)
+      else sessionStorage.removeItem('proposalDetailId')
+    } catch {}
+  }, [detailProposal, restoreId])
   const loadPendingMine = async () => {
     const { data } = await supabase.from('proposal_steps').select('proposal_id').eq('approver_id', currentUser.id).eq('status', 'pending')
     setPendingMine((data ?? []).map((s: any) => s.proposal_id))
@@ -12167,10 +12182,10 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
         return cur.kind === 'dntt' ? <ProposalDnttView {...common} /> : isFormDoc(cur) ? <ProposalFormDocView {...common} /> : <ProposalDocView {...common} onEdit={cur.kind === 'totrinh' ? () => { setDocProposal(null); setEditingDoc(cur) } : undefined} />
       })()}
       {editingDoc && (
-        <ProposalDocForm currentUser={currentUser} users={users} editing={editingDoc} onClose={() => setEditingDoc(null)} />
+        <ProposalDocForm currentUser={currentUser} users={users} editing={editingDoc} onClose={() => { const id = editingDoc.id; setEditingDoc(null); setOpenNewId(id) }} />
       )}
       {editingProposal && (
-        <ProposalModal currentUser={currentUser} users={users} editingProposal={editingProposal} onClose={() => setEditingProposal(null)} />
+        <ProposalModal currentUser={currentUser} users={users} editingProposal={editingProposal} onClose={() => { const id = editingProposal.id; setEditingProposal(null); setOpenNewId(id) }} />
       )}
       {forwardingProposal && (
         <ForwardApprovalModal proposal={forwardingProposal} currentUser={currentUser} users={users} onClose={() => setForwardingProposal(null)} />
