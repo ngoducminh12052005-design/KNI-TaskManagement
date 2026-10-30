@@ -8154,20 +8154,26 @@ function DeptUserSelect({ users, excludeId, value, onChange }: {
     </div>
   )
 }
-// So sánh nội dung tờ trình cũ/mới -> chuỗi ghi vào lịch sử
-function docDiff(oldP: { title: string; company?: string; driveUrl?: string; formData?: Record<string, any> }, nw: { title: string; company: string; driveUrl: string; fd: Record<string, any>; newFiles: number }) {
+// So sánh nội dung tờ trình cũ/mới -> chuỗi ghi vào lịch sử (ghi mọi thay đổi, kể cả sửa ở phần sau của đoạn văn dài)
+function docDiff(
+  oldP: { title: string; company?: string; driveUrl?: string; formData?: Record<string, any> },
+  nw: { title: string; company: string; driveUrl: string; fd: Record<string, any>; newFiles: number; approvers?: { oldNames: string; newNames: string } },
+) {
   const o = oldP.formData ?? {}
-  const cut = (v: any) => { const t = (Array.isArray(v) ? v.join(' | ') : String(v ?? '')).replace(/\s+/g, ' ').trim(); return t.length > 70 ? t.slice(0, 70) + '…' : t }
+  const norm = (v: any) => (Array.isArray(v) ? v.join(' | ') : String(v ?? '')).replace(/\s+/g, ' ').trim()
+  const cut = (v: any) => { const t = norm(v); return t.length > 70 ? t.slice(0, 70) + '…' : t }
   const added: string[] = []; const edited: string[] = []
   const chk = (label: string, a: any, b: any) => {
+    if (norm(a) === norm(b)) return
     const x = cut(a), y = cut(b)
-    if (x === y) return
-    if (!x) added.push(`${label}: "${y}"`)
-    else if (!y) edited.push(`${label}: đã xóa "${x}"`)
+    if (!norm(a)) added.push(`${label}: "${y}"`)
+    else if (!norm(b)) edited.push(`${label}: đã xóa "${x}"`)
+    else if (x === y) edited.push(`${label}: đã sửa phần phía sau của nội dung (${norm(a).length} → ${norm(b).length} ký tự)`)
     else edited.push(`${label}: "${x}" → "${y}"`)
   }
   chk('Tiêu đề', oldP.title, nw.title)
   chk('Công ty', oldP.company, nw.company)
+  chk('Nơi lập', o.place, nw.fd.place)
   chk('Kính gửi', o.kinhGui, nw.fd.kinhGui)
   chk('Căn cứ', o.canCu, nw.fd.canCu)
   chk('Mở đầu', o.intro, nw.fd.intro)
@@ -8176,9 +8182,12 @@ function docDiff(oldP: { title: string; company?: string; driveUrl?: string; for
   chk('Đề nghị', o.deNghi, nw.fd.deNghi)
   chk('Mức ưu tiên', o.priority, nw.fd.priority)
   chk('Link Drive', oldP.driveUrl, nw.driveUrl)
-  chk('Người ký', o.signRoles, nw.fd.signRoles)
+  chk('Chức danh ký', o.signRoles, nw.fd.signRoles)
+  if (nw.approvers && nw.approvers.oldNames !== nw.approvers.newNames) {
+    edited.push(`Người duyệt: ${nw.approvers.oldNames || '—'} → ${nw.approvers.newNames || '—'}`)
+  }
   const oc: any[] = o.costRows ?? [], nc: any[] = nw.fd.costRows ?? []
-  const rowTxt = (r: any) => `${r.item} (${r.qty || ''} ${r.unit || ''} × ${r.price || ''})`.replace(/\s+/g, ' ')
+  const rowTxt = (r: any) => `${r.item} (${r.qty || ''} ${r.unit || ''} × ${r.price || ''})${r.note ? ` · ghi chú: ${r.note}` : ''}`.replace(/\s+/g, ' ')
   nc.forEach((r, i) => {
     const old = oc[i]
     if (!old) added.push(`Chi phí: thêm dòng "${rowTxt(r)}"`)
@@ -8188,7 +8197,6 @@ function docDiff(oldP: { title: string; company?: string; driveUrl?: string; for
   if (nw.newFiles > 0) added.push(`Đính kèm thêm ${nw.newFiles} file`)
   return { added: added.join('\n'), edited: edited.join('\n') }
 }
-
 function ProposalDocForm({ currentUser, users, onClose, onCreated, editing }: { currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void; editing?: Proposal | null }) {
   const now = new Date()
   const dateText = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()}`
@@ -8324,7 +8332,10 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing }: { 
 
     if (editing) {
       // ===== SỬA & GỬI LẠI =====
-      const diff = docDiff(editing, { title: title.trim(), company, driveUrl: driveUrl.trim(), fd: formData, newFiles: uploaded.length })
+      const { data: oldSteps } = await supabase.from('proposal_steps').select('approver_id, status, step_order').eq('proposal_id', editing.id).order('step_order')
+      const oldNames = (oldSteps ?? []).filter((s: any) => s.status !== 'skipped').map((s: any) => nameOf(s.approver_id)).join(' → ')
+      const newNames = approverIds.map(nameOf).join(' → ')
+      const diff = docDiff(editing, { title: title.trim(), company, driveUrl: driveUrl.trim(), fd: formData, newFiles: uploaded.length, approvers: { oldNames, newNames } })
       const { error: upErr } = await supabase.from('proposals').update({
         title: title.trim(), brief: title.trim(),
         description: (intro.trim() || noiDung.trim()).slice(0, 200),
@@ -8674,9 +8685,6 @@ function ProposalDocView({ p, users, currentUserId, onClose, canAct, onApprove, 
       <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
         <span className="text-sm font-bold text-gray-800">📄 Tờ trình {p.code ?? ''}</span>
         <div className="flex items-center gap-2">
-          {onEdit && p.submittedBy === currentUserId && p.status === 'rejected' && (
-            <button type="button" onClick={onEdit} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#d97706' }}>✏️ Chỉnh sửa & gửi lại</button>
-          )}
           <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
         </div>
       </div>
@@ -10586,9 +10594,9 @@ function ProposalPlanSection({ p, users, currentUser, flow }: {
     </section>
   )
 }
-function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revisions, onClose, onOpenDoc, canAct = false, onApprove, onReject, onRequestReview }: {
+function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revisions, onClose, onOpenDoc, onEdit, canAct = false, onApprove, onReject, onRequestReview }: {
   proposal: Proposal; users: User[]; currentUser: User; approvals: ProposalApproval[]; revisions: ProposalRevision[]; onClose: () => void; onOpenDoc?: () => void
-  canAct?: boolean; onApprove?: () => void | Promise<void>; onReject?: () => void | Promise<void>; onRequestReview?: () => void | Promise<void>
+  canAct?: boolean; onApprove?: () => void | Promise<void>; onReject?: () => void | Promise<void>; onRequestReview?: () => void | Promise<void>; onEdit?: () => void
 }) {
   const [steps, setSteps] = useState<{ id: string; approverId: string; order: number; status: string; note?: string; decidedAt?: string }[]>([])
   const userOf = (id?: string) => users.find(u => u.id === id)
@@ -10665,6 +10673,12 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
                 className="text-xs font-bold px-3 py-1.5 rounded-lg"
                 style={{ background: '#05966922', color: '#059669', border: '1px solid #05966955' }}>
                 📄 Xem {p.kind === 'dntt' ? 'đề nghị thanh toán' : isFormDoc(p) ? 'văn bản' : 'tờ trình'}
+              </button>
+            )}
+            {onEdit && (
+              <button type="button" onClick={onEdit}
+                className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: '#d97706' }}>
+                ✏️ Chỉnh sửa & gửi lại
               </button>
             )}
             {canAct && onRequestReview && (
@@ -12075,6 +12089,9 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
           <ProposalDetailModal
             proposal={cur}
             users={users} currentUser={currentUser} approvals={proposalApprovals} revisions={proposalRevisions}
+            onEdit={(cur.submittedBy === currentUser.id && cur.status === 'rejected')
+              ? () => { setDetailProposal(null); if (cur.kind === 'totrinh') setEditingDoc(cur); else setEditingProposal(cur) }
+              : undefined}
             onOpenDoc={(cur.kind === 'totrinh' || cur.kind === 'dntt' || isFormDoc(cur))
               ? () => { setDetailProposal(null); setDocProposal(cur) }
               : undefined}
