@@ -13086,30 +13086,19 @@ function ProjectProposals({ project, proposals, users, currentUser, canManage, o
       {linked.length === 0 && (
         <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Chưa có tờ trình hay đề xuất nào gắn vào dự án này.</p>
       )}
-      {linked.map(p => {
-        const [label, bg, color] = chip(p)
-        return (
-          <div key={p.id} className="py-2" style={{ borderTop: '1px solid var(--border)' }}>
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
-                  <span className="font-mono text-[11px] mr-2" style={{ color: 'var(--text-muted)' }}>{p.code ?? ''}</span>{p.title}
-                </p>
-                <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                  {groupOf(p)} · {nameOf(p.submittedBy)} · {new Date(p.createdAt).toLocaleDateString('vi-VN')}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="px-2 py-0.5 rounded-lg text-[11px] font-semibold whitespace-nowrap" style={{ background: bg, color }}>{label}</span>
-                {onOpenProposal && <button type="button" onClick={() => onOpenProposal(p.id)} className="text-[11px] underline" style={{ color: '#2563eb' }}>Mở</button>}
-                {(canManage || p.submittedBy === me) && (
-                  <button type="button" onClick={() => unlink(p)} className="text-[11px]" style={{ color: '#dc2626' }}>Gỡ</button>
-                )}
-              </div>
+            {linked.length > 0 && (
+        <>
+          <ProposalListTable proposals={linked} users={users} currentUser={currentUser} isMyTurn={() => false}
+            onOpen={p => onOpenProposal?.(p.id)} />
+          {linked.some(p => canManage || p.submittedBy === me) && (
+            <div className="flex flex-wrap gap-2 mt-2">
+              {linked.filter(p => canManage || p.submittedBy === me).map(p => (
+                <button key={p.id} type="button" onClick={() => unlink(p)} className="text-[11px] px-2 py-1 rounded-lg" style={{ background: '#f8717122', color: '#dc2626' }}>Gỡ {p.code ?? 'tờ trình'}</button>
+              ))}
             </div>
-          </div>
-        )
-      })}
+          )}
+        </>
+      )}
       {hidden > 0 && (
         <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>+ {hidden} tờ trình khác thuộc dự án nhưng bạn không liên quan nên không hiển thị.</p>
       )}
@@ -13123,7 +13112,7 @@ function ProjectProposals({ project, proposals, users, currentUser, canManage, o
             {candidates.map(p => <option key={p.id} value={p.code}>{p.title}</option>)}
           </datalist>
           <button type="button" onClick={link} disabled={!code.trim() || busy}
-            className="px-4 py-2 rounded-lg text-xs font-bold disabled:opacity-40 flex-shrink-0" style={{ background: '#7c3aed', color: '#fff' }}>＋ Gắn</button>
+            className="px-4 py-2 rounded-lg text-xs font-bold disabled:opacity-40 flex-shrink-0" style={{ background: '#7c3aed', color: '#fff' }}>＋ Gắn tờ trình</button>
         </div>
         {msg && <p className="text-[11px] mt-1.5" style={{ color: '#dc2626' }}>{msg}</p>}
       </div>
@@ -13136,6 +13125,9 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
   onClose: () => void; onChanged: () => void; onOpenTask?: (taskId: string) => void; onOpenProposal?: (proposalId: string) => void
 }) {
   const [showTaskForm, setShowTaskForm] = useState(false)
+  const [attachCode, setAttachCode] = useState('')
+  const [attachMsg, setAttachMsg] = useState('')
+  const [attachBusy, setAttachBusy] = useState(false)
   const [taskFilter, setTaskFilter] = useState<'all' | 'mine' | 'waiting' | 'overdue' | 'done'>('all')
   const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
   const money = (n: number) => Number(n || 0).toLocaleString('vi-VN')
@@ -13177,6 +13169,28 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
     return [w.label, w.color]
   }
   const canOpen = (t: Task) => t.assignedTo.includes(currentUser.id) || t.projectManager.includes(currentUser.id) || t.createdBy === currentUser.id
+    // Gắn TASK có sẵn vào dự án (theo mã TASK)
+  const attachCandidates = tasks.filter(t => !t.projectId && !!t.taskCode && !isTaskGated(t)
+    && (!!currentUser.isDirector || t.createdBy === currentUser.id || t.assignedTo.includes(currentUser.id) || t.projectManager.includes(currentUser.id)))
+  const attachTask = async () => {
+    const c = attachCode.trim().toUpperCase()
+    if (!c) return
+    setAttachMsg('')
+    const t = tasks.find(x => (x.taskCode ?? '').toUpperCase() === c)
+    if (!t) { setAttachMsg(`Không tìm thấy TASK ${c}.`); return }
+    if (t.projectId === project.id) { setAttachMsg('TASK này đã thuộc dự án rồi.'); return }
+    if (t.projectId) { setAttachMsg('TASK này đang thuộc một dự án khác.'); return }
+    if (!attachCandidates.some(x => x.id === t.id)) { setAttachMsg('Bạn không có quyền gắn TASK này (hoặc TASK chưa được duyệt).'); return }
+    setAttachBusy(true)
+    const { error } = await supabase.from('tasks').update({ project_id: project.id }).eq('id', t.id)
+    if (!error) {
+      const missing = t.assignedTo.filter(uid => !project.memberIds.includes(uid))
+      if (missing.length > 0) await supabase.from('project_members').insert(missing.map(uid => ({ project_id: project.id, user_id: uid, role: 'member' })))
+    }
+    setAttachBusy(false)
+    if (error) { setAttachMsg('Không gắn được: ' + error.message); return }
+    setAttachCode('')
+  }
 
   const row = (k: string, v: string) => (
     <div className="grid grid-cols-3 gap-2 py-1 text-xs">
@@ -13287,67 +13301,6 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
               {row('Bên bị ảnh hưởng', project.affected ?? '')}
               {row('Nhà cung cấp', [project.supplierName, project.supplierRef].filter(Boolean).join(' · '))}
             </section>
-
-            <section className="rounded-xl p-4" style={card}>
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Task của dự án ({list.length})</h3>
-                {projectOpen ? (
-                  <button type="button" onClick={() => setShowTaskForm(true)} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#7c3aed' }}>＋ Thêm task</button>
-                ) : (
-                  <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{approved ? 'Dự án đã đóng, không thêm task mới' : 'Dự án chưa được duyệt, chưa thêm task được'}</span>
-                )}
-              </div>
-              <div className="flex gap-2 mb-3 flex-wrap">
-                {tile('Tổng', list.length, 'var(--text-primary)')}
-                {tile('Đang làm', working, '#2563eb')}
-                {tile('Chờ duyệt', waiting, waiting > 0 ? '#7c3aed' : 'var(--text-muted)')}
-                {tile('Quá hạn', overdue, overdue > 0 ? '#dc2626' : 'var(--text-muted)')}
-                {tile('Hoàn thành', done, '#059669')}
-              </div>
-              <div className="flex gap-1.5 mb-2 flex-wrap">
-                {filterBtn('all', 'Tất cả')}
-                {filterBtn('mine', 'Của tôi')}
-                {filterBtn('waiting', 'Chờ duyệt')}
-                {filterBtn('overdue', 'Quá hạn')}
-                {filterBtn('done', 'Hoàn thành')}
-              </div>
-              {shown.length === 0 && (
-                <p className="text-xs py-2" style={{ color: 'var(--text-muted)' }}>
-                  {list.length === 0 ? 'Chưa có task nào. Bấm "＋ Thêm task" để tạo task đầu tiên của dự án.' : 'Không có task nào khớp bộ lọc.'}
-                </p>
-              )}
-              {shown.map(t => {
-                const [stLabel, stColor] = stateOf(t)
-                return (
-                  <div key={t.id} className="py-2" style={{ borderTop: '1px solid var(--border)' }}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
-                          <span className="font-mono text-[11px] mr-2" style={{ color: 'var(--text-muted)' }}>{t.taskCode ?? ''}</span>{t.title}
-                        </p>
-                        <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                          {t.assignedTo.length > 0 ? t.assignedTo.map(id => nameOf(id)).join(', ') : 'Chưa giao'}
-                          {t.selfCreated ? ' · tự tạo' : ''} · Hạn {fmtD(t.dueDate)}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {isOverdue(t) && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: '#dc262618', color: '#dc2626' }}>⚠️ Quá hạn</span>}
-                        <span className="text-[11px] font-semibold" style={{ color: stColor }}>{stLabel}</span>
-                        {canApproveSelfTask(t, currentUser, users) && (
-                          <>
-                            <button type="button" onClick={() => approveSelfTask(t, currentUser)} className="text-[11px] font-bold" style={{ color: '#059669' }}>✓ Duyệt</button>
-                            <button type="button" onClick={() => rejectSelfTask(t, currentUser)} className="text-[11px] font-bold" style={{ color: '#dc2626' }}>Từ chối</button>
-                          </>
-                        )}
-                        {onOpenTask && canOpen(t) && (
-                          <button type="button" onClick={() => onOpenTask(t.id)} className="text-[11px] underline" style={{ color: '#2563eb' }}>Mở</button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </section>
           </div>
 
           <div className="space-y-4">
@@ -13376,11 +13329,78 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
           </div>
         </div>
       </div>
-      <div className="max-w-5xl mx-auto grid md:grid-cols-3 gap-4 mt-4 pb-8">
-        <div className="md:col-span-2 space-y-4">
-          <ProjectProposals project={project} proposals={proposals} users={users} currentUser={currentUser} canManage={canAssign} onOpenProposal={onOpenProposal} />
-          <ProjectDiscussion project={project} currentUser={currentUser} users={users} />
-        </div>
+      <div className="max-w-5xl mx-auto space-y-4 mt-4 pb-8">
+        <section className="rounded-xl p-4" style={card}>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Task của dự án ({list.length})</h3>
+            {projectOpen ? (
+              <button type="button" onClick={() => setShowTaskForm(true)} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#7c3aed' }}>＋ Tạo TASK</button>
+            ) : (
+              <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{approved ? 'Dự án đã đóng, không thêm task mới' : 'Dự án chưa được duyệt, chưa thêm task được'}</span>
+            )}
+          </div>
+          {projectOpen && (
+            <div className="mb-3">
+              <div className="flex gap-1.5">
+                <input list="project-task-codes" value={attachCode} onChange={e => setAttachCode(e.target.value)} onKeyDown={e => e.key === 'Enter' && attachTask()}
+                  placeholder="Chọn hoặc dán mã TASK có sẵn để gắn vào dự án (VD: TASK291026-01)"
+                  className="flex-1 min-w-0 px-3 py-2 rounded-lg text-xs outline-none"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+                <datalist id="project-task-codes">
+                  {attachCandidates.map(t => <option key={t.id} value={t.taskCode ?? ''}>{t.title}</option>)}
+                </datalist>
+                <button type="button" onClick={attachTask} disabled={!attachCode.trim() || attachBusy}
+                  className="px-4 py-2 rounded-lg text-xs font-bold disabled:opacity-40 flex-shrink-0" style={{ background: '#7c3aed', color: '#fff' }}>＋ Gắn TASK</button>
+              </div>
+              {attachMsg && <p className="text-[11px] mt-1.5" style={{ color: '#dc2626' }}>{attachMsg}</p>}
+            </div>
+          )}
+          <div className="flex gap-2 mb-3 flex-wrap">
+            {tile('Tổng', list.length, 'var(--text-primary)')}
+            {tile('Đang làm', working, '#2563eb')}
+            {tile('Chờ duyệt', waiting, waiting > 0 ? '#7c3aed' : 'var(--text-muted)')}
+            {tile('Quá hạn', overdue, overdue > 0 ? '#dc2626' : 'var(--text-muted)')}
+            {tile('Hoàn thành', done, '#059669')}
+          </div>
+          <div className="flex gap-1.5 mb-2 flex-wrap">
+            {filterBtn('all', 'Tất cả')}
+            {filterBtn('mine', 'Của tôi')}
+            {filterBtn('waiting', 'Chờ duyệt')}
+            {filterBtn('overdue', 'Quá hạn')}
+            {filterBtn('done', 'Hoàn thành')}
+          </div>
+          {shown.length === 0 && (
+            <p className="text-xs py-2" style={{ color: 'var(--text-muted)' }}>
+              {list.length === 0 ? 'Chưa có task nào. Bấm "＋ Tạo TASK" để tạo task đầu tiên, hoặc gắn TASK có sẵn.' : 'Không có task nào khớp bộ lọc.'}
+            </p>
+          )}
+          {shown.length > 0 && (
+            <>
+              {list.some(t => canApproveSelfTask(t, currentUser, users)) && (
+                <div className="rounded-lg p-3 mb-3" style={{ background: '#f59e0b1a', border: '1px solid #f59e0b55' }}>
+                  <p className="text-xs font-bold mb-1" style={{ color: '#b45309' }}>⏳ Task tự tạo đang chờ bạn duyệt</p>
+                  {list.filter(t => canApproveSelfTask(t, currentUser, users)).map(t => (
+                    <div key={t.id} className="flex items-center justify-between gap-2 py-1 text-xs">
+                      <span style={{ color: 'var(--text-primary)' }}><span className="font-mono mr-1" style={{ color: 'var(--text-muted)' }}>{t.taskCode ?? ''}</span>{t.title}</span>
+                      <span className="flex gap-3 shrink-0">
+                        <button type="button" onClick={() => approveSelfTask(t, currentUser)} className="font-bold" style={{ color: '#059669' }}>✓ Duyệt</button>
+                        <button type="button" onClick={() => rejectSelfTask(t, currentUser)} className="font-bold" style={{ color: '#dc2626' }}>Từ chối</button>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <TaskListTable tasks={shown} users={users} currentUser={currentUser}
+                onOpen={t => {
+                  if (!onOpenTask) return
+                  if (!canOpen(t)) { alert('Bạn không phải người tham gia task này nên không mở được chi tiết.'); return }
+                  onOpenTask(t.id)
+                }} />
+            </>
+          )}
+        </section>
+        <ProjectProposals project={project} proposals={proposals} users={users} currentUser={currentUser} canManage={canAssign} onOpenProposal={onOpenProposal} />
+        <ProjectDiscussion project={project} currentUser={currentUser} users={users} />
       </div>
       {showTaskForm && <ProjectTaskForm project={project} users={users} currentUser={currentUser} canAssign={canAssign} onClose={() => setShowTaskForm(false)} />}
     </div>
