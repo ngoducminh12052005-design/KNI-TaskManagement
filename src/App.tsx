@@ -8238,7 +8238,7 @@ function docDiff(
   if (nw.newFiles > 0) added.push(`Đính kèm thêm ${nw.newFiles} file`)
   return { added: added.join('\n'), edited: edited.join('\n') }
 }
-function ProposalDocForm({ currentUser, users, onClose, onCreated, editing }: { currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void; editing?: Proposal | null }) {
+function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, projectId }: { currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void; editing?: Proposal | null; projectId?: string }) {
   const now = new Date()
   const dateText = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()}`
   const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)
@@ -8432,7 +8432,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing }: { 
         code: await generateProposalCode(currentUser.id),
         group_name: 'Tờ trình', department: currentUser.department, company: company || null,
         brief: title.trim(), approval_mode: approvalMode,
-        attachments: uploaded, items, kind: 'totrinh', form_data: formData,
+        attachments: uploaded, items, kind: 'totrinh', form_data: formData, project_id: projectId ?? null,
       }).select('id').single()
       data = res.data; insertError = res.error
       if (!insertError && data?.id) {
@@ -12545,8 +12545,11 @@ function ProjectMemberPicker({ users, excludeIds, value, onChange }: {
 // Gồm 2 hàm: ProjectForm (form tạo dự án cũ) và ProjectDetail (trang chi tiết dự án cũ).
 // Đã giữ phần "Danh mục" dự án mà bạn đổi sau này.
 
-function ProjectForm({ currentUser, users, onClose, onCreated }: {
-  currentUser: User; users: User[]; onClose: () => void; onCreated: (id: string) => void
+// Task nhập sẵn trong form tạo dự án (tạo cùng lúc với dự án)
+type DraftProjectTask = { title: string; description: string; assignees: string[]; slaLevel: string; exp: number; startDate: string; dueDate: string }
+
+function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
+  currentUser: User; users: User[]; proposals: Proposal[]; onClose: () => void; onCreated: (id: string) => void
 }) {
   const [name, setName] = useState('')
   const [company, setCompany] = useState('')
@@ -12570,7 +12573,30 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  const box = 'w-full border border-gray-300 rounded px-2 py-1.5 bg-white text-sm outline-none focus:border-blue-500'
+  const box = 'w-full bg-transparent border-0 border-b border-dashed border-gray-400 px-0.5 py-1 text-sm outline-none focus:border-blue-500'
+
+  // ===== Mục TASK và TỜ TRÌNH ngay trong form =====
+  const isStaff = !currentUser.isDirector && currentUser.role !== 'manager'
+  const todayStr = new Date().toISOString().split('T')[0]
+  const blankTask = (): DraftProjectTask => ({ title: '', description: '', assignees: isStaff ? [currentUser.id] : [], slaLevel: '', exp: slaExpRange('').suggested, startDate: todayStr, dueDate: '' })
+  const [openTask, setOpenTask] = useState(false)
+  const [openProp, setOpenProp] = useState(false)
+  const [draftTasks, setDraftTasks] = useState<DraftProjectTask[]>([])
+  const [nt, setNt] = useState<DraftProjectTask>(blankTask)
+  const [attachIds, setAttachIds] = useState<string[]>([])
+  const uname = (id: string) => users.find(u => u.id === id)?.name ?? id
+  const attachable = proposals.filter(p => !p.projectId && p.code
+    && (!!currentUser.isDirector || p.submittedBy === currentUser.id || p.recipientId === currentUser.id || p.participants.includes(currentUser.id)))
+  const addDraftTask = () => {
+    if (!nt.title.trim()) { setError('Vui lòng nhập tên task.'); return }
+    if (nt.assignees.length === 0) { setError('Vui lòng chọn người phụ trách cho task.'); return }
+    if (nt.dueDate && nt.dueDate < nt.startDate) { setError('Hạn hoàn thành phải sau ngày bắt đầu.'); return }
+    const r = slaExpRange(nt.slaLevel)
+    if ((nt.exp < r.min || nt.exp > r.max) && !window.confirm(`EXP ${nt.exp} nằm ngoài khung gợi ý ${r.min}–${r.max}. Vẫn thêm?`)) return
+    setDraftTasks(l => [...l, { ...nt, title: nt.title.trim(), description: nt.description.trim() }])
+    setNt({ ...blankTask(), slaLevel: nt.slaLevel, exp: nt.exp })
+    setError('')
+  }
   const ink = { color: '#111827' }
   const label = 'block text-xs font-semibold text-gray-600 mb-1'
   const userOptions = (
@@ -12592,6 +12618,7 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
     if (!company) { setError('Vui lòng chọn công ty.'); return }
     if (!managerId) { setError('Vui lòng chọn quản lý dự án.'); return }
     if (plannedStart && plannedEnd && plannedEnd < plannedStart) { setError('Ngày kết thúc phải sau ngày bắt đầu.'); return }
+    if (nt.title.trim()) { setError('Bạn đang nhập dở một task: bấm "＋ Thêm task vào dự án" hoặc xóa tên task trước khi tạo dự án.'); return }
     setSaving(true); setError('')
     const now = new Date()
     const ds = String(now.getDate()).padStart(2, '0') + String(now.getMonth() + 1).padStart(2, '0') + String(now.getFullYear()).slice(-2)
@@ -12609,24 +12636,47 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
         affected: affected.trim() || null, planned_start: plannedStart || null, planned_end: plannedEnd || null,
         budget: Number(budget) || 0, supplier_name: supplierName.trim() || null, supplier_ref: supplierRef.trim() || null,
         risk_level: riskLevel, created_by: currentUser.id,
-        approval_status: needsApproval ? 'pending' : 'approved',
-      }).select('id').single()
+        approval_status: needsApproval ? 'draft' : 'approved',
+      }).select('id, code').single()
       created = res.data; insertError = res.error
       if (!insertError || insertError.code !== '23505') break
     }
     if (insertError || !created) { setSaving(false); setError(insertError?.message ?? 'Không tạo được dự án.'); return }
-    const memberIds = Array.from(new Set([...managerIds, ...(ownerId ? [ownerId] : []), ...members]))
+    const memberIds = Array.from(new Set([...managerIds, ...(ownerId ? [ownerId] : []), ...members, ...draftTasks.flatMap(d => d.assignees)]))
     await supabase.from('project_members').insert(memberIds.map(uid => ({ project_id: created.id, user_id: uid, role: managerIds.includes(uid) ? 'manager' : 'member' })))
-        if (needsApproval) {
-      const approverIds = projectApproverIds({ createdBy: currentUser.id, managerId, managerIds, teamId: currentUser.teamId }, users)
-      const approvers = users.filter(u => approverIds.includes(u.id))
-      if (approvers.length > 0) {
-        await supabase.from('notifications').insert(approvers.map(u => ({
-          message: `🗂️ ${currentUser.name} đề xuất dự án "${name.trim()}" và chờ bạn duyệt`,
-          target_user_id: u.id,
-        })))
+            // Task nhập sẵn: dự án còn nháp thì task cũng nháp (duyệt dự án xong mới giao + tính SLA)
+    const projectActive = !needsApproval
+    const nowIso = new Date().toISOString()
+    const failed: string[] = []
+    for (let i = 0; i < draftTasks.length; i++) {
+      const d = draftTasks[i]
+      const res2 = await supabase.from('tasks').insert({
+        title: d.title, description: d.description, exp_reward: d.exp,
+        task_code: `TASK-${created.code}.${i + 1}`, project_id: created.id,
+        work_status: 'received', status: 'open',
+        assigned_to: d.assignees, project_manager: managerIds, supporters: [],
+        created_by: currentUser.id,
+        start_date: d.startDate, due_date: d.dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+        category: 'projects_dev', priority: 'medium', self_created: false,
+        important: false, urgent: false, is_team_project: false,
+        cross_dept_pending: false, target_team_id: null,
+        creation_approval: projectActive ? 'approved' : 'draft',
+        sla_level: d.slaLevel || null,
+        sla_start_at: projectActive && d.slaLevel ? nowIso : null,
+        drive_folder_created: false, drive_folder_name: null,
+      }).select('id, task_code').single()
+      if (res2.error || !res2.data) { failed.push(d.title); continue }
+      if (projectActive) {
+        for (const uid of d.assignees.filter(u => u !== currentUser.id)) {
+          await supabase.from('notifications').insert({
+            message: `📋 ${currentUser.name} vừa giao task [${res2.data.task_code}] cho bạn trong dự án [${created.code}] ${name.trim()}: ${d.title}`,
+            target_user_id: uid, link_task_id: res2.data.id,
+          })
+        }
       }
     }
+    if (attachIds.length > 0) await supabase.from('proposals').update({ project_id: created.id }).in('id', attachIds)
+    if (failed.length > 0) alert('Dự án đã tạo nhưng chưa tạo được task: ' + failed.join(', ') + '. Bạn thêm lại trong chi tiết dự án.')
     setSaving(false)
     onCreated(created.id)
     onClose()
@@ -12640,6 +12690,11 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
       </div>
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-[860px] mx-auto my-4 bg-white shadow-xl p-6 sm:p-8 space-y-5 text-[13px]" style={ink}>
+          <p className="font-bold text-gray-500">TẬP ĐOÀN KHÔI NGUYÊN INVESTMENT (KNI)</p>
+          <div className="grid grid-cols-3 border border-black">
+            <div className="p-3 text-xs border-r border-black flex items-center">Mã dự án: <span className="ml-1 font-mono text-gray-500">PTASK… (tự sinh)</span></div>
+            <div className="col-span-2 p-3 text-center text-2xl font-bold">PHIẾU DỰ ÁN<span className="text-blue-400"> / PROJECT</span></div>
+          </div>
           <div>
             <label className={label}>Tên dự án *</label>
             <input value={name} onChange={e => setName(e.target.value)} placeholder="VD: Nâng cấp hạ tầng mạng văn phòng ACVN Hà Nội" className={box} style={ink} />
@@ -12747,6 +12802,101 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
             </div>
           </div>
           <p className="text-xs text-gray-500">Mã dự án <b>PTASKngàytháng năm-số thứ tự</b> (ví dụ PTASK201026-01) sẽ tự sinh khi lưu.</p>
+
+          {/* ===== TASK ===== */}
+          <div className="border-t border-black pt-3">
+            <button type="button" onClick={() => setOpenTask(o => !o)} className="w-full flex items-center justify-between text-left">
+              <span className="font-bold text-sm text-gray-800">✅ TASK <span className="font-normal text-gray-500">({draftTasks.length})</span></span>
+              <span className="text-gray-500">{openTask ? '▲' : '▼'}</span>
+            </button>
+            {openTask && (
+              <div className="mt-3 space-y-3">
+                {draftTasks.map((d, i) => (
+                  <div key={i} className="border border-gray-300 rounded p-2 text-xs flex items-start justify-between gap-2">
+                    <div>
+                      <p className="font-semibold text-gray-800">{i + 1}. {d.title}</p>
+                      {d.description && <p className="text-gray-600">{d.description}</p>}
+                      <p className="text-gray-500">Phụ trách: {d.assignees.map(uname).join(', ')} · SLA: {d.slaLevel || 'Không áp dụng'} · EXP {d.exp} · {d.startDate} → {d.dueDate || 'chưa đặt hạn'}</p>
+                    </div>
+                    <button type="button" onClick={() => setDraftTasks(l => l.filter((_, k) => k !== i))} className="text-red-600 font-bold">✕</button>
+                  </div>
+                ))}
+                <div className="border border-dashed border-gray-400 rounded p-3 space-y-3">
+                  <div>
+                    <label className={label}>Tên task</label>
+                    <input value={nt.title} onChange={e => setNt({ ...nt, title: e.target.value })} className={box} style={ink} />
+                  </div>
+                  <div>
+                    <label className={label}>Mô tả ngắn</label>
+                    <input value={nt.description} onChange={e => setNt({ ...nt, description: e.target.value })} className={box} style={ink} />
+                  </div>
+                  <table className="w-full border-collapse text-xs">
+                    <tbody>
+                      <tr>
+                        <td className="border border-gray-400 bg-gray-50 font-bold p-1.5 w-[22%]">Ngày bắt đầu</td>
+                        <td className="border border-gray-400 p-1"><input type="date" value={nt.startDate} onChange={e => setNt({ ...nt, startDate: e.target.value })} className={box} style={ink} /></td>
+                        <td className="border border-gray-400 bg-gray-50 font-bold p-1.5 w-[22%]">Hạn hoàn thành</td>
+                        <td className="border border-gray-400 p-1"><input type="date" value={nt.dueDate} onChange={e => setNt({ ...nt, dueDate: e.target.value })} className={box} style={ink} /></td>
+                      </tr>
+                      <tr>
+                        <td className="border border-gray-400 bg-gray-50 font-bold p-1.5">Mức độ SLA</td>
+                        <td className="border border-gray-400 p-1">
+                          <select value={nt.slaLevel} onChange={e => setNt({ ...nt, slaLevel: e.target.value, exp: slaExpRange(e.target.value).suggested })} className={box} style={ink}>
+                            <option value="">-- Không áp dụng SLA --</option>
+                            {Object.entries(SLA_LEVELS).map(([k, c]) => <option key={k} value={k}>{c.label}</option>)}
+                          </select>
+                        </td>
+                        <td className="border border-gray-400 bg-gray-50 font-bold p-1.5">EXP thưởng</td>
+                        <td className="border border-gray-400 p-1"><input type="number" value={nt.exp} onChange={e => setNt({ ...nt, exp: Number(e.target.value) })} className={box} style={{ ...ink, fontWeight: 700 }} /></td>
+                      </tr>
+                      <tr>
+                        <td className="border border-gray-400 bg-gray-50 font-bold p-1.5">Người phụ trách</td>
+                        <td className="border border-gray-400 p-1.5" colSpan={3}>
+                          {isStaff ? <span>{currentUser.name} (bạn tự nhận)</span> : (
+                            <>
+                              <div className="flex flex-wrap gap-1.5 mb-1">
+                                {nt.assignees.map(id => (
+                                  <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full" style={{ background: '#ede9fe', color: '#5b21b6' }}>
+                                    {uname(id)}<button type="button" onClick={() => setNt({ ...nt, assignees: nt.assignees.filter(x => x !== id) })} className="font-bold">✕</button>
+                                  </span>
+                                ))}
+                              </div>
+                              <select value="" onChange={e => { const v = e.target.value; if (v && !nt.assignees.includes(v)) setNt({ ...nt, assignees: [...nt.assignees, v] }) }} className={box} style={ink}>
+                                <option value="">＋ Thêm người phụ trách</option>
+                                {users.filter(u => !nt.assignees.includes(u.id)).map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+                              </select>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <button type="button" onClick={addDraftTask} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#7c3aed' }}>＋ Thêm task vào dự án</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ===== TỜ TRÌNH ===== */}
+          <div className="border-t border-black pt-3">
+            <button type="button" onClick={() => setOpenProp(o => !o)} className="w-full flex items-center justify-between text-left">
+              <span className="font-bold text-sm text-gray-800">📜 TỜ TRÌNH <span className="font-normal text-gray-500">({attachIds.length})</span></span>
+              <span className="text-gray-500">{openProp ? '▲' : '▼'}</span>
+            </button>
+            {openProp && (
+              <div className="mt-3 space-y-2">
+                {attachable.length === 0 ? (
+                  <p className="text-xs text-gray-500">Bạn chưa có tờ trình nào chưa gắn dự án.</p>
+                ) : attachable.map(p => (
+                  <label key={p.id} className="flex items-start gap-2 text-xs cursor-pointer">
+                    <input type="checkbox" checked={attachIds.includes(p.id)} onChange={() => setAttachIds(a => a.includes(p.id) ? a.filter(x => x !== p.id) : [...a, p.id])} />
+                    <span><span className="font-mono text-gray-500">{p.code}</span> {p.title}</span>
+                  </label>
+                ))}
+                <p className="text-[11px] text-gray-500">Muốn viết tờ trình mới cho dự án: bấm Tạo dự án, vào chi tiết rồi bấm "＋ Tạo tờ trình".</p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
       <div className="shrink-0 px-4 py-3 flex items-center justify-end gap-3" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
@@ -12754,7 +12904,7 @@ function ProjectForm({ currentUser, users, onClose, onCreated }: {
         <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600">Hủy</button>
         <button type="button" onClick={submit} disabled={saving}
           className="px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40" style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
-          {saving ? 'Đang lưu...' : needsApproval ? 'Gửi trưởng bộ phận duyệt' : 'Tạo dự án'}
+          {saving ? 'Đang lưu...' : 'Tạo dự án'}
         </button>
       </div>
     </div>
@@ -12782,8 +12932,8 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [assignees, setAssignees] = useState<string[]>(canAssign ? [] : [currentUser.id])
-  const [priority, setPriority] = useState<TaskPriority>('medium')
-  const [exp, setExp] = useState(getExpRange('medium', false, false).suggested)
+  const [slaLevel, setSlaLevel] = useState('')
+  const [exp, setExp] = useState(slaExpRange('').suggested)
   const [startDate, setStartDate] = useState(todayStr)
   const [dueDate, setDueDate] = useState('')
   const [saving, setSaving] = useState(false)
@@ -12792,20 +12942,17 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
   const inp = { background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
   const lab = 'text-xs font-semibold mb-1 block'
   const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? id
-  const range = getExpRange(priority, false, false)
+  const range = slaExpRange(slaLevel)
   const memberUsers = users.filter(u => project.memberIds.includes(u.id))
   const otherUsers = users.filter(u => !project.memberIds.includes(u.id))
 
-  const changePriority = (p: TaskPriority) => { setPriority(p); setExp(getExpRange(p, false, false).suggested) }
+  const changeSla = (v: string) => { setSlaLevel(v); setExp(slaExpRange(v).suggested) }
 
   const submit = async () => {
     if (!title.trim()) { setError('Vui lòng nhập tên task.'); return }
     if (assignees.length === 0) { setError('Vui lòng chọn ít nhất một người phụ trách.'); return }
     if (dueDate && dueDate < startDate) { setError('Hạn hoàn thành phải sau ngày bắt đầu.'); return }
-    if (exp < range.min || exp > range.max) {
-      setError(`Điểm EXP phải nằm trong khoảng ${range.min}–${range.max} cho mức độ "${PRIORITY_CONFIG[priority].label}".`)
-      return
-    }
+        if ((exp < range.min || exp > range.max) && !window.confirm(`EXP ${exp} nằm ngoài khung gợi ý ${range.min}–${range.max} của ${slaLevel || 'task không SLA'}. Vẫn lưu?`)) return
     setSaving(true); setError('')
     const creatingForSelf = !canAssign
     const finalDue = dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]
@@ -12824,10 +12971,13 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
         supporters: [],
         created_by: currentUser.id,
         start_date: startDate, due_date: finalDue,
-        category: 'projects_dev', priority, self_created: creatingForSelf,
+        category: 'projects_dev', priority: 'medium', self_created: creatingForSelf,
         important: false, urgent: false, is_team_project: false,
         cross_dept_pending: false, target_team_id: null,
-        creation_approval: creatingForSelf && currentUser.role === 'employee' ? 'pending' : 'approved',
+        // Dự án chưa duyệt thì task ở nháp (duyệt dự án xong mới giao + tính SLA)
+        creation_approval: project.approvalStatus !== 'approved' ? 'draft' : (creatingForSelf && currentUser.role === 'employee' ? 'pending' : 'approved'),
+        sla_level: slaLevel || null,
+        sla_start_at: (slaLevel && project.approvalStatus === 'approved') ? new Date().toISOString() : null,
         drive_folder_created: false, drive_folder_name: null,
       }).select('id').single()
       newTask = res.data; lastError = res.error
@@ -12842,6 +12992,7 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
     }
 
     // Thông báo: người được giao và quản lý dự án
+    if (project.approvalStatus !== 'approved') { setSaving(false); onClose(); return }
     const where = `trong dự án [${project.code}] ${project.name}`
     const notified = new Set<string>()
     if (canAssign) {
@@ -12924,9 +13075,10 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={lab} style={{ color: 'var(--text-muted)' }}>Mức độ</label>
-              <select value={priority} onChange={e => changePriority(e.target.value as TaskPriority)} className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inp}>
-                {(['low', 'medium', 'high'] as TaskPriority[]).map(p => <option key={p} value={p}>{PRIORITY_CONFIG[p].label}</option>)}
+              <label className={lab} style={{ color: 'var(--text-muted)' }}>Mức độ SLA</label>
+              <select value={slaLevel} onChange={e => changeSla(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inp}>
+                <option value="">-- Không áp dụng SLA --</option>
+                {Object.entries(SLA_LEVELS).map(([k, c]) => <option key={k} value={k}>{c.label}</option>)}
               </select>
             </div>
             <div>
@@ -13042,12 +13194,14 @@ function ProjectProposals({ project, proposals, users, currentUser, canManage, o
 }) {
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
+  const [creating, setCreating] = useState(false)
   const [msg, setMsg] = useState('')
   const me = currentUser.id
   const isDir = !!currentUser.isDirector
   const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
   const involved = (p: Proposal) => p.submittedBy === me || p.recipientId === me || p.participants.includes(me)
   const canView = (p: Proposal) => canManage || isDir || involved(p)
+    || (project.approvalStatus === 'pending' && projectApproverIds(project, users).includes(me))
   const groupOf = (p: Proposal) => p.groupName ?? (p.kind === 'totrinh' ? 'Tờ trình' : 'Đề xuất')
   const chip = (p: Proposal): [string, string, string] =>
     p.status === 'pending' ? ['⏳ Chờ duyệt', '#fbbf2422', '#d97706']
@@ -13082,7 +13236,13 @@ function ProjectProposals({ project, proposals, users, currentUser, canManage, o
 
   return (
     <section className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
-      <h3 className="text-sm font-bold mb-3" style={{ color: 'var(--text-primary)' }}>📜 Tờ trình & Đề xuất liên quan ({linked.length})</h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>📜 Tờ trình & Đề xuất liên quan ({linked.length})</h3>
+        {(canManage || project.createdBy === me) && (
+          <button type="button" onClick={() => setCreating(true)} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#7c3aed' }}>＋ Tạo tờ trình</button>
+        )}
+      </div>
+      {creating && <ProposalDocForm currentUser={currentUser} users={users} projectId={project.id} onClose={() => setCreating(false)} />}
       {linked.length === 0 && (
         <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Chưa có tờ trình hay đề xuất nào gắn vào dự án này.</p>
       )}
@@ -13146,7 +13306,8 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
   const team = TEAMS.find(t => t.id === project.teamId)
   const canAssign = canEdit || currentUser.role === 'manager'
     const approved = project.approvalStatus === 'approved'
-  const projectOpen = project.status !== 'closed' && project.status !== 'done' && approved
+  const projectOpen = project.status !== 'closed' && project.status !== 'done'
+    && (approved || project.approvalStatus === 'draft' || project.approvalStatus === 'rejected')
   const creator = users.find(u => u.id === project.createdBy)
   const approverIds = projectApproverIds(project, users)
   const canDecide = project.approvalStatus === 'pending' && (!!currentUser.isDirector || approverIds.includes(currentUser.id))
@@ -13212,6 +13373,18 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
       .update({ approval_status: 'approved', approval_note: null, approved_by: currentUser.id })
       .eq('id', project.id).eq('approval_status', 'pending')
     if (error) { alert('Không duyệt được: ' + error.message); return }
+    // Duyệt dự án = duyệt luôn các task nháp trong dự án: giao việc, thông báo và bắt đầu tính SLA
+    const { data: drafts } = await supabase.from('tasks').select('id, title, task_code, assigned_to').eq('project_id', project.id).eq('creation_approval', 'draft')
+    if ((drafts ?? []).length > 0) {
+      const nowIso = new Date().toISOString()
+      await supabase.from('tasks').update({ creation_approval: 'approved', sla_start_at: nowIso }).eq('project_id', project.id).eq('creation_approval', 'draft').not('sla_level', 'is', null)
+      await supabase.from('tasks').update({ creation_approval: 'approved' }).eq('project_id', project.id).eq('creation_approval', 'draft')
+      for (const t of drafts ?? []) {
+        for (const uid of ((t.assigned_to ?? []) as string[]).filter(u => u !== currentUser.id)) {
+          await supabase.from('notifications').insert({ message: `📋 Task [${t.task_code}] trong dự án "${project.name}" đã được giao cho bạn: ${t.title}`, target_user_id: uid, link_task_id: t.id })
+        }
+      }
+    }
     if (project.createdBy) await notifyUsers([project.createdBy], `✅ ${currentUser.name} đã duyệt dự án "${project.name}". Bạn có thể bắt đầu làm.`)
     onChanged()
   }
@@ -13223,6 +13396,17 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
       .eq('id', project.id).eq('approval_status', 'pending')
     if (error) { alert('Không từ chối được: ' + error.message); return }
     if (project.createdBy) await notifyUsers([project.createdBy], `❌ ${currentUser.name} đã từ chối dự án "${project.name}": ${reason}`)
+    onChanged()
+  }
+  // Gửi quản lý duyệt: lúc này người duyệt thấy đủ thông tin, task, tờ trình của dự án
+  const sendForApproval = async () => {
+    if (list.length === 0 && !window.confirm('Dự án chưa có task nào. Vẫn gửi duyệt?')) return
+    const { error } = await supabase.from('projects')
+      .update({ approval_status: 'pending', approval_note: null })
+      .eq('id', project.id).eq('approval_status', 'draft')
+    if (error) { alert('Không gửi duyệt được: ' + error.message); return }
+    const nProp = proposals.filter(p => p.projectId === project.id).length
+    await notifyUsers(approverIds, `🗂️ ${currentUser.name} gửi dự án "${project.name}" (${list.length} task, ${nProp} tờ trình) và chờ bạn duyệt`)
     onChanged()
   }
   const resubmitProject = async () => {
@@ -13268,7 +13452,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
             <div>
               <p className="text-sm font-bold" style={{ color: '#b45309' }}>⏳ Dự án đang chờ trưởng bộ phận duyệt</p>
               <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                {canDecide ? `${nameOf(project.createdBy)} đề xuất dự án này. Duyệt xong mới được thêm task và bắt đầu làm.` : 'Chưa thể thêm task cho đến khi được duyệt.'}
+                {canDecide ? `${nameOf(project.createdBy)} đề xuất dự án này. Xem thông tin, task và tờ trình bên dưới rồi duyệt. Duyệt xong các task sẽ được giao và bắt đầu tính SLA.` : 'Chưa thể thêm task cho đến khi được duyệt.'}
               </p>
             </div>
             {canDecide && (
@@ -13287,6 +13471,17 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
             </div>
             {isCreator && (
               <button type="button" onClick={resubmitProject} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#7c3aed' }}>📤 Gửi lại duyệt</button>
+            )}
+          </div>
+        )}
+        {project.approvalStatus === 'draft' && (
+          <div className="rounded-xl p-4 mb-4 flex items-center justify-between gap-3 flex-wrap" style={{ background: '#0284c71a', border: '1px solid #0284c766' }}>
+            <div>
+              <p className="text-sm font-bold" style={{ color: '#0369a1' }}>📝 Dự án chưa gửi duyệt</p>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>Bạn có thể thêm task và tờ trình bên dưới. Khi gửi, quản lý sẽ thấy đủ thông tin, task và tờ trình để duyệt.</p>
+            </div>
+            {isCreator && (
+              <button type="button" onClick={sendForApproval} className="px-4 py-2 rounded-lg text-sm font-bold text-white" style={{ background: '#7c3aed' }}>📤 Gửi quản lý duyệt</button>
             )}
           </div>
         )}
@@ -13667,7 +13862,7 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
         : <ProjectListTable projects={visible} tasks={tasks} users={users} currentUser={currentUser}
             canSee={canSee} onOpen={p => setOpenId(p.id)} />}
 
-      {showForm && <ProjectForm currentUser={currentUser} users={users} onClose={() => setShowForm(false)} onCreated={async (id) => { await load(); setOpenId(id) }} />}
+      {showForm && <ProjectForm currentUser={currentUser} users={users} proposals={proposals} onClose={() => setShowForm(false)} onCreated={async (id) => { await load(); setOpenId(id) }} />}
       {open && <ProjectDetail project={open} users={users} tasks={tasks} proposals={proposals} currentUser={currentUser} canEdit={canEditProject(open)} onClose={() => setOpenId(null)} onChanged={load} onOpenTask={onOpenTask} onOpenProposal={onOpenProposal} />}
     </div>
   )
