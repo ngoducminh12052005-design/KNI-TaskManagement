@@ -10482,7 +10482,13 @@ function ProposalCommentsSection({ p, users, currentUser }: { p: Proposal; users
     const { data } = await supabase.from('proposal_comments').select('*').eq('proposal_id', p.id).order('created_at')
     setComments((data ?? []).map((c: any) => ({ id: c.id, userId: c.user_id, content: c.content, createdAt: c.created_at })))
   }
-  useEffect(() => { load() }, [p.id])
+  useEffect(() => {
+    load()
+    const ch = supabase.channel(`proposal-comments-${p.id}-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'proposal_comments', filter: `proposal_id=eq.${p.id}` }, () => { load() })
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [p.id])
   const send = async () => {
     const t = text.trim()
     if (!t) return
@@ -10656,6 +10662,22 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
     return () => { alive = false }
   }, [p.id, p.status, p.recipientId])
 
+  // Bình luận ở mục Trao đổi cũng được ghi vào Lịch sử (tự cập nhật khi có người nhắn)
+  const [comments, setComments] = useState<{ id: string; userId: string; content: string; createdAt: string }[]>([])
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      const { data } = await supabase.from('proposal_comments').select('*').eq('proposal_id', p.id).order('created_at')
+      if (!alive) return
+      setComments((data ?? []).map((c: any) => ({ id: c.id, userId: c.user_id, content: c.content, createdAt: c.created_at })))
+    }
+    load()
+    const ch = supabase.channel(`proposal-history-comments-${p.id}-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'proposal_comments', filter: `proposal_id=eq.${p.id}` }, () => { load() })
+      .subscribe()
+    return () => { alive = false; supabase.removeChannel(ch) }
+  }, [p.id])
+
   const flow = steps.length > 0 ? steps : [{
     id: 'legacy', approverId: p.recipientId, order: 1,
     status: p.status === 'approved' ? 'approved' : p.status === 'rejected' ? 'rejected' : 'pending',
@@ -10687,6 +10709,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
 
   const events = [
     { at: p.createdAt, text: `${userOf(p.submittedBy)?.name ?? ''} đã gửi đề xuất` },
+    ...comments.map(c => ({ at: c.createdAt, text: `💬 ${userOf(c.userId)?.name ?? ''} đã trao đổi: ${c.content}` })),
     ...approvals.filter(a => a.proposalId === p.id).map(a => ({
       at: a.createdAt,
       text: `${userOf(a.approverId)?.name ?? ''} ${a.action === 'approved' ? 'đã duyệt' : a.action === 'rejected' ? (a.note?.startsWith('[REVIEW]') ? 'yêu cầu xem xét lại' : 'đã từ chối') : 'đã chuyển tiếp'}${a.note ? `: ${a.note.replace('[REVIEW]', '').trim()}` : ''}`,
