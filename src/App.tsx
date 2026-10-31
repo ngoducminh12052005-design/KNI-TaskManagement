@@ -780,6 +780,10 @@ const PRIORITY_CONFIG = {
   medium: { label: 'Trung bình', color: '#f59e0b', bg: '#1a1000' },
   low: { label: 'Thấp', color: '#6b7280', bg: '#111118' },
 }
+// Ngày theo GIỜ ĐỊA PHƯƠNG (không dùng toISOString vì đó là giờ UTC, lệch 7 tiếng so với Việt Nam)
+const localDateStr = (d: Date = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const localToday = () => localDateStr()
+
 const SLA_LEVELS: Record<string, { label: string; hours: number; color: string }> = {
   P1: { label: 'P1 · 1 giờ', hours: 1, color: '#dc2626' },
   P2: { label: 'P2 · 4 giờ', hours: 4, color: '#d97706' },
@@ -2641,7 +2645,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
     && (task.status === 'open' || task.status === 'in-progress') && !task.crossDeptPending && !isTaskGated(task)
   const canApproveCross = canApproveCrossTask(task, currentUser)
   // Nhân viên được giao: bấm "Bắt đầu" ngay trong chi tiết, bắt đầu rồi mới có nút Complete
-  const isBeforeStart = !!task.startDate && task.startDate > new Date().toISOString().split('T')[0]
+  const isBeforeStart = !!task.startDate && task.startDate > localToday()
   const canStart = isAssignee && task.status === 'open' && !task.crossDeptPending && !task.crossDeptRejected && !isTaskGated(task) && !isBeforeStart
   const canPending = isAssignee && task.status === 'in-progress' && task.workStatus === 'processing' && !task.pendingRequestedAt && !task.isLocked && !isTaskGated(task)
   // Người được giao, hoặc quản lý liên quan (BOD, người giao task, PM, quản lý phòng của người làm) đều được bấm Tiếp tục
@@ -6014,7 +6018,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         project_manager: form.projectManager, supporters: form.supporters,
         created_by: currentUser.id,
         start_date: form.startDate,
-        due_date: form.dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+        due_date: form.dueDate || localDateStr(new Date(Date.now() + 7 * 86400000)),
         category: form.category, priority: form.priority, self_created: creatingForSelf,
         important: form.important, urgent: form.urgent, is_team_project: form.isTeamProject,
         cross_dept_pending: isCrossDept,
@@ -6206,7 +6210,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
           const pri = PRIORITY_CONFIG[task.priority]
           const isMyTask = task.assignedTo.includes(currentUser.id) || task.supporters.includes(currentUser.id)
           const isTaskParticipant = task.assignedTo.includes(currentUser.id) || task.projectManager.includes(currentUser.id) || task.supporters.includes(currentUser.id) || task.createdBy === currentUser.id
-          const isBeforeStartDate = !!task.startDate && task.startDate > new Date().toISOString().split('T')[0]
+          const isBeforeStartDate = !!task.startDate && task.startDate > localToday()
           const catColor = CATEGORY_COLORS[task.category] ?? '#6b7280'
           const canEdit = canEditTask(task, currentUser, users)
 
@@ -12619,7 +12623,7 @@ function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
 
   // ===== Mục TASK và TỜ TRÌNH ngay trong form =====
   const isStaff = !currentUser.isDirector && currentUser.role !== 'manager'
-  const todayStr = new Date().toISOString().split('T')[0]
+  const todayStr = localToday()
   const blankTask = (): DraftProjectTask => ({ title: '', description: '', assignees: isStaff ? [currentUser.id] : [], slaLevel: '', exp: slaExpRange('').suggested, startDate: todayStr, dueDate: '' })
   const [openTask, setOpenTask] = useState(false)
   const [openProp, setOpenProp] = useState(false)
@@ -12698,7 +12702,7 @@ function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
         work_status: 'received', status: 'open',
         assigned_to: d.assignees, project_manager: managerIds, supporters: [],
         created_by: currentUser.id,
-        start_date: d.startDate, due_date: d.dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+        start_date: d.startDate, due_date: d.dueDate || localDateStr(new Date(Date.now() + 7 * 86400000)),
         category: 'projects_dev', priority: 'medium', self_created: false,
         important: false, urgent: false, is_team_project: false,
         cross_dept_pending: false, target_team_id: null,
@@ -12970,7 +12974,7 @@ async function generateProjectTaskCode(projectId: string, projectCode: string, s
 function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
   project: Project; users: User[]; currentUser: User; canAssign: boolean; onClose: () => void
 }) {
-  const todayStr = new Date().toISOString().split('T')[0]
+  const todayStr = localToday()
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [assignees, setAssignees] = useState<string[]>(canAssign ? [] : [currentUser.id])
@@ -12997,7 +13001,7 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
         if ((exp < range.min || exp > range.max) && !window.confirm(`EXP ${exp} nằm ngoài khung gợi ý ${range.min}–${range.max} của ${slaLevel || 'task không SLA'}. Vẫn lưu?`)) return
     setSaving(true); setError('')
     const creatingForSelf = !canAssign
-    const finalDue = dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]
+    const finalDue = dueDate || localDateStr(new Date(Date.now() + 7 * 86400000))
 
     let newTask: any = null
     let lastError: any = null
@@ -13393,7 +13397,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
   const fmtD = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN') : '—')
   const st = PROJECT_STATUS[project.status] ?? PROJECT_STATUS.planning
   const rk = PROJECT_RISK[project.riskLevel] ?? PROJECT_RISK.medium
-  const todayStr = new Date().toISOString().split('T')[0]
+  const todayStr = localToday()
   const isOverdue = (t: Task) => t.status !== 'completed' && !!t.dueDate && t.dueDate < todayStr
   const seq = (t: Task) => { const m = (t.taskCode ?? '').match(/\.(\d+)$/); return m ? parseInt(m[1], 10) : 0 }
   const list = tasks.filter(t => t.projectId === project.id).sort((a, b) => seq(a) - seq(b))
@@ -13721,7 +13725,7 @@ function ProjectListTable({ projects, tasks, users, currentUser, canSee, onOpen 
   const th = 'px-2 py-2.5 text-[10px] font-bold uppercase tracking-wide text-left'
   const td = 'px-2 py-3 text-xs align-middle'
   const cols = [3, 9, 5, 21, 12, 8, 12, 6, 6, 8, 10]
-  const today = new Date().toISOString().split('T')[0]
+  const today = localToday()
 
   return (
     <div className="w-full min-w-0 rounded-2xl overflow-x-auto" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
