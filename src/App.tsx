@@ -1501,7 +1501,7 @@ function DashboardProposals({ proposals, currentUser, users, onOpen, onViewAll, 
       .on('postgres_changes', { event: '*', schema: 'public', table: 'proposal_steps' }, () => { load() })
       .subscribe()
     return () => { supabase.removeChannel(ch) }
-  }, [currentUser.id])
+  }, [currentUser.id, proposals])
 
   // Thời gian: dùng chung bộ lọc ngày ở trên cùng Dashboard
   const df = dateFilter ?? EMPTY_DATE_FILTER
@@ -8725,7 +8725,7 @@ function ProposalDocView({ p, users, currentUserId, onClose, canAct, onApprove, 
       setSteps((data ?? []).map((s: any) => ({ id: s.id, approverId: s.approver_id, order: s.step_order, status: s.status, decidedAt: s.decided_at ?? undefined, note: s.note ?? undefined })))
     })
     return () => { alive = false }
-  }, [p.id, p.status, p.recipientId])
+  }, [p])
 
   const flow = steps.length > 0 ? steps : [{
     id: 'legacy', approverId: p.recipientId, order: 1,
@@ -9881,7 +9881,7 @@ function ProposalFormDocView({ p, users, currentUserId, onClose, canAct, onAppro
       setSteps((data ?? []).map((s: any) => ({ id: s.id, approverId: s.approver_id, order: s.step_order, status: s.status, decidedAt: s.decided_at ?? undefined, note: s.note ?? undefined })))
     })
     return () => { alive = false }
-  }, [p.id, p.status, p.recipientId])
+  }, [p])
 
   const flow = steps.length > 0 ? steps : [{
     id: 'legacy', approverId: p.recipientId, order: 1,
@@ -10046,7 +10046,7 @@ function ProposalDnttView({ p, users, currentUserId, onClose, canAct, onApprove,
       setSteps((data ?? []).map((s: any) => ({ id: s.id, approverId: s.approver_id, order: s.step_order, status: s.status, decidedAt: s.decided_at ?? undefined, note: s.note ?? undefined })))
     })
     return () => { alive = false }
-  }, [p.id, p.status, p.recipientId])
+  }, [p])
 
   const flow = steps.length > 0 ? steps : [{
     id: 'legacy', approverId: p.recipientId, order: 1,
@@ -10702,7 +10702,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
       })))
     })
     return () => { alive = false }
-  }, [p.id, p.status, p.recipientId])
+  }, [p])
 
   // Bình luận ở mục Trao đổi cũng được ghi vào Lịch sử (tự cập nhật khi có người nhắn)
   const [comments, setComments] = useState<{ id: string; userId: string; content: string; createdAt: string }[]>([])
@@ -11773,7 +11773,8 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
     const ch = supabase.channel(`steps-${currentUser.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'proposal_steps' }, () => { loadPendingMine() })
       .subscribe()
-    return () => { supabase.removeChannel(ch) }
+    const timer = window.setInterval(loadPendingMine, 15000)   // dự phòng khi realtime của proposal_steps chưa bật
+    return () => { window.clearInterval(timer); supabase.removeChannel(ch) }
   }, [currentUser.id, proposals])
   const isMyTurn = (p: Proposal) => p.recipientId === currentUser.id || pendingMine.includes(p.id)
   const getUserById = (id?: string) => users.find(u => u.id === id)
@@ -11850,7 +11851,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
         // Ban Giám đốc Tập đoàn duyệt = tờ trình coi như đã được duyệt, những người còn lại không cần duyệt nữa
     const signRoles: string[] = Array.isArray(p.formData?.signRoles) ? p.formData!.signRoles : []
     const myRole = signRoles[mine.step_order - 1] ?? (p.kind === 'totrinh' ? docRoleLabel(mine.step_order - 1, steps.length) : '')
-    if (myRole === 'Ban Giám đốc Tập đoàn') {
+    if (/^Ban Giám đốc/i.test(myRole)) {   // nhận cả "Ban Giám đốc KNI" (tờ trình cũ) và "Ban Giám đốc Tập đoàn"
       const open = steps.filter(s => s.id !== mine.id && (s.status === 'pending' || s.status === 'waiting'))
       if (open.length > 0) {
         await supabase.from('proposal_steps')
@@ -11914,6 +11915,8 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
         link_proposal_id: p.id,
       })
     }
+    // Duyệt song song mà chưa phải người cuối: dòng tờ trình không đổi, nên báo cho mọi máy (người gửi, các người duyệt khác) tải lại ngay
+    if (!allDone) await supabase.from('proposals').update({ status: 'pending' }).eq('id', p.id).eq('status', 'pending')
     loadPendingMine()
   }
 
