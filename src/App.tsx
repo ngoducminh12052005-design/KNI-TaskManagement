@@ -5563,12 +5563,13 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
 
 // ==================== TASKS VIEW ====================
 
-function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collaborations, highlightTaskId, clearHighlightTaskId, openEditTaskId, clearOpenEditTaskId }: {
+function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collaborations, highlightTaskId, clearHighlightTaskId, openEditTaskId, clearOpenEditTaskId, createForProjectId, onCreateForProjectDone }: {
   currentUser: User; tasks: Task[]; users: User[]
   setTasks: (t: Task[]) => void; setCurrentUser: (u: User) => void
   collaborations: Collaboration[]
   highlightTaskId?: string | null; clearHighlightTaskId?: () => void
   openEditTaskId?: string | null; clearOpenEditTaskId?: () => void
+  createForProjectId?: string | null; onCreateForProjectDone?: (projectId?: string) => void
 }) {
   const [filter, setFilter] = useState<'all' | TaskBucket>('all')
   const [bodOnly, setBodOnly] = useState(false)
@@ -5674,7 +5675,28 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     if (!openEditTaskId) return
     const t = tasks.find(x => x.id === openEditTaskId)
     if (t) { openEditModal(t); clearOpenEditTaskId?.() }
-  }, [openEditTaskId, tasks])
+    }, [openEditTaskId, tasks])
+
+  // Tạo task từ trang chi tiết dự án: dùng đúng form này, task gắn vào dự án
+  const [projectCtx, setProjectCtx] = useState<{ id: string; code: string; name: string; approvalStatus: string } | null>(null)
+  useEffect(() => {
+    if (!createForProjectId) return
+    let alive = true
+    ;(async () => {
+      const [{ data: p }, { data: mem }] = await Promise.all([
+        supabase.from('projects').select('id, code, name, company, approval_status').eq('id', createForProjectId).single(),
+        supabase.from('project_members').select('user_id, role').eq('project_id', createForProjectId),
+      ])
+      if (!alive) return
+      if (!p) { onCreateForProjectDone?.(); return }
+      const pms = (mem ?? []).filter((m: any) => m.role === 'manager').map((m: any) => m.user_id as string)
+      setProjectCtx({ id: p.id, code: p.code, name: p.name, approvalStatus: p.approval_status ?? 'approved' })
+      setEditingTask(null); setSelfMode(false)
+      setForm(f => ({ ...f, projectManager: pms, company: p.company ?? f.company }))
+      setShowModal(true)
+    })()
+    return () => { alive = false }
+  }, [createForProjectId])
   const now = new Date()
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   const [form, setForm] = useState({
@@ -5969,10 +5991,12 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       const isCrossDept = crossRequested || bodGate || (!creatingForSelf && !asBod && outsideAssignees.length > 0)
       const targetTeamId = crossRequested ? crossTeamId : bodGate ? bodDirectEmployees[0].teamId : (isCrossDept ? outsideAssignees[0].teamId : null)
 
-      const taskCode = generateTaskCode(form.startDate, tasks)
+           const projectDraft = !!projectCtx && projectCtx.approvalStatus !== 'approved'   // dự án chưa duyệt: task nháp, chưa giao, chưa tính SLA
+      const taskCode = projectCtx ? await generateProjectTaskCode(projectCtx.id, projectCtx.code) : generateTaskCode(form.startDate, tasks)
       const { data: newTask } = await supabase.from('tasks').insert({
         title: finalTitle, company: form.company || null, description: form.description, exp_reward: form.expReward,
         task_code: taskCode,
+        project_id: projectCtx?.id ?? null,
         sla_level: form.slaLevel || null,
         // Quản lý / BOD giao task có SLA: đồng hồ SLA chạy ngay từ lúc giao (nếu có ngày bắt đầu ở tương lai thì tính từ ngày đó).
         // Task chờ quản lý phòng khác duyệt thì tính giờ sau khi được duyệt.
@@ -6000,11 +6024,19 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         drive_folder_name: (!creatingForSelf && form.driveFolderCreated) ? (form.driveFolderName.trim() || null) : null,
       }).select('id').single()
       const newTaskId = newTask?.id
-      if (newTaskId) setOpenNewTaskId(newTaskId)
+            if (newTaskId && !projectCtx) setOpenNewTaskId(newTaskId)
+      if (newTaskId && projectCtx) {
+        if (projectDraft) await supabase.from('tasks').update({ creation_approval: 'draft', sla_start_at: null }).eq('id', newTaskId)
+        const who = creatingForSelf ? [currentUser.id] : finalAssigned
+        const { data: mem } = await supabase.from('project_members').select('user_id').eq('project_id', projectCtx.id)
+        const have = new Set((mem ?? []).map((m: any) => m.user_id))
+        const miss = who.filter(uid => !have.has(uid))
+        if (miss.length > 0) await supabase.from('project_members').insert(miss.map(uid => ({ project_id: projectCtx.id, user_id: uid, role: 'member' })))
+      }
 
       if (isManager && !selfMode) {
         const taskContent = form.description.trim() || form.title
-        for (const uid of (isCrossDept ? [] : finalAssigned)) {
+        for (const uid of (isCrossDept || projectDraft ? [] : finalAssigned)) {
           if (uid === currentUser.id) continue
           await supabase.from('notifications').insert({
             message: `📋 ${currentUser.name} vừa giao task [${taskCode}] cho bạn: ${taskContent}`,
@@ -6054,6 +6086,8 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
     setSelfMode(false)
     // Sửa xong thì mở lại đúng trang chi tiết của task đó (không bị văng ra ngoài)
     if (returnToTaskId) { setOpenNewTaskId(returnToTaskId); setReturnToTaskId(null) }
+    // Tạo task từ dự án xong thì quay lại chi tiết dự án
+    if (projectCtx) { const pid = projectCtx.id; setProjectCtx(null); onCreateForProjectDone?.(pid) }
     setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'operations', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '', slaLevel: '', company: '', fromBod: !!(currentUser.isBodAssistant && !currentUser.isDirector), doc: emptyTaskDoc() })
   }
 
@@ -6585,12 +6619,17 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       {crossApproveTask && (
         <CrossDeptApproveModal task={crossApproveTask} currentUser={currentUser} users={users} onClose={() => setCrossApproveTask(null)} />
       )}
+            {showModal && projectCtx && (
+        <div className="fixed top-2 left-1/2 -translate-x-1/2 z-[70] px-3 py-1.5 rounded-lg text-xs font-bold shadow" style={{ background: '#ede9fe', color: '#5b21b6' }}>
+          🗂️ Task sẽ nằm trong dự án [{projectCtx.code}] {projectCtx.name}{projectCtx.approvalStatus !== 'approved' ? ' (dự án chưa duyệt: task ở dạng nháp)' : ''}
+        </div>
+      )}
       {/* Create / Edit: phiếu giao task dạng tờ giấy */}
       {showModal && (
         <TaskDocForm form={form} setForm={setForm} isManager={isManager} selfMode={selfMode} setSelfMode={setSelfMode}
           crossMode={crossMode} setCrossMode={setCrossMode} crossTeamId={crossTeamId} setCrossTeamId={setCrossTeamId}
           editingTask={editingTask} currentUser={currentUser} users={users} employees={employees} teamUsers={teamUsers}
-          onSave={handleSaveTask} onClose={() => { setShowModal(false); setEditingTask(null); setSelfMode(false); if (returnToTaskId) { setOpenNewTaskId(returnToTaskId); setReturnToTaskId(null) } }} />
+          onSave={handleSaveTask} onClose={() => { setShowModal(false); setEditingTask(null); setSelfMode(false); if (projectCtx) { const pid = projectCtx.id; setProjectCtx(null); onCreateForProjectDone?.(pid) } if (returnToTaskId) { setOpenNewTaskId(returnToTaskId); setReturnToTaskId(null) } }} />
       )}
       {docTask && (
         <TaskViewFlow task={docTask} tasks={tasks} users={users} currentUser={currentUser} initialStage={docStage}
@@ -12964,7 +13003,7 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
       code = await generateProjectTaskCode(project.id, project.code, i)
       const res = await supabase.from('tasks').insert({
         title: title.trim(), description: description.trim(), exp_reward: exp,
-        task_code: code, project_id: project.id,
+        task_code: code, project_id: project.id, company: project.company ?? null,
         work_status: 'received', status: 'open',
         assigned_to: assignees,
         project_manager: project.managerIds,
@@ -13104,6 +13143,62 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
         </div>
       </div>
     </div>
+  )
+}
+
+// ===== Lịch sử dự án =====
+async function logProjectEvent(projectId: string, userId: string, text: string) {
+  await supabase.from('project_events').insert({ project_id: projectId, user_id: userId, text })
+}
+
+// Gộp: sự kiện đã ghi + trao đổi + task + tờ trình. Việc gì xảy ra trong dự án cũng nằm ở đây
+function ProjectHistory({ project, tasks, proposals, users }: { project: Project; tasks: Task[]; proposals: Proposal[]; users: User[] }) {
+  const [events, setEvents] = useState<{ id: string; text: string; createdAt: string }[]>([])
+  const [comments, setComments] = useState<{ id: string; userId: string; content: string; createdAt: string }[]>([])
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      const [e, c] = await Promise.all([
+        supabase.from('project_events').select('*').eq('project_id', project.id).order('created_at'),
+        supabase.from('project_comments').select('*').eq('project_id', project.id).order('created_at'),
+      ])
+      if (!alive) return
+      setEvents((e.data ?? []).map((x: any) => ({ id: x.id, text: x.text, createdAt: x.created_at })))
+      setComments((c.data ?? []).map((x: any) => ({ id: x.id, userId: x.user_id, content: x.content, createdAt: x.created_at })))
+    }
+    load()
+    const ch = supabase.channel(`project-history-${project.id}-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_events', filter: `project_id=eq.${project.id}` }, () => { load() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_comments', filter: `project_id=eq.${project.id}` }, () => { load() })
+      .subscribe()
+    return () => { alive = false; supabase.removeChannel(ch) }
+  }, [project.id])
+
+  const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
+  const list: { at: string; text: string }[] = [{ at: project.createdAt, text: `🗂️ ${nameOf(project.createdBy)} tạo dự án` }]
+  events.forEach(e => list.push({ at: e.createdAt, text: e.text }))
+  comments.forEach(c => list.push({ at: c.createdAt, text: `💬 ${nameOf(c.userId)} đã trao đổi: ${c.content}` }))
+  tasks.filter(t => t.projectId === project.id).forEach(t => {
+    const tag = `[${t.taskCode ?? ''}] ${t.title}`
+    if (t.createdAt) list.push({ at: t.createdAt, text: `✅ ${nameOf(t.createdBy)} tạo task ${tag}` })
+    if (t.submittedAt) list.push({ at: t.submittedAt, text: `📤 Nộp kết quả task ${tag}` })
+    if (t.approvedAt) list.push({ at: t.approvedAt, text: `🔒 ${nameOf(t.approvedBy)} duyệt & đóng task ${tag}` })
+  })
+  proposals.filter(p => p.projectId === project.id).forEach(p => list.push({ at: p.createdAt, text: `📜 ${nameOf(p.submittedBy)} gửi tờ trình [${p.code ?? ''}] ${p.title}` }))
+  list.sort((a, b) => a.at.localeCompare(b.at))
+
+  return (
+    <section className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+      <h3 className="text-sm font-bold mb-3" style={{ color: 'var(--text-primary)' }}>🕘 Lịch sử</h3>
+      <div className="space-y-2.5">
+        {list.map((e, i) => (
+          <div key={i}>
+            <p className="text-xs break-words" style={{ color: 'var(--text-primary)' }}>{e.text}</p>
+            <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{new Date(e.at).toLocaleString('vi-VN')}</p>
+          </div>
+        ))}
+      </div>
+    </section>
   )
 }
 
@@ -13280,11 +13375,12 @@ function ProjectProposals({ project, proposals, users, currentUser, canManage, o
   )
 }
 
-function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit, onClose, onChanged, onOpenTask, onOpenProposal }: {
+function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit, onClose, onChanged, onOpenTask, onOpenProposal, onCreateTask }: {
   project: Project; users: User[]; tasks: Task[]; proposals: Proposal[]; currentUser: User; canEdit: boolean
-  onClose: () => void; onChanged: () => void; onOpenTask?: (taskId: string) => void; onOpenProposal?: (proposalId: string) => void
+  onClose: () => void; onChanged: () => void; onOpenTask?: (taskId: string) => void; onOpenProposal?: (proposalId: string) => void; onCreateTask?: (projectId: string) => void
 }) {
   const [showTaskForm, setShowTaskForm] = useState(false)
+  const [viewTask, setViewTask] = useState<Task | null>(null)   // khung chi tiết task mở ngay trong dự án
   const [attachCode, setAttachCode] = useState('')
   const [attachMsg, setAttachMsg] = useState('')
   const [attachBusy, setAttachBusy] = useState(false)
@@ -13343,13 +13439,14 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
     if (t.projectId) { setAttachMsg('TASK này đang thuộc một dự án khác.'); return }
     if (!attachCandidates.some(x => x.id === t.id)) { setAttachMsg('Bạn không có quyền gắn TASK này (hoặc TASK chưa được duyệt).'); return }
     setAttachBusy(true)
-    const { error } = await supabase.from('tasks').update({ project_id: project.id }).eq('id', t.id)
+    const { error } = await supabase.from('tasks').update({ project_id: project.id, ...(t.company ? {} : { company: project.company ?? null }) }).eq('id', t.id)
     if (!error) {
       const missing = t.assignedTo.filter(uid => !project.memberIds.includes(uid))
       if (missing.length > 0) await supabase.from('project_members').insert(missing.map(uid => ({ project_id: project.id, user_id: uid, role: 'member' })))
     }
     setAttachBusy(false)
     if (error) { setAttachMsg('Không gắn được: ' + error.message); return }
+    await logProjectEvent(project.id, currentUser.id, `🔗 ${currentUser.name} gắn TASK [${t.taskCode}] ${t.title} vào dự án`)
     setAttachCode('')
   }
 
@@ -13362,6 +13459,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
   const changeStatus = async (v: string) => {
     const { error } = await supabase.from('projects').update({ status: v }).eq('id', project.id)
     if (error) { alert('Không đổi được trạng thái: ' + error.message); return }
+    await logProjectEvent(project.id, currentUser.id, `🔄 ${currentUser.name} đổi trạng thái dự án: ${(PROJECT_STATUS[project.status] ?? PROJECT_STATUS.planning)[0]} → ${(PROJECT_STATUS[v] ?? PROJECT_STATUS.planning)[0]}`)
     onChanged()
   }
     const notifyUsers = async (ids: string[], message: string) => {
@@ -13385,6 +13483,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
         }
       }
     }
+    await logProjectEvent(project.id, currentUser.id, `✅ ${currentUser.name} duyệt dự án (các task nháp được giao, bắt đầu tính SLA)`)
     if (project.createdBy) await notifyUsers([project.createdBy], `✅ ${currentUser.name} đã duyệt dự án "${project.name}". Bạn có thể bắt đầu làm.`)
     onChanged()
   }
@@ -13395,6 +13494,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
       .update({ approval_status: 'rejected', approval_note: reason, approved_by: currentUser.id })
       .eq('id', project.id).eq('approval_status', 'pending')
     if (error) { alert('Không từ chối được: ' + error.message); return }
+    await logProjectEvent(project.id, currentUser.id, `❌ ${currentUser.name} từ chối dự án. Lý do: ${reason}`)
     if (project.createdBy) await notifyUsers([project.createdBy], `❌ ${currentUser.name} đã từ chối dự án "${project.name}": ${reason}`)
     onChanged()
   }
@@ -13406,6 +13506,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
       .eq('id', project.id).eq('approval_status', 'draft')
     if (error) { alert('Không gửi duyệt được: ' + error.message); return }
     const nProp = proposals.filter(p => p.projectId === project.id).length
+    await logProjectEvent(project.id, currentUser.id, `📤 ${currentUser.name} gửi dự án chờ duyệt (${list.length} task, ${nProp} tờ trình)`)
     await notifyUsers(approverIds, `🗂️ ${currentUser.name} gửi dự án "${project.name}" (${list.length} task, ${nProp} tờ trình) và chờ bạn duyệt`)
     onChanged()
   }
@@ -13414,6 +13515,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
       .update({ approval_status: 'pending', approval_note: null })
       .eq('id', project.id).eq('approval_status', 'rejected')
     if (error) { alert('Không gửi lại được: ' + error.message); return }
+    await logProjectEvent(project.id, currentUser.id, `📤 ${currentUser.name} gửi lại dự án chờ duyệt`)
     await notifyUsers(approverIds, `🗂️ ${currentUser.name} gửi lại dự án "${project.name}" và chờ bạn duyệt`)
     onChanged()
   }
@@ -13529,7 +13631,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Task của dự án ({list.length})</h3>
             {projectOpen ? (
-              <button type="button" onClick={() => setShowTaskForm(true)} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#7c3aed' }}>＋ Tạo TASK</button>
+              <button type="button" onClick={() => (onCreateTask ? onCreateTask(project.id) : setShowTaskForm(true))} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#7c3aed' }}>＋ Tạo TASK</button>
             ) : (
               <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{approved ? 'Dự án đã đóng, không thêm task mới' : 'Dự án chưa được duyệt, chưa thêm task được'}</span>
             )}
@@ -13585,19 +13687,19 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
                   ))}
                 </div>
               )}
-              <TaskListTable tasks={shown} users={users} currentUser={currentUser}
-                onOpen={t => {
-                  if (!onOpenTask) return
-                  if (!canOpen(t)) { alert('Bạn không phải người tham gia task này nên không mở được chi tiết.'); return }
-                  onOpenTask(t.id)
-                }} />
+              <TaskListTable tasks={shown} users={users} currentUser={currentUser} onOpen={t => setViewTask(t)} />
             </>
           )}
         </section>
         <ProjectProposals project={project} proposals={proposals} users={users} currentUser={currentUser} canManage={canAssign} onOpenProposal={onOpenProposal} />
+        <ProjectHistory project={project} tasks={tasks} proposals={proposals} users={users} />
         <ProjectDiscussion project={project} currentUser={currentUser} users={users} />
       </div>
       {showTaskForm && <ProjectTaskForm project={project} users={users} currentUser={currentUser} canAssign={canAssign} onClose={() => setShowTaskForm(false)} />}
+      {viewTask && (
+        <TaskViewFlow task={viewTask} tasks={tasks} users={users} currentUser={currentUser}
+          readOnly={!canOpen(viewTask)} onClose={() => setViewTask(null)} />
+      )}
     </div>
   )
 }
@@ -13758,15 +13860,26 @@ function ProjectListTable({ projects, tasks, users, currentUser, canSee, onOpen 
   )
 }
 
-function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpenProposal, focusProjectId, onFocusHandled }: {
+function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpenProposal, focusProjectId, onFocusHandled, onCreateTask }: {
   currentUser: User; users: User[]; tasks: Task[]; proposals: Proposal[]
   onOpenTask?: (taskId: string) => void; onOpenProposal?: (proposalId: string) => void
-  focusProjectId?: string | null; onFocusHandled?: () => void
+  focusProjectId?: string | null; onFocusHandled?: () => void; onCreateTask?: (projectId: string) => void
 }) {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [openId, setOpenId] = useState<string | null>(null)
+  // Nhớ dự án đang mở: tải lại trang vẫn ở đúng chỗ (sessionStorage = theo từng tab)
+  const [restoreId, setRestoreId] = useState<string | null>(() => { try { return sessionStorage.getItem('projectDetailId') } catch { return null } })
+  useEffect(() => {
+    if (!restoreId) return
+    if (projects.some(p => p.id === restoreId)) { setOpenId(restoreId); setRestoreId(null) }
+    else if (!loading) setRestoreId(null)
+  }, [restoreId, projects, loading])
+  useEffect(() => {
+    if (restoreId) return
+    try { if (openId) sessionStorage.setItem('projectDetailId', openId); else sessionStorage.removeItem('projectDetailId') } catch {}
+  }, [openId, restoreId])
   const [fCompany, setFCompany] = useState('')
   const [fStatus, setFStatus] = useState('')
   const [q, setQ] = useState('')
@@ -13863,7 +13976,7 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
             canSee={canSee} onOpen={p => setOpenId(p.id)} />}
 
       {showForm && <ProjectForm currentUser={currentUser} users={users} proposals={proposals} onClose={() => setShowForm(false)} onCreated={async (id) => { await load(); setOpenId(id) }} />}
-      {open && <ProjectDetail project={open} users={users} tasks={tasks} proposals={proposals} currentUser={currentUser} canEdit={canEditProject(open)} onClose={() => setOpenId(null)} onChanged={load} onOpenTask={onOpenTask} onOpenProposal={onOpenProposal} />}
+      {open && <ProjectDetail project={open} users={users} tasks={tasks} proposals={proposals} currentUser={currentUser} canEdit={canEditProject(open)} onClose={() => setOpenId(null)} onChanged={load} onOpenTask={onOpenTask} onOpenProposal={onOpenProposal} onCreateTask={onCreateTask} />}
     </div>
   )
 }
@@ -14688,6 +14801,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   const [highlightProposalId, setHighlightProposalId] = useState<string | null>(null)
     const [openProposalId, setOpenProposalId] = useState<string | null>(null)
   const [projectFocusId, setProjectFocusId] = useState<string | null>(null)
+  const [createTaskProjectId, setCreateTaskProjectId] = useState<string | null>(null)   // đang tạo task cho dự án này
 
   const handleJoinProposal = async (proposal: Proposal) => {
     if (!proposal.participants.includes(currentUser.id)) {
@@ -14757,10 +14871,13 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
       case 'tasks': return (
         <TasksView {...sharedProps} collaborations={collaborations}
           highlightTaskId={highlightTaskId} clearHighlightTaskId={() => setHighlightTaskId(null)}
-          openEditTaskId={editTaskId} clearOpenEditTaskId={() => setEditTaskId(null)} />
+          openEditTaskId={editTaskId} clearOpenEditTaskId={() => setEditTaskId(null)}
+          createForProjectId={createTaskProjectId}
+          onCreateForProjectDone={pid => { setCreateTaskProjectId(null); if (pid) { setProjectFocusId(pid); setView('projects') } }} />
       )
       case 'projects': return <ProjectsView currentUser={currentUser} users={users} tasks={tasks} proposals={proposals}
         focusProjectId={projectFocusId} onFocusHandled={() => setProjectFocusId(null)}
+        onCreateTask={pid => { setCreateTaskProjectId(pid); setView('tasks') }}
         onOpenTask={id => { setView('tasks'); setHighlightTaskId(id) }}
         onOpenProposal={id => { setView('proposals'); setOpenProposalId(id) }} />
       case 'directory': return <StaffDirectoryView />
