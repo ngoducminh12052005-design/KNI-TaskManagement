@@ -5757,27 +5757,24 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
 
   // Quá hạn SLA chỉ ghi nhận "quá hạn", không tự khoá task nữa: nhân viên vẫn làm tiếp được.
 
+  // Bấm thông báo (hoặc bấm task từ Dashboard / Dự án): mở thẳng trang "Xem chi tiết" của task, không hiện thẻ thao tác
   useEffect(() => {
     if (!highlightTaskId) return
+    const t = tasks.find(x => x.id === highlightTaskId)
+    if (!t) {
+      // Danh sách task chưa tải xong thì đợi; quá 6 giây mà không có (task đã bị xoá) thì bỏ qua
+      const giveUp = setTimeout(() => clearHighlightTaskId?.(), 6000)
+      return () => clearTimeout(giveUp)
+    }
     setFilter('all')
     setSearch('')
     setDateFilter(EMPTY_DATE_FILTER)
     setViewMode('list')
-    setExpandedRow(highlightTaskId)
-    const tryScroll = () => {
-      const el = taskRefs.current[highlightTaskId]
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-        setFlashTaskId(highlightTaskId)
-        setTimeout(() => setFlashTaskId(prev => (prev === highlightTaskId ? null : prev)), 2500)
-        clearHighlightTaskId?.()
-      } else {
-        setTimeout(tryScroll, 150)
-      }
-    }
-    const t = setTimeout(tryScroll, 150)
-    return () => clearTimeout(t)
-  }, [highlightTaskId])
+    setExpandedRow(null)
+    setDocStage('detail')
+    setDocTask(t)
+    clearHighlightTaskId?.()
+  }, [highlightTaskId, tasks])
 
   // Từ Dashboard bấm "Sửa": mở thẳng form Chỉnh sửa Task của task đó
   useEffect(() => {
