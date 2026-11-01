@@ -3388,8 +3388,8 @@ function FilePicker({ files, setFiles }: { files: File[]; setFiles: (f: File[]) 
     const fresh = incoming.filter(f => f.size <= limit && !cur.some(x => x.name === f.name && x.size === f.size))
     const take = fresh.slice(0, Math.max(0, TASK_MAX_FILES - cur.length))
     const msgs: string[] = []
-    if (tooBig.length) msgs.push(`${tooBig.length} file vượt ${TASK_MAX_FILE_MB}MB nên bị bỏ qua`)
-    if (fresh.length > take.length) msgs.push(`Tối đa ${TASK_MAX_FILES} file, ${fresh.length - take.length} file bị bỏ qua`)
+    if (tooBig.length) msgs.push(`${tooBig.length} file vượt ${TASK_MAX_FILE_MB}MB nên bị bỏ qua. File lớn thì nén lại hoặc chia nhỏ`)
+    if (fresh.length > take.length) msgs.push(`Tối đa ${TASK_MAX_FILES} file, ${fresh.length - take.length} file bị bỏ qua. Nhiều file hơn thì bỏ vào thư mục, nén thành file .zip rồi đính kèm`)
     setWarn(msgs.join('. '))
     if (take.length > 0) setFiles([...cur, ...take])
   }
@@ -3417,7 +3417,7 @@ function FilePicker({ files, setFiles }: { files: File[]; setFiles: (f: File[]) 
         📎 Bấm để chọn nhiều ảnh / file, hoặc kéo thả, hoặc dán (Ctrl+V) vào đây
       </div>
       <input ref={inputRef} type="file" multiple className="hidden"
-        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.zip,.rar"
+        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.zip,.rar,.7z"
         onChange={e => { add(e.target.files); e.target.value = '' }} />
       {warn && <p className="text-[11px] mt-1" style={{ color: '#dc2626' }}>{warn}</p>}
 
