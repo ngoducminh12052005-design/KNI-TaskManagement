@@ -3347,27 +3347,100 @@ const myTasks = tasks.filter(t => taskInScope(t, currentUser, users) || needMyAp
   )
 }
 
-function FilePicker({ files, setFiles }: { files: File[]; setFiles: (f: File[]) => void }) {
-  const add = (list: FileList | null) => {
-    if (!list) return
-    const next = [...files, ...Array.from(list)]
-    if (next.length > MAX_FILES) { alert(`Tối đa ${MAX_FILES} file. Nhiều hơn thì bỏ vào Drive rồi dán link.`); return }
-    if (next.some(f => f.size > MAX_FILE_MB * 1024 * 1024)) { alert(`Mỗi file tối đa ${MAX_FILE_MB}MB. File lớn hơn thì bỏ vào Drive rồi dán link.`); return }
-    setFiles(next)
+// Giới hạn file đính kèm của task (nộp ảnh/file trực tiếp, không dùng link Drive)
+const TASK_MAX_FILES = 30
+const TASK_MAX_FILE_MB = 25
+
+function fmtFileSize(n: number) {
+  return n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`
+}
+
+// Tải nhiều file song song (4 file một lượt) để nộp nhanh khi có nhiều ảnh
+async function uploadTaskFiles(userId: string, files: File[]) {
+  const up = async (f: File) => {
+    const small = await compressImage(f)
+    const safe = small.name.replace(/[^\w.\-]+/g, '_')
+    const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${safe}`
+    const { error } = await supabase.storage.from('proposal-files').upload(path, small, { contentType: small.type || undefined })
+    if (error) throw error
+    return { name: small.name, path, size: small.size, type: small.type, at: new Date().toISOString(), by: userId }
   }
+  const out: { name: string; path: string; size: number; type: string; at?: string; by?: string }[] = []
+  for (let i = 0; i < files.length; i += 4) out.push(...await Promise.all(files.slice(i, i + 4).map(up)))
+  return out
+}
+
+function FilePicker({ files, setFiles }: { files: File[]; setFiles: (f: File[]) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const filesRef = useRef(files)
+  filesRef.current = files
+  const [drag, setDrag] = useState(false)
+  const [warn, setWarn] = useState('')
+  const urls = useMemo(() => files.map(f => (f.type.startsWith('image/') ? URL.createObjectURL(f) : '')), [files])
+  useEffect(() => () => { urls.forEach(u => u && URL.revokeObjectURL(u)) }, [urls])
+
+  const add = (list: FileList | File[] | null) => {
+    if (!list) return
+    const cur = filesRef.current
+    const limit = TASK_MAX_FILE_MB * 1024 * 1024
+    const incoming = Array.from(list)
+    const tooBig = incoming.filter(f => f.size > limit)
+    const fresh = incoming.filter(f => f.size <= limit && !cur.some(x => x.name === f.name && x.size === f.size))
+    const take = fresh.slice(0, Math.max(0, TASK_MAX_FILES - cur.length))
+    const msgs: string[] = []
+    if (tooBig.length) msgs.push(`${tooBig.length} file vượt ${TASK_MAX_FILE_MB}MB nên bị bỏ qua`)
+    if (fresh.length > take.length) msgs.push(`Tối đa ${TASK_MAX_FILES} file, ${fresh.length - take.length} file bị bỏ qua`)
+    setWarn(msgs.join('. '))
+    if (take.length > 0) setFiles([...cur, ...take])
+  }
+
+  // Dán ảnh từ clipboard (Ctrl+V, chụp màn hình) cũng vào được
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const fs = Array.from(e.clipboardData?.files ?? [])
+      if (fs.length > 0) { e.preventDefault(); add(fs) }
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [])
+
   return (
     <div className="mb-4">
-      <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Ảnh / file đính kèm</label>
-      <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
-        onChange={e => { add(e.target.files); e.target.value = '' }}
-        className="text-xs w-full" style={{ color: 'var(--text-muted)' }} />
-      {files.map((f, i) => (
-        <div key={i} className="flex items-center justify-between text-xs mt-1" style={{ color: 'var(--text-primary)' }}>
-          <span className="truncate">📎 {f.name}</span>
-          <button type="button" onClick={() => setFiles(files.filter((_, j) => j !== i))} style={{ color: '#dc2626' }}>✕</button>
+      <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
+        Ảnh / file đính kèm{files.length > 0 ? ` (${files.length}/${TASK_MAX_FILES})` : ''}
+      </label>
+      <div onClick={() => inputRef.current?.click()}
+        onDragOver={e => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)}
+        onDrop={e => { e.preventDefault(); setDrag(false); add(e.dataTransfer.files) }}
+        className="rounded-lg p-3 text-center text-xs cursor-pointer"
+        style={{ border: `1.5px dashed ${drag ? '#7c3aed' : 'var(--border)'}`, background: drag ? '#7c3aed11' : 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
+        📎 Bấm để chọn nhiều ảnh / file, hoặc kéo thả, hoặc dán (Ctrl+V) vào đây
+      </div>
+      <input ref={inputRef} type="file" multiple className="hidden"
+        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.zip,.rar"
+        onChange={e => { add(e.target.files); e.target.value = '' }} />
+      {warn && <p className="text-[11px] mt-1" style={{ color: '#dc2626' }}>{warn}</p>}
+
+      {files.length > 0 && (
+        <div className="mt-2">
+          <div className="flex flex-wrap gap-2">
+            {files.map((f, i) => urls[i] ? (
+              <div key={`${f.name}-${f.size}-${i}`} className="relative">
+                <img src={urls[i]} alt={f.name} title={f.name} className="w-16 h-16 object-cover rounded-lg" style={{ border: '1px solid var(--border)' }} />
+                <button type="button" onClick={() => setFiles(files.filter((_, j) => j !== i))}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full text-[10px] font-bold text-white" style={{ background: '#dc2626' }}>✕</button>
+              </div>
+            ) : null)}
+          </div>
+          {files.map((f, i) => urls[i] ? null : (
+            <div key={`${f.name}-${f.size}-${i}`} className="flex items-center justify-between text-xs mt-1.5" style={{ color: 'var(--text-primary)' }}>
+              <span className="truncate">📎 {f.name} <span style={{ color: 'var(--text-muted)' }}>({fmtFileSize(f.size)})</span></span>
+              <button type="button" onClick={() => setFiles(files.filter((_, j) => j !== i))} style={{ color: '#dc2626' }}>✕</button>
+            </div>
+          ))}
+          <button type="button" onClick={() => setFiles([])} className="text-[11px] mt-2 underline" style={{ color: '#dc2626' }}>Xoá tất cả</button>
         </div>
-      ))}
-      <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>💡 Nhiều file hoặc hình ảnh: bỏ vào Drive (bật quyền xem) rồi dán link ở ô bên dưới.</p>
+      )}
     </div>
   )
 }
@@ -3445,7 +3518,6 @@ function RejectResultModal({ task, currentUser, onClose }: { task: Task; current
 function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; currentUser: User; users: User[]; onClose: () => void }) {
   const [result, setResult] = useState<'successful' | 'with_issue' | null>(null)
   const [issueText, setIssueText] = useState('')
-  const [driveLink, setDriveLink] = useState('')
   const [note, setNote] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [saving, setSaving] = useState(false)
@@ -3457,12 +3529,11 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
   const handleSubmit = async () => {
     if (!result) { setError('Chọn kết quả Complete: successful hoặc with issue.'); return }
     if (hasIssue && !issueText.trim()) { setError('Bạn chọn "Complete with issue", vui lòng ghi rõ lý do issue là gì.'); return }
-    if (files.length === 0 && !driveLink.trim() && !note.trim()) { setError('Vui lòng đính kèm ảnh/file, dán link hoặc ghi chú kết quả.'); return }
-    if (driveLink.trim() && !/^https?:\/\//i.test(driveLink.trim())) { setError('Link không hợp lệ, vui lòng dán đúng đường dẫn (https://...).'); return }
+    if (files.length === 0 && !note.trim()) { setError('Vui lòng đính kèm ảnh/file hoặc ghi chú kết quả.'); return }
     setError('')
     setSaving(true)
     let uploaded: { name: string; path: string; size: number; type: string }[] = []
-    try { uploaded = await uploadProposalFiles(currentUser.id, files) }
+    try { uploaded = await uploadTaskFiles(currentUser.id, files) }
     catch (e: any) { setSaving(false); setError('Upload file lỗi: ' + (e?.message ?? '')); return }
 
     // Dừng đồng hồ xử lý, cộng dồn thời gian đã chạy
@@ -3471,7 +3542,7 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
     const nowIso = new Date().toISOString()
     const rec: SubmissionRec = {
       n: prevSubs.length + 1, at: nowIso, by: currentUser.id, result, issue: hasIssue ? issueText.trim() : undefined,
-      note: note.trim() || undefined, link: driveLink.trim() || undefined, files: uploaded,
+      note: note.trim() || undefined, files: uploaded,
     }
 
     const autoClose = false   // task BOD giao: BOD phải là người Close
@@ -3486,7 +3557,7 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
       processing_started_at: null,
       total_processing_seconds: (task.totalProcessingSeconds ?? 0) + elapsed,
       complete_issue: hasIssue ? issueText.trim() : null,
-      submission_file_url: driveLink.trim() || null,
+      submission_file_url: null,
       submission_attachments: uploaded,
       submission_own_folder_url: null,
       submission_folder_name: null,
@@ -3570,11 +3641,6 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
             )}
 
             <FilePicker files={files} setFiles={setFiles} />
-
-            <label className="text-xs font-bold mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Link (Drive...) nếu có nhiều file / hình ảnh</label>
-            <input value={driveLink} onChange={e => setDriveLink(e.target.value)} placeholder="https://drive.google.com/..."
-              className="w-full px-3 py-2.5 mb-4 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
-              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
 
             <label className="text-xs font-bold mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Ghi chú</label>
             <textarea value={note} onChange={e => setNote(e.target.value)} rows={3} placeholder="Mô tả ngắn gọn kết quả đã làm..."
