@@ -2634,9 +2634,12 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   const canComplete = isAssignee && task.status === 'in-progress' && task.workStatus !== 'pending' && !task.pendingRequestedAt && !task.isLocked && !isTaskGated(task)
   const waitFwd = isWaitingForward(task, users)
   const canForward = waitFwd && relayIdOf(task) === currentUser.id && !isAssignee
-  const canClose = currentUser.role === 'manager' && !isAssignee && task.status === 'submitted'
-    && !isTargetDeptApprover(task, currentUser) && !waitFwd
-    && (!isBodAssigned(task, users) || isBodSide(currentUser))
+  // Quản lý tự tạo task cho mình: chính quản lý đó duyệt & đóng (người khác không đóng thay)
+  const canClose = currentUser.role === 'manager' && task.status === 'submitted'
+    && (isMgrSelfTask(task, users)
+      ? task.createdBy === currentUser.id
+      : (!isAssignee && !isTargetDeptApprover(task, currentUser) && !waitFwd
+        && (!isBodAssigned(task, users) || isBodSide(currentUser))))
   const canReject = canClose || canForward
   const [showCrossApprove, setShowCrossApprove] = useState(false)
   const [showDelegate, setShowDelegate] = useState(false)
@@ -2781,7 +2784,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
           <div className="ml-auto flex flex-wrap gap-2">
             <button type="button" onClick={onOpenPhieu} className={btn}
               style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>📄 Xem phiếu giao task</button>
-            {canEdit && onEdit && (
+            {canEdit && onEdit && !canApproveCross && (
               <button type="button" onClick={onEdit} className={btn}
                 style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>✏️ Sửa</button>
             )}
@@ -2821,6 +2824,9 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
             )}
             {canApproveCross && (
               <>
+                {canEdit && onEdit && (
+                  <button type="button" onClick={onEdit} className={btn} style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>✏️ Sửa</button>
+                )}
                 <button type="button" onClick={() => rejectCrossDept(task, currentUser)} className={btn} style={{ background: '#f8717122', color: '#dc2626' }}>Từ chối</button>
                 <button type="button" onClick={() => setShowCrossApprove(true)} className={`${btn} text-white`} style={{ background: '#059669' }}>✓ Duyệt & phân công</button>
               </>
@@ -4305,11 +4311,20 @@ async function resumeTask(task: Task, me?: User) {
   }
 }
 
-// Quyền sửa: task BOD giao thì chỉ BOD được sửa
+// Task do BOD giao: quản lý (không phải BOD / trợ lý BOD) được sửa nhưng BẮT BUỘC ghi lý do
+const needsEditReason = (t: Task, user: User, users: User[]) => isBodAssigned(t, users) && !isBodSide(user)
+// Quản lý tự tạo task cho chính mình: chính quản lý đó duyệt & đóng task
+const isMgrSelfTask = (t: Task, users: User[]) =>
+  t.selfCreated && t.assignedTo.length === 1 && t.assignedTo[0] === t.createdBy && users.find(u => u.id === t.createdBy)?.role === 'manager'
+
+// Quyền sửa: task BOD giao thì BOD sửa tự do; quản lý nhận task (hoặc đang duyệt / phân công) sửa được nhưng phải nêu lý do
 const canEditTask = (t: Task, user: User, users: User[]) => {
   if (t.selfCreated && t.createdBy === user.id && t.creationApproval === 'draft') return true
   if (user.role !== 'manager') return false
-  if (isBodAssigned(t, users)) return isBodSide(user)
+  if (isBodAssigned(t, users)) {
+    if (isBodSide(user)) return true
+    return t.assignedTo.includes(user.id) || chainOf(t).includes(user.id) || canApproveCrossTask(t, user)
+  }
   const assignees = users.filter(u => t.assignedTo.includes(u.id))
   return t.createdBy === user.id || assignees.some(a => a.teamId === user.teamId)
 }
@@ -5923,6 +5938,13 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       const resubmit = false   // sửa xong vẫn ở New; bấm 'Gửi task cho quản lý' mới gửi
       // Ghi lại người sửa đã đổi những gì (hiện ở Lịch sử trong chi tiết task)
       const editChanges = diffTaskEdit(editingTask, { ...form, title: finalTitle, doc: cleanTaskDoc(form.doc) }, users)
+      // Task do BOD giao: quản lý (không phải BOD) sửa thì bắt buộc nhập lý do (ghi vào Lịch sử + báo BOD)
+      let editReason = ''
+      if (editChanges.length > 0 && needsEditReason(editingTask, currentUser, users)) {
+        editReason = (window.prompt('Task do BOD giao. Nhập lý do sửa (bắt buộc):') ?? '').trim()
+        if (!editReason) { alert('Bạn phải nhập lý do khi sửa task do BOD giao.'); return }
+        editChanges.unshift({ label: 'Lý do sửa', from: '—', to: editReason })
+      }
       const isOwnDraftEdit = editingTask.createdBy === currentUser.id && (editingTask.creationApproval === 'draft' || editingTask.creationApproval === 'rejected')
       // Trước đó chưa có SLA, nay được đặt SLA → tính SLA từ lúc sửa
       // (task còn chờ quản lý phòng ban duyệt thì chờ duyệt xong mới tính, task tự tạo và task đã Close thì không áp dụng)
@@ -5950,11 +5972,11 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       await supabase.from('task_edit_logs').insert({ task_id: editingTask.id, user_id: currentUser.id, changes: editChanges })
       // Báo cho người phụ trách / hỗ trợ / PM biết task vừa bị sửa gì (bấm thông báo mở thẳng task, xem chi tiết ở Lịch sử)
       const summary = editChanges.map(c => c.label).join(', ')
-      const notifyIds = Array.from(new Set([...form.assignedTo, ...editingTask.assignedTo, ...form.supporters, ...form.projectManager]))
+      const notifyIds = Array.from(new Set([...form.assignedTo, ...editingTask.assignedTo, ...form.supporters, ...form.projectManager, ...(editReason ? [editingTask.createdBy] : [])]))
         .filter(uid => uid && uid !== currentUser.id)
       for (const uid of notifyIds) {
         await supabase.from('notifications').insert({
-          message: `✏️ ${currentUser.name} vừa chỉnh sửa task [${editingTask.taskCode ?? finalTitle}] — đã đổi: ${summary}`,
+          message: `✏️ ${currentUser.name} vừa chỉnh sửa task [${editingTask.taskCode ?? finalTitle}] — đã đổi: ${summary}${editReason ? `. Lý do: ${editReason}` : ''}`,
           target_user_id: uid, link_task_id: editingTask.id,
         })
       }
@@ -6483,8 +6505,11 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                       ⏳ Chờ quản lý phòng nhận nộp kết quả
                     </span>
 
-                  ) : task.status === 'submitted' && currentUser.role === 'manager' && !task.assignedTo.includes(currentUser.id) && !isTargetDeptApprover(task, currentUser)
-                    && (!isBodAssigned(task, users) || isBodSide(currentUser)) ? (
+                  ) : task.status === 'submitted' && currentUser.role === 'manager'
+                    && (isMgrSelfTask(task, users)
+                      ? task.createdBy === currentUser.id   // quản lý tự tạo task cho mình: tự duyệt & đóng
+                      : (!task.assignedTo.includes(currentUser.id) && !isTargetDeptApprover(task, currentUser)
+                        && (!isBodAssigned(task, users) || isBodSide(currentUser)))) ? (
                     <div className="flex flex-col gap-1.5 items-end">
                       {task.submissionOwnFolderUrl && (
                         <a href={task.submissionOwnFolderUrl} target="_blank" rel="noopener noreferrer"
@@ -8284,7 +8309,7 @@ function docDiff(
 function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, projectId }: { currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void; editing?: Proposal | null; projectId?: string }) {
   const now = new Date()
   const dateText = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()}`
-  const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)
+  const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)   // gồm cả chính người tạo nếu là quản lý (có thể tự là Trưởng bộ phận)
 
   const efd: Record<string, any> = editing?.formData ?? {}
   const [title, setTitle] = useState(editing?.title ?? '')
@@ -8451,7 +8476,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
         added_note: diff.added || null,
         edited_note: diff.edited || (diff.added ? null : 'Gửi lại, không thay đổi nội dung'),
       })
-      for (const id of (approvalMode === 'par' ? approverIds : [recipientId])) {
+      for (const id of (approvalMode === 'par' ? approverIds : [recipientId]).filter(x => x !== currentUser.id)) {
         await supabase.from('notifications').insert({
           message: `📜 ${currentUser.name} đã chỉnh sửa và gửi lại tờ trình "${title.trim()}" cho bạn`,
           target_user_id: id, link_proposal_id: editing.id,
@@ -8490,7 +8515,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
     if (insertError) { setError(insertError.message); return }
     if (data?.id) onCreated?.(data.id)
 
-    const notifyIds = approvalMode === 'par' ? approverIds : [recipientId]
+    const notifyIds = (approvalMode === 'par' ? approverIds : [recipientId]).filter(x => x !== currentUser.id)
     for (const id of notifyIds) {
       await supabase.from('notifications').insert({
         message: `📜 ${currentUser.name} vừa trình tờ trình "${title.trim()}" cho bạn`,
@@ -8953,7 +8978,7 @@ const DNTT_ROLES = ['Trưởng bộ phận/ OM/ Quản lý đơn vị', 'Kế to
 function ProposalDnttForm({ currentUser, users, onClose, onCreated }: { currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void }) {
   const now = new Date()
   const dateText = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`
-  const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)
+  const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)   // gồm cả chính người tạo nếu là quản lý (có thể tự là Trưởng bộ phận)
 
   const [dept, setDept] = useState(currentUser.department ?? '')
   const [content, setContent] = useState('')
@@ -9057,7 +9082,7 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated }: { currentU
     if (insertError) { setError(insertError.message); return }
     if (data?.id) onCreated?.(data.id)
 
-    const notifyIds = approvalMode === 'par' ? approverIds : [recipientId]
+    const notifyIds = (approvalMode === 'par' ? approverIds : [recipientId]).filter(x => x !== currentUser.id)
     for (const id of notifyIds) {
       await supabase.from('notifications').insert({
         message: `💳 ${currentUser.name} vừa gửi đề nghị thanh toán "${content.trim().slice(0, 80)}" cho bạn`,
@@ -9628,7 +9653,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
   const cfg = FORM_TPL[tpl]
   const now = new Date()
   const dateText = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`
-  const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)
+  const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)   // gồm cả chính người tạo nếu là quản lý (có thể tự là Trưởng bộ phận)
 
   const [f, setF] = useState<Record<string, any>>(() => initFormData(tpl, currentUser))
   const set = (patch: Record<string, any>) => setF(prev => ({ ...prev, ...patch }))
@@ -9739,7 +9764,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
     if (insertError) { setError(insertError.message); return }
     if (data?.id) onCreated?.(data.id)
 
-    const notifyIds = approvalMode === 'par' ? approverIds : [recipientId]
+    const notifyIds = (approvalMode === 'par' ? approverIds : [recipientId]).filter(x => x !== currentUser.id)
     for (const id of notifyIds) {
       await supabase.from('notifications').insert({
         message: `${cfg.icon} ${currentUser.name} vừa gửi ${cfg.noun} "${title.slice(0, 80)}" cho bạn`,
@@ -10965,7 +10990,7 @@ function ProposalModal({ currentUser, users, editingProposal, onClose, onCreated
   const [ciItem, setCiItem] = useState('')
   const [ciCost, setCiCost] = useState('')
   const [ciAmount, setCiAmount] = useState('')
-  const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId && u.id !== currentUser.id)
+  const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)   // gồm cả chính người tạo nếu là quản lý (có thể tự là Trưởng bộ phận)
   const [extraApprovers, setExtraApprovers] = useState<string[]>([])
   const [approvalMode, setApprovalMode] = useState<'seq' | 'par'>('seq')
   const [saving, setSaving] = useState(false)
@@ -13605,6 +13630,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
               {row('Bên bị ảnh hưởng', project.affected ?? '')}
               {row('Nhà cung cấp', [project.supplierName, project.supplierRef].filter(Boolean).join(' · '))}
             </section>
+            <ProjectHistory project={project} tasks={tasks} proposals={proposals} users={users} />
           </div>
 
           <div className="space-y-4">
@@ -13699,7 +13725,6 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
           )}
         </section>
         <ProjectProposals project={project} proposals={proposals} users={users} currentUser={currentUser} canManage={canAssign} onOpenProposal={onOpenProposal} />
-        <ProjectHistory project={project} tasks={tasks} proposals={proposals} users={users} />
         <ProjectDiscussion project={project} currentUser={currentUser} users={users} />
       </div>
       {showTaskForm && <ProjectTaskForm project={project} users={users} currentUser={currentUser} canAssign={canAssign} onClose={() => setShowTaskForm(false)} />}
