@@ -4774,46 +4774,48 @@ function TaskTracker({ tasks: rawTasks, users, currentUser }: { tasks: Task[]; u
 type TaskEditLog = { id: string; userId: string; changes: TaskChange[]; createdAt: string }
 type TaskNoteRow = { id: string; userId: string; note: string; createdAt: string }
 // note: có giá trị nếu là dòng Work Note do người dùng ghi; còn lại là sự kiện lịch sử của hệ thống
-type TaskEvent = { at: string; text: string; lines?: string[]; by?: string; note?: string }
+type TaskEvent = { at: string; text: string; lines?: string[]; by?: string; note?: string; actors?: string[] }
 
+// ===== 1) Thay NGUYÊN hàm buildTaskEvents cũ bằng hàm này =====
 function buildTaskEvents(task: Task, users: User[], editLogs: TaskEditLog[], notes: TaskNoteRow[]): TaskEvent[] {
   const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
   const names = (ids: string[]) => (ids.length ? ids.map(nameOf).join(', ') : '—')
   const subs = getSubs(task)
   const events: TaskEvent[] = []
-  const add = (at: string | undefined, text: string) => { if (at) events.push({ at, text }) }
-  add(task.createdAt, `${nameOf(task.createdBy)} ${task.selfCreated ? 'tự tạo task' : 'giao task'}`)
-  if (task.creationApproval === 'approved' && task.creationApprovedBy) add(task.creationApprovedAt, `${nameOf(task.creationApprovedBy)} duyệt cho làm`)
-  if (task.creationApproval === 'rejected' || (task.creationApproval === 'draft' && task.creationRejectedReason)) add(task.creationApprovedAt, `${nameOf(task.creationApprovedBy)} từ chối task${task.creationRejectedReason ? `: ${task.creationRejectedReason}` : ''}`)
+  const add = (at: string | undefined, text: string, actors?: (string | undefined)[]) => { if (at) events.push({ at, text, actors: (actors ?? []).filter(Boolean) as string[] }) }
+  add(task.createdAt, `${nameOf(task.createdBy)} ${task.selfCreated ? 'tự tạo task' : 'giao task'}`, [task.createdBy])
+  if (task.creationApproval === 'approved' && task.creationApprovedBy) add(task.creationApprovedAt, `${nameOf(task.creationApprovedBy)} duyệt cho làm`, [task.creationApprovedBy])
+  if (task.creationApproval === 'rejected' || (task.creationApproval === 'draft' && task.creationRejectedReason)) add(task.creationApprovedAt, `${nameOf(task.creationApprovedBy)} từ chối task${task.creationRejectedReason ? `: ${task.creationRejectedReason}` : ''}`, [task.creationApprovedBy])
   add(task.ticketReceivedAt, `🔧 Ticket Received: ${task.ticketReceivedText ?? ''}`)
-  add(task.startedAt, `▶️ Bắt đầu làm (${names(task.assignedTo)}) lúc ${fmtClockVN(task.startedAt)}${getSlaStartLateSeconds(task) > 0 ? ` — trễ SLA ${formatLate(getSlaStartLateSeconds(task))}` : ''}`)
+  add(task.startedAt, `▶️ Bắt đầu làm (${names(task.assignedTo)}) lúc ${fmtClockVN(task.startedAt)}${getSlaStartLateSeconds(task) > 0 ? ` — trễ SLA ${formatLate(getSlaStartLateSeconds(task))}` : ''}`, task.assignedTo)
   add(task.ticketInProcessAt, `🔧 Ticket In-process: ${task.ticketInProcessText ?? ''}`)
   const plog = pendLogOf(task)
-  if (!plog.some(e => e.kind === 'request' && e.at === task.pendingRequestedAt)) add(task.pendingRequestedAt, `⏸ ${nameOf(task.pendingRequestedBy)} xin tạm hoãn${task.pendingReason ? `: ${task.pendingReason}` : ''}`)
+  if (!plog.some(e => e.kind === 'request' && e.at === task.pendingRequestedAt)) add(task.pendingRequestedAt, `⏸ ${nameOf(task.pendingRequestedBy)} xin tạm hoãn${task.pendingReason ? `: ${task.pendingReason}` : ''}`, [task.pendingRequestedBy])
   plog.forEach(e => {
-    if (e.kind === 'request') add(e.at, `⏸ ${nameOf(e.by)} xin tạm dừng (Pending)${e.reason ? `. Lý do: ${e.reason}` : ''}`)
-    else if (e.kind === 'approve') add(e.at, `✅ ${nameOf(e.by)} đã duyệt tạm dừng${e.note ? ` (lý do xin: ${e.note})` : ''}`)
-    else if (e.kind === 'reject') add(e.at, `❌ ${nameOf(e.by)} từ chối tạm dừng${e.reason ? `. Lý do: ${e.reason}` : ''}${e.note ? ` (lý do xin: ${e.note})` : ''}`)
-    else add(e.at, `▶️ ${nameOf(e.by)} mở lại task (tiếp tục xử lý)`)
+    if (e.kind === 'request') add(e.at, `⏸ ${nameOf(e.by)} xin tạm dừng (Pending)${e.reason ? `. Lý do: ${e.reason}` : ''}`, [e.by])
+    else if (e.kind === 'approve') add(e.at, `✅ ${nameOf(e.by)} đã duyệt tạm dừng${e.note ? ` (lý do xin: ${e.note})` : ''}`, [e.by])
+    else if (e.kind === 'reject') add(e.at, `❌ ${nameOf(e.by)} từ chối tạm dừng${e.reason ? `. Lý do: ${e.reason}` : ''}${e.note ? ` (lý do xin: ${e.note})` : ''}`, [e.by])
+    else add(e.at, `▶️ ${nameOf(e.by)} mở lại task (tiếp tục xử lý)`, [e.by])
   })
-  add(task.unlockRequestedAt, `🔓 Xin mở khóa SLA${task.unlockRequestedReason ? `: ${task.unlockRequestedReason}` : ''}`)
+  add(task.unlockRequestedAt, `🔓 Xin mở khóa SLA${task.unlockRequestedReason ? `: ${task.unlockRequestedReason}` : ''}`, task.assignedTo)
   add(task.ticketCompletedAt, `🔧 Ticket Completed: ${task.ticketCompletedText ?? ''}`)
   if (subs.length > 0) {
     subs.forEach(r => {
-      add(r.at, `📤 Nộp kết quả lần ${r.n} — ${r.result === 'with_issue' ? `Complete with issue: ${r.issue ?? ''}` : 'Complete successful'}${r.note ? ` · Ghi chú: ${r.note}` : ''}${r.link ? ` · Link: ${r.link}` : ''}${r.files.length ? ` · Tệp: ${r.files.map(f => f.name).join(', ')}` : ''}`)
-      if (r.rejected) add(r.rejected.at, `↩️ ${nameOf(r.rejected.by)} từ chối kết quả lần ${r.n}. Lý do: ${r.rejected.reason}`)
+      add(r.at, `📤 Nộp kết quả lần ${r.n} — ${r.result === 'with_issue' ? `Complete with issue: ${r.issue ?? ''}` : 'Complete successful'}${r.note ? ` · Ghi chú: ${r.note}` : ''}${r.link ? ` · Link: ${r.link}` : ''}${r.files.length ? ` · Tệp: ${r.files.map(f => f.name).join(', ')}` : ''}`, task.assignedTo)
+      if (r.rejected) add(r.rejected.at, `↩️ ${nameOf(r.rejected.by)} từ chối kết quả lần ${r.n}. Lý do: ${r.rejected.reason}`, [r.rejected.by])
     })
-  } else add(task.submittedAt, `📤 Nộp kết quả${task.submissionNote ? `: ${task.submissionNote}` : ''}`)
-  add(task.approvedAt, `✅ ${nameOf(task.approvedBy)} duyệt & đóng task`)
+  } else add(task.submittedAt, `📤 Nộp kết quả${task.submissionNote ? `: ${task.submissionNote}` : ''}`, task.assignedTo)
+  add(task.approvedAt, `✅ ${nameOf(task.approvedBy)} duyệt & đóng task`, [task.approvedBy])
   editLogs.forEach(l => {
     if (l.changes.length === 0) return
-    events.push({ at: l.createdAt, text: `✏️ ${nameOf(l.userId)} đã chỉnh sửa task`, lines: l.changes.map(c => `${c.label}: ${c.from} → ${c.to}`) })
+    events.push({ at: l.createdAt, text: `✏️ ${nameOf(l.userId)} đã chỉnh sửa task`, lines: l.changes.map(c => `${c.label}: ${c.from} → ${c.to}`), actors: [l.userId] })
   })
   // Work Note cũng là một dòng trong Lịch sử
-  notes.forEach(n => events.push({ at: n.createdAt, text: `📝 ${nameOf(n.userId)} ghi Work Note: ${n.note}`, by: n.userId, note: n.note }))
+  notes.forEach(n => events.push({ at: n.createdAt, text: `📝 ${nameOf(n.userId)} ghi Work Note: ${n.note}`, by: n.userId, actors: [n.userId], note: n.note }))
   events.sort((a, b) => a.at.localeCompare(b.at))
   return events
 }
+
 
 // Tải log chỉnh sửa + Work Note của task (tự cập nhật realtime) rồi gộp thành một dòng thời gian
 function useTaskTimeline(task: Task | undefined, users: User[]): TaskEvent[] {
@@ -5269,6 +5271,7 @@ function TaskUpdateDrawer({ task, users, currentUser, canWrite, onClose }: {
 
   useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight
+    markWorkNoteSeen(currentUser.id, task.id)   // đang mở Work Note thì mục mới coi như đã đọc
   }, [timeline.length])
 
   useEffect(() => {
@@ -5380,24 +5383,43 @@ function markWorkNoteSeen(uid: string, taskId: string) {
   } catch {}
 }
 
-function useWorkNoteBadges(taskIds: string[], uid: string): Record<string, number> {
-  const [rows, setRows] = useState<{ task_id: string; user_id: string; created_at: string }[]>([])
+// ===== 2) Thay NGUYÊN hàm useWorkNoteBadges cũ bằng hàm này =====
+// Đếm số mục MỚI trong Work Note (gồm cả mục hệ thống như "Bắt đầu làm", trễ SLA, chỉnh sửa, tạm dừng, nộp kết quả...)
+// Mục do chính mình làm / ghi thì không tính. Mở Work Note ra là số mất.
+function useWorkNoteBadges(tasks: Task[], users: User[], uid: string): Record<string, number> {
+  const [notes, setNotes] = useState<Record<string, TaskNoteRow[]>>({})
+  const [logs, setLogs] = useState<Record<string, TaskEditLog[]>>({})
   const [rev, setRev] = useState(0)
-  const key = taskIds.join(',')
+  const key = tasks.map(t => t.id).join(',')
 
   useEffect(() => {
-    if (taskIds.length === 0) { setRows([]); return }
+    const ids = tasks.map(t => t.id)
+    if (ids.length === 0) { setNotes({}); setLogs({}); return }
     let alive = true
     const load = async () => {
       const chunks: string[][] = []
-      for (let i = 0; i < taskIds.length; i += 80) chunks.push(taskIds.slice(i, i + 80))
-      const res = await Promise.all(chunks.map(c =>
-        supabase.from('task_work_notes').select('task_id, user_id, created_at').in('task_id', c)))
-      if (alive) setRows(res.flatMap(r => (r.data ?? []) as any[]))
+      for (let i = 0; i < ids.length; i += 80) chunks.push(ids.slice(i, i + 80))
+      const [nRes, lRes] = await Promise.all([
+        Promise.all(chunks.map(c => supabase.from('task_work_notes').select('id, task_id, user_id, note, created_at').in('task_id', c))),
+        Promise.all(chunks.map(c => supabase.from('task_edit_logs').select('id, task_id, user_id, changes, created_at').in('task_id', c))),
+      ])
+      if (!alive) return
+      const nm: Record<string, TaskNoteRow[]> = {}
+      nRes.flatMap(r => (r.data ?? []) as any[]).forEach(x => {
+        nm[x.task_id] = nm[x.task_id] ?? []
+        nm[x.task_id].push({ id: x.id, userId: x.user_id, note: x.note, createdAt: x.created_at })
+      })
+      const lm: Record<string, TaskEditLog[]> = {}
+      lRes.flatMap(r => (r.data ?? []) as any[]).forEach(x => {
+        lm[x.task_id] = lm[x.task_id] ?? []
+        lm[x.task_id].push({ id: x.id, userId: x.user_id, changes: Array.isArray(x.changes) ? x.changes : [], createdAt: x.created_at })
+      })
+      setNotes(nm); setLogs(lm)
     }
     load()
     const ch = supabase.channel(`wn-badge-${Math.random().toString(36).slice(2)}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'task_work_notes' }, () => { load() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_edit_logs' }, () => { load() })
       .subscribe()
     const onSeen = () => setRev(r => r + 1)
     window.addEventListener('workNoteSeen', onSeen)
@@ -5413,14 +5435,16 @@ function useWorkNoteBadges(taskIds: string[], uid: string): Record<string, numbe
     }
     const seen = getWorkNoteSeen(uid)
     const out: Record<string, number> = {}
-    for (const r of rows) {
-      if (r.user_id === uid) continue                       // note của chính mình thì không tính
-      const since = seen[r.task_id] ?? base
-      if (Date.parse(r.created_at) > Date.parse(since)) out[r.task_id] = (out[r.task_id] ?? 0) + 1
+    for (const t of tasks) {
+      const since = Date.parse(seen[t.id] ?? base)
+      const n = buildTaskEvents(t, users, logs[t.id] ?? [], notes[t.id] ?? [])
+        .filter(e => !(e.actors ?? []).includes(uid) && Date.parse(e.at) > since).length
+      if (n > 0) out[t.id] = n
     }
     return out
-  }, [rows, rev, uid])
+  }, [tasks, users, notes, logs, rev, uid])
 }
+
 
 function WorkNoteBadge({ count }: { count: number }) {
   if (count <= 0) return null
@@ -5433,7 +5457,7 @@ function WorkNoteBadge({ count }: { count: number }) {
 }
 function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; users: User[]; currentUser: User; onOpen: (t: Task) => void }) {
   const [updateTask, setUpdateTask] = useState<Task | null>(null)
-  const badges = useWorkNoteBadges(tasks.map(t => t.id), currentUser.id)
+  const badges = useWorkNoteBadges(tasks, users, currentUser.id)
   const userOf = (id: string) => users.find(u => u.id === id)
   const fmtShort = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '—')
   const th = 'px-2 py-2.5 text-[10px] font-bold uppercase tracking-wide text-left'
