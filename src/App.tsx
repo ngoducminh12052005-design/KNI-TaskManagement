@@ -4277,10 +4277,8 @@ const pendingApproverIds = (t: Task, users: User[], requesterId?: string): strin
     // Task BOD (hoặc trợ lý BOD có quyền BOD) giao, quản lý đã phân công xuống nhân viên: người duyệt tạm dừng là quản lý đã phân công
     const relay = relayIdOf(t)
     if (isBodAssigned(t, users) && relay && relay !== req.id && users.some(u => u.id === relay)) return [relay]
-    const cross = !!t.targetTeamId || (!!creator && !isBodSide(creator) && creator.teamId !== req.teamId)
-    const teamId = cross && creator ? creator.teamId : req.teamId
-    ids = users.filter(u => u.role === 'manager' && !u.isDirector && u.teamId === teamId).map(u => u.id)
-    if (cross && creator?.role === 'manager' && !ids.includes(creator.id)) ids.push(creator.id)
+    // Luôn là quản lý phòng ban CỦA NHÂN VIÊN xin tạm dừng (kể cả task do phòng ban khác giao sang), không phải quản lý phòng ban giao task
+    ids = users.filter(u => u.role === 'manager' && !u.isDirector && u.teamId === req.teamId).map(u => u.id)
   }
   ids = ids.filter((id, i) => ids.indexOf(id) === i && id !== req.id)
   if (ids.length === 0) ids = users.filter(u => u.isDirector && u.id !== req.id).map(u => u.id) // không có ai thì chuyển lên BOD
