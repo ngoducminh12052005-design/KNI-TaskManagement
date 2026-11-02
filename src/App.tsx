@@ -4441,6 +4441,8 @@ async function approveSelfTask(task: Task, approver: User) {
     work_status: 'processing',
     started_at: nowIso,
     processing_started_at: nowIso,
+    // SLA chỉ bắt đầu tính từ lúc quản lý duyệt (nếu ngày bắt đầu ở tương lai thì tính từ ngày đó)
+    sla_start_at: task.slaLevel ? new Date(Math.max(Date.now(), task.startDate ? new Date(`${task.startDate}T00:00:00`).getTime() : 0)).toISOString() : null,
   }).eq('id', task.id).eq('creation_approval', 'pending')
   if (error) { alert('Không duyệt được task: ' + error.message); return }
   await supabase.from('notifications').insert({
@@ -4457,6 +4459,7 @@ async function rejectSelfTask(task: Task, approver: User) {
     creation_approved_by: approver.id,
     creation_approved_at: new Date().toISOString(),
     creation_rejected_reason: reason.trim() || null,
+    sla_start_at: null,                    // bị từ chối: chưa tính SLA, gửi lại và được duyệt mới tính
   }).eq('id', task.id).eq('creation_approval', 'pending')
   if (error) { alert('Không từ chối được task: ' + error.message); return }
   await supabase.from('notifications').insert({
@@ -4471,7 +4474,7 @@ async function sendSelfTask(task: Task, sender: User, users: User[]) {
   if (approverIds.length === 0) { alert('Chưa có quản lý nào để nhận task này. Hãy chọn người quản lý (PM) trong phần Sửa.'); return }
   const { error } = await supabase.from('tasks').update({
     creation_approval: 'pending', creation_rejected_reason: null,
-    sla_start_at: task.slaLevel ? (task.slaStartAt ?? new Date().toISOString()) : null,   // gửi quản lý là bắt đầu tính, duyệt chậm thì lỗi của quản lý
+    sla_start_at: null,   // gửi quản lý chưa tính SLA, quản lý duyệt xong mới bắt đầu tính
   }).eq('id', task.id).eq('creation_approval', 'draft')
   if (error) { alert('Không gửi được task: ' + error.message); return }
   for (const id of approverIds) {
