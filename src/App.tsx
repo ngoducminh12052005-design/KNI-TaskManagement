@@ -12878,7 +12878,7 @@ function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
           <p className="font-bold text-gray-500">TẬP ĐOÀN KHÔI NGUYÊN INVESTMENT (KNI)</p>
           <div className="grid grid-cols-3 border border-black">
             <div className="p-3 text-xs border-r border-black flex items-center">Mã dự án: <span className="ml-1 font-mono text-gray-500">PTASK… (tự sinh)</span></div>
-            <div className="col-span-2 p-3 text-center text-2xl font-bold">PHIẾU DỰ ÁN<span className="text-blue-400"> / PROJECT</span></div>
+            <div className="col-span-2 p-3 text-center text-2xl font-bold">DỰ ÁN<span className="text-blue-400"> / PROJECT</span></div>
           </div>
           <div>
             <label className={label}>Tên dự án *</label>
