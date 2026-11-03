@@ -14152,7 +14152,19 @@ function ProjectViewFlow(props: {
   focusTaskId?: string | null; onFocusTaskHandled?: () => void
 }) {
   // Nếu đang đi tới 1 task cụ thể trong dự án thì vào thẳng trang chi tiết, không hiện phiếu
-  const [stage, setStage] = useState<'phieu' | 'detail'>(props.focusTaskId ? 'detail' : 'phieu')
+  // Nhớ đang ở phiếu hay chi tiết: tải lại trang vẫn ở đúng chỗ đó (chỉ nhớ cho đúng dự án này)
+  const [stage, setStageRaw] = useState<'phieu' | 'detail'>(() => {
+    try {
+      const v = sessionStorage.getItem('projectStage')
+      if (v === `${props.project.id}:detail`) return 'detail'
+      if (v === `${props.project.id}:phieu`) return 'phieu'
+    } catch {}
+    return props.focusTaskId ? 'detail' : 'phieu'
+  })
+  const setStage = (s: 'phieu' | 'detail') => {
+    setStageRaw(s)
+    try { sessionStorage.setItem('projectStage', `${props.project.id}:${s}`) } catch {}
+  }
   return stage === 'phieu' ? (
     <ProjectDetailModal project={props.project} users={props.users} tasks={props.tasks} proposals={props.proposals}
       onClose={() => setStage('detail')} onOpenDetail={() => setStage('detail')} />
@@ -14468,7 +14480,7 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
   }, [restoreId, projects, loading])
   useEffect(() => {
     if (restoreId) return
-    try { if (openId) sessionStorage.setItem('projectDetailId', openId); else sessionStorage.removeItem('projectDetailId') } catch {}
+    try { if (openId) sessionStorage.setItem('projectDetailId', openId); else { sessionStorage.removeItem('projectDetailId'); sessionStorage.removeItem('projectStage') } } catch {}
   }, [openId, restoreId])
   const [fCompany, setFCompany] = useState('')
   const [fStatus, setFStatus] = useState('')
@@ -15539,6 +15551,8 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
                   return (
                     <button key={item.id} type="button"
                       onClick={() => {
+                        // Bấm menu = muốn vào danh sách: quên dự án/phiếu đang mở (còn reload trang thì vẫn giữ nguyên chỗ cũ)
+                        try { sessionStorage.removeItem('projectDetailId'); sessionStorage.removeItem('projectStage') } catch {}
                         setView(item.id as View)
                         setSidebarHover(false)
                         if (item.id === 'social' && mentionCount > 0) setShowMentions(true)
