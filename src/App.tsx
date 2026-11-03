@@ -1868,10 +1868,7 @@ const fmtTaskMoney = (n: number) => Math.round(n).toLocaleString('vi-VN')
 // Bỏ dòng trống trước khi lưu vào cột tasks.form_data
 // Các lần nộp kết quả lưu trong form_data._meta.submissions (không cần thêm cột trong database)
 const taskMeta = (t: { formData?: any }): any => (t.formData && typeof t.formData === 'object' ? (t.formData as any)._meta : undefined) ?? {}
-// Giờ bắt đầu của task ("HH:MM", lưu trong form_data._meta.startTime, không cần thêm cột database)
-const taskStartTime = (t: { formData?: any }): string => taskMeta(t).startTime || ''
-// Mốc bắt đầu = ngày + giờ bắt đầu (không nhập giờ thì lấy 00:00)
-const startMs = (date?: string, time?: string) => (date ? new Date(`${date}T${time || '00:00'}:00`).getTime() : 0)
+
 // ===== Giao chéo / ủy quyền qua quản lý =====
 const deptPrefix = (id?: string) => id?.match(/^t\d+/)?.[0] ?? ''
 
@@ -2204,22 +2201,7 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
           <tbody>
             <tr>
               <td className={`${td} font-bold bg-gray-50`} style={{ width: '22%' }}>Ngày bắt đầu</td>
-              <td className={td}>
-                <div className="flex gap-2">
-                  <input type="date" value={form.startDate} onChange={e => patchForm({ startDate: e.target.value }, { startDate: e.target.value })} className={cell} style={ink} />
-                  <input type="time" value={form.startTime ?? ''} onChange={e => patchForm({ startTime: e.target.value })} className={cell}
-                    style={{ ...ink, maxWidth: 110 }} title="Giờ bắt đầu (để trống = tính ngay khi giao)" />
-                </div>
-                {form.slaLevel && (SLA_LEVELS as any)[form.slaLevel] && (() => {
-                  const from = Math.max(Date.now(), startMs(form.startDate, form.startTime))
-                  const f = (ms: number) => new Date(ms).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })
-                  return (
-                    <p className="text-[10px] mt-1" style={{ color: '#b45309' }}>
-                      ⏱ SLA tính từ {f(from)} → hạn {f(from + (SLA_LEVELS as any)[form.slaLevel].hours * 3600000)} (cần quản lý phòng khác duyệt thì tính từ lúc được duyệt)
-                    </p>
-                  )
-                })()}
-              </td>
+              <td className={td}><input type="date" value={form.startDate} onChange={e => patchForm({ startDate: e.target.value }, { startDate: e.target.value })} className={cell} style={ink} /></td>
               <td className={`${td} font-bold bg-gray-50`} style={{ width: '22%' }}>Hạn hoàn thành</td>
               <td className={td}><input type="date" value={form.dueDate} min={form.startDate || undefined} onChange={e => patchForm({ dueDate: e.target.value }, { dueDate: e.target.value })} className={cell} style={ink} /></td>
             </tr>
@@ -2548,7 +2530,7 @@ function CrossDeptApproveModal({ task, currentUser, users, onClose }: { task: Ta
     const { error: upErr } = await supabase.from('tasks').update({
       cross_dept_pending: false, assigned_to: assignedTo,
       // SLA chỉ tính từ lúc quản lý phòng ban duyệt (BOD giao cũng vậy); nếu ngày bắt đầu ở tương lai thì tính từ ngày đó
-      sla_start_at: task.slaLevel ? new Date(Math.max(Date.now(), startMs(task.startDate, taskStartTime(task)))).toISOString() : null,
+      sla_start_at: task.slaLevel ? new Date(Math.max(Date.now(), task.startDate ? new Date(`${task.startDate}T00:00:00`).getTime() : 0)).toISOString() : null,
       form_data: { ...(task.formData ?? {}), _meta: { ...taskMeta(task), crossApprovedBy: currentUser.id, crossApprovedAt: new Date().toISOString(), transfer: null,
         chain: chainOf(task).includes(currentUser.id) ? chainOf(task) : [...chainOf(task), currentUser.id] } },
     }).eq('id', task.id)
@@ -2754,8 +2736,7 @@ type TaskChange = { label: string; from: string; to: string }
 function diffTaskEdit(old: Task, f: {
   title: string; company: string; description: string; expReward: number
   assignedTo: string[]; projectManager: string[]; supporters: string[]
-  startDate: string; startTime?: string; dueDate: string
-  category: string; priority: TaskPriority
+  startDate: string; dueDate: string; category: string; priority: TaskPriority
   important: boolean; urgent: boolean; isTeamProject: boolean; slaLevel: string
   doc: any
 }, users: User[]): TaskChange[] {
@@ -2775,7 +2756,6 @@ function diffTaskEdit(old: Task, f: {
   if (!sameIds(old.supporters, f.supporters)) out.push({ label: 'Người hỗ trợ', from: names(old.supporters), to: names(f.supporters) })
   if (!sameIds(old.projectManager, f.projectManager)) out.push({ label: 'Quản lý (PM)', from: names(old.projectManager), to: names(f.projectManager) })
   pushVal('Ngày bắt đầu', date(old.startDate), date(f.startDate))
-  pushVal('Giờ bắt đầu', taskStartTime(old) || '—', f.startTime || '—')
   pushVal('Hạn hoàn thành', date(old.dueDate), date(f.dueDate))
   pushVal('Danh mục', taskCategoryLabel(old.category) || '—', taskCategoryLabel(f.category) || '—')
   pushVal('Ưu tiên', PRIORITY_CONFIG[old.priority]?.label ?? old.priority, PRIORITY_CONFIG[f.priority]?.label ?? f.priority)
@@ -3064,7 +3044,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
               {info('Người phụ trách', names(task.assignedTo))}
               {info('Hỗ trợ', names(task.supporters))}
               {info('Quản lý (PM)', names(task.projectManager))}
-                {info('Ngày bắt đầu', `${fmtD(task.startDate)}${taskStartTime(task) ? ` · ${taskStartTime(task)}` : ''}`)}
+              {info('Ngày bắt đầu', fmtD(task.startDate))}
               {info('Hạn hoàn thành', fmtD(task.dueDate))}
               {info('Mức độ SLA', task.slaLevel ? SLA_LEVELS[task.slaLevel].label : 'Không áp dụng SLA')}
               {task.slaLevel && info('Hạn SLA', getSlaDeadline(task) ? fmtClockVN(getSlaDeadline(task)!.toISOString()) : slaIdleText(task))}
@@ -3336,7 +3316,7 @@ function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, canSen
           {heading('THÔNG TIN GIAO VIỆC')}
           <table className="w-full border-collapse mb-4">
             <tbody>
-              <tr><td className={lab} style={{ width: '22%' }}>Ngày bắt đầu</td>  <td className={td}>{fmtD(task.startDate)}{taskStartTime(task) ? ` · ${taskStartTime(task)}` : ''}</td><td className={lab} style={{ width: '22%' }}>Hạn hoàn thành</td><td className={td}>{fmtD(task.dueDate)}</td></tr>
+              <tr><td className={lab} style={{ width: '22%' }}>Ngày bắt đầu</td><td className={td}>{fmtD(task.startDate)}</td><td className={lab} style={{ width: '22%' }}>Hạn hoàn thành</td><td className={td}>{fmtD(task.dueDate)}</td></tr>
               <tr><td className={lab}>Danh mục</td><td className={td} colSpan={3}>{taskCategoryLabel(task.category)}</td></tr>
               <tr><td className={lab}>Mức độ SLA</td><td className={td}>{task.slaLevel ? SLA_LEVELS[task.slaLevel].label : 'Không áp dụng SLA'}</td><td className={lab}>EXP thưởng</td><td className={td}>+{task.expReward}</td></tr>
               <tr><td className={lab}>Trạng thái</td><td className={td} colSpan={3}>{statusText}</td></tr>
@@ -4632,7 +4612,7 @@ async function approveSelfTask(task: Task, approver: User) {
     // Duyệt xong: tự chuyển sang "Đang xử lý" (trừ khi ngày bắt đầu ở tương lai: chờ tới ngày hoặc nhân viên bấm "Bắt đầu sớm")
     ...((task.startDate && task.startDate > localToday()) ? {} : { status: 'in-progress', work_status: 'processing', started_at: nowIso, processing_started_at: nowIso }),
     // SLA chỉ bắt đầu tính từ lúc quản lý duyệt (nếu ngày bắt đầu ở tương lai thì tính từ ngày đó)
-    sla_start_at: task.slaLevel ? new Date(Math.max(Date.now(), startMs(task.startDate, taskStartTime(task)))).toISOString() : null,
+    sla_start_at: task.slaLevel ? new Date(Math.max(Date.now(), task.startDate ? new Date(`${task.startDate}T00:00:00`).getTime() : 0)).toISOString() : null,
   }).eq('id', task.id).eq('creation_approval', 'pending')
   if (error) { alert('Không duyệt được task: ' + error.message); return }
   await supabase.from('notifications').insert({
@@ -6002,7 +5982,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   const now = new Date()
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   const [form, setForm] = useState({
-    title: '', description: '', expReward: 80, startDate: todayStr, startTime: '', dueDate: '',
+    title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '',
     category: 'operations', priority: 'medium' as TaskPriority,
     important: false, urgent: false, isTeamProject: false,
     assignedTo: [] as string[], projectManager: [] as string[], supporters: [] as string[],
@@ -6195,7 +6175,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
     setSelfMode(task.selfCreated)
     setForm({
       title: task.title, description: task.description, expReward: task.expReward,
-      startDate: task.startDate || todayStr, startTime: taskStartTime(task), dueDate: task.dueDate,
+      startDate: task.startDate || todayStr, dueDate: task.dueDate,
       category: task.category, priority: task.priority,
       important: task.important, urgent: task.urgent, isTeamProject: task.isTeamProject ?? false,
       assignedTo: task.assignedTo, projectManager: task.projectManager, supporters: task.supporters,
@@ -6245,9 +6225,9 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       sla_level: form.slaLevel || null,
       // Mới đặt SLA → mốc tính là lúc sửa (nếu ngày bắt đầu ở tương lai thì tính từ ngày đó). Bỏ SLA → xoá mốc.
       // Đổi giữa các mức SLA (VD P3 → P1) thì giữ nguyên mốc cũ.
-      ...(slaStartsNow ? { sla_start_at: new Date(Math.max(Date.now(), startMs(form.startDate, form.startTime))).toISOString() } : {}),
+      ...(slaStartsNow ? { sla_start_at: new Date(Math.max(Date.now(), form.startDate ? new Date(`${form.startDate}T00:00:00`).getTime() : 0)).toISOString() } : {}),
       ...(!form.slaLevel ? { sla_start_at: null } : {}),
-      form_data: withMeta(cleanTaskDoc(form.doc), { ...taskMeta(editingTask), startTime: form.startTime || undefined }),
+      form_data: withMeta(cleanTaskDoc(form.doc), taskMeta(editingTask)),
     }).eq('id', editingTask.id)
     if (updateError) {
       alert('Không lưu được thay đổi: ' + updateError.message)
@@ -6316,9 +6296,8 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         // Quản lý / BOD giao task có SLA: đồng hồ SLA chạy ngay từ lúc giao (nếu có ngày bắt đầu ở tương lai thì tính từ ngày đó).
         // Task chờ quản lý phòng khác duyệt thì tính giờ sau khi được duyệt.
         sla_start_at: (form.slaLevel && !creatingForSelf && !isCrossDept && finalAssigned.length > 0)
-          ? new Date(Math.max(Date.now(), startMs(form.startDate, form.startTime))).toISOString() : null,
+          ? new Date(Math.max(Date.now(), form.startDate ? new Date(`${form.startDate}T00:00:00`).getTime() : 0)).toISOString() : null,
         form_data: withMeta(cleanTaskDoc(form.doc), {
-          ...(form.startTime ? { startTime: form.startTime } : {}),
           ...((currentUser.isBodAssistant && !currentUser.isDirector && form.fromBod && !creatingForSelf) ? { fromBod: true } : {}),
           ...(bodGate ? { bodGate: true } : {}),
         }),
@@ -6406,7 +6385,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
     // Tạo task từ dự án xong thì quay lại chi tiết dự án
     if (projectCtx) { const pid = projectCtx.id; setProjectCtx(null); onCreateForProjectDone?.(pid) }
     if (returnProjectId) { const pid = returnProjectId; setReturnProjectId(null); onCreateForProjectDone?.(pid, editingTask?.id) }
-    setForm({ title: '', description: '', expReward: 80, startDate: todayStr, startTime: '', dueDate: '', category: 'operations', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '', slaLevel: '', company: '', fromBod: !!(currentUser.isBodAssistant && !currentUser.isDirector), doc: emptyTaskDoc() })
+    setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'operations', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '', slaLevel: '', company: '', fromBod: !!(currentUser.isBodAssistant && !currentUser.isDirector), doc: emptyTaskDoc() })
   }
 
   const toggleFormArray = (field: 'assignedTo' | 'projectManager' | 'supporters', uid: string) => {
