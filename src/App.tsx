@@ -1653,8 +1653,13 @@ function DashboardProjects({ currentUser, users, onOpen, onViewAll }: {
         supabase.from('project_members').select('project_id, user_id, role'),
       ])
       const byProject: Record<string, string[]> = {}; const byManager: Record<string, string[]> = {}
-      ;(m.data ?? []).forEach((x: any) => { (byProject[x.project_id] ??= []).push(x.user_id); if (x.role === 'manager') (byManager[x.project_id] ??= []).push(x.user_id) })
-      setProjects((p.data ?? []).map((x: any) => mapDbProject(x, byProject[x.id] ?? [], byManager[x.id] ?? [])))
+      const byAppr: Record<string, string[]> = {}; const byApprOk: Record<string, string[]> = {}
+;(m.data ?? []).forEach((x: any) => {
+  if (x.role === 'approver') { (byAppr[x.project_id] ??= []).push(x.user_id); return }
+  if (x.role === 'approver_ok') { (byApprOk[x.project_id] ??= []).push(x.user_id); return }
+  (byProject[x.project_id] ??= []).push(x.user_id); if (x.role === 'manager') (byManager[x.project_id] ??= []).push(x.user_id)
+})
+setProjects((p.data ?? []).map((x: any) => mapDbProject(x, byProject[x.id] ?? [], byManager[x.id] ?? [], byAppr[x.id] ?? [], byApprOk[x.id] ?? [])))
       setLoading(false)
     }
     load()
@@ -12824,9 +12829,11 @@ interface Project {
   approvalStatus: string
   approvalNote?: string
   approvedBy?: string
+  approverIds: string[]   // người được chọn duyệt (lưu ở project_members, role 'approver' = chưa duyệt, 'approver_ok' = đã duyệt)
+  approvedIds: string[]   // trong đó ai đã duyệt
 }
 
-function mapDbProject(p: any, memberIds: string[], managerIds: string[] = []): Project {
+function mapDbProject(p: any, memberIds: string[], managerIds: string[] = [], pendingApprIds: string[] = [], okApprIds: string[] = []): Project {
   return {
     id: p.id, code: p.code ?? '', name: p.name, company: p.company ?? undefined, cls: p.class ?? 'project',
     status: p.status ?? 'planning', priority: p.priority ?? 'P3', objective: p.objective ?? undefined,
@@ -12837,12 +12844,16 @@ function mapDbProject(p: any, memberIds: string[], managerIds: string[] = []): P
     createdAt: p.created_at, memberIds,
     managerIds: Array.from(new Set([...(p.manager_id ? [p.manager_id as string] : []), ...managerIds])),
     approvalStatus: p.approval_status ?? 'approved', approvalNote: p.approval_note ?? undefined, approvedBy: p.approved_by ?? undefined,
+    approverIds: Array.from(new Set([...pendingApprIds, ...okApprIds])), approvedIds: okApprIds,
   }
 }
 
 // Dự án chờ duyệt / bị từ chối chỉ người tạo, trưởng bộ phận cùng phòng và BOD nhìn thấy
 // Quản lý được duyệt dự án: đã chọn PM là quản lý khác người tạo thì chỉ PM đó; chưa chọn thì quản lý cùng phòng ban người tạo
-const projectApproverIds = (p: { createdBy?: string; managerId?: string; managerIds?: string[]; teamId?: string }, users: User[]) => {
+const projectApproverIds = (p: { createdBy?: string; managerId?: string; managerIds?: string[]; teamId?: string; approverIds?: string[] }, users: User[]) => {
+  // Người tạo đã chọn sẵn người duyệt (trưởng bộ phận + BOD) thì chỉ những người đó duyệt
+  const chosen = (p.approverIds ?? []).filter(id => id !== p.createdBy)
+  if (chosen.length > 0) return chosen
   const creator = users.find(u => u.id === p.createdBy)
   const pms = Array.from(new Set([...(p.managerIds ?? []), ...(p.managerId ? [p.managerId] : [])]))
     .filter(id => id !== p.createdBy && users.find(u => u.id === id)?.role === 'manager')
@@ -12939,6 +12950,7 @@ function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
   const managerId = managerIds[0] ?? ''   // PM chính (lưu ở cột manager_id)
   const [teamId, setTeamId] = useState(currentUser.teamId)
   const [members, setMembers] = useState<string[]>([])
+  const [approverIds, setApproverIds] = useState<string[]>([])   // người cần duyệt dự án (trưởng bộ phận + BOD)
   const [affected, setAffected] = useState('')
   const [plannedStart, setPlannedStart] = useState('')
   const [plannedEnd, setPlannedEnd] = useState('')
@@ -12988,7 +13000,23 @@ function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
       })}
     </>
   )
-  const needsApproval = !currentUser.isDirector && currentUser.role !== 'manager'
+  // Quản lý (PM) không cần chọn lại làm người duyệt; người tạo cũng không tự duyệt chính mình
+  const apprIds = approverIds.filter(id => !managerIds.includes(id) && id !== currentUser.id)
+  // Bộ phận -> chỉ trưởng bộ phận và các sếp (BOD) của bộ phận đó
+  const approverOptions = (
+    <>
+      <option value="">＋ Thêm người duyệt</option>
+      {TEAMS.map(t => {
+        const list = users.filter(u => u.teamId === t.id && (u.role === 'manager' || u.isDirector) && !apprIds.includes(u.id) && !managerIds.includes(u.id) && u.id !== currentUser.id)
+        return list.length === 0 ? null : (
+          <optgroup key={t.id} label={`${t.emoji} ${t.name}`}>
+            {list.map(u => <option key={u.id} value={u.id}>{u.name}{u.isDirector ? ' (BOD)' : ' (Trưởng bộ phận)'}</option>)}
+          </optgroup>
+        )
+      })}
+    </>
+  )
+  const needsApproval = !currentUser.isDirector && (currentUser.role !== 'manager' || apprIds.length > 0)
   const submit = async () => {
     if (!name.trim()) { setError('Vui lòng nhập tên dự án.'); return }
     if (!company) { setError('Vui lòng chọn công ty.'); return }
@@ -13008,7 +13036,7 @@ function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
       const res = await supabase.from('projects').insert({
         code, name: name.trim(), company, class: cls, status, priority,
         objective: objective.trim() || null, description: description.trim() || null,
-        owner_id: ownerId || null, manager_id: managerId, team_id: needsApproval ? currentUser.teamId : (teamId || null),
+        owner_id: ownerId || null, manager_id: managerId, team_id: (needsApproval && apprIds.length === 0) ? currentUser.teamId : (teamId || null),
         affected: affected.trim() || null, planned_start: plannedStart || null, planned_end: plannedEnd || null,
         budget: Number(budget) || 0, supplier_name: supplierName.trim() || null, supplier_ref: supplierRef.trim() || null,
         risk_level: riskLevel, created_by: currentUser.id,
@@ -13018,9 +13046,14 @@ function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
       if (!insertError || insertError.code !== '23505') break
     }
     if (insertError || !created) { setSaving(false); setError(insertError?.message ?? 'Không tạo được dự án.'); return }
-    const memberIds = Array.from(new Set([...managerIds, ...(ownerId ? [ownerId] : []), ...members, ...draftTasks.flatMap(d => d.assignees)]))
+    const memberIds = Array.from(new Set([...managerIds, ...(ownerId ? [ownerId] : []), ...members, ...draftTasks.flatMap(d => d.assignees)])).filter(uid => !apprIds.includes(uid))
     await supabase.from('project_members').insert(memberIds.map(uid => ({ project_id: created.id, user_id: uid, role: managerIds.includes(uid) ? 'manager' : 'member' })))
-            // Task nhập sẵn: dự án còn nháp thì task cũng nháp (duyệt dự án xong mới giao + tính SLA)
+        // Người cần duyệt: chỉ lưu danh sách, CHƯA gửi. Người tạo vào chi tiết kiểm tra rồi bấm Gửi duyệt
+    if (apprIds.length > 0) {
+      const ra = await supabase.from('project_members').insert(apprIds.map(uid => ({ project_id: created.id, user_id: uid, role: 'approver' })))
+      if (ra.error) alert('Dự án đã tạo nhưng chưa lưu được danh sách người duyệt: ' + ra.error.message)
+    }   
+    // Task nhập sẵn: dự án còn nháp thì task cũng nháp (duyệt dự án xong mới giao + tính SLA)
     const projectActive = !needsApproval
     const nowIso = new Date().toISOString()
     const failed: string[] = []
@@ -13143,6 +13176,24 @@ function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
             <label className={label}>Thành viên tham gia (chọn phòng ban rồi chọn người)</label>
             <ProjectMemberPicker users={users} excludeIds={[...managerIds, ownerId]} value={members} onChange={setMembers} />
           </div>
+          {!currentUser.isDirector && (
+            <div>
+              <label className={label}>Người cần duyệt dự án (chọn bộ phận: chỉ hiện trưởng bộ phận và các sếp)</label>
+              <div className="flex flex-wrap gap-1.5 mb-1.5">
+                {apprIds.map(id => {
+                  const u = users.find(x => x.id === id)
+                  return (
+                    <span key={id} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full" style={{ background: u?.isDirector ? '#fef3c7' : '#dcfce7', color: u?.isDirector ? '#92400e' : '#166534' }}>
+                      {u?.isDirector ? '👑 ' : ''}{u?.name ?? '—'}
+                      <button type="button" onClick={() => setApproverIds(approverIds.filter(x => x !== id))} className="font-bold">✕</button>
+                    </span>
+                  )
+                })}
+              </div>
+              <select value="" onChange={e => { const v = e.target.value; if (v && !approverIds.includes(v)) setApproverIds([...approverIds, v]) }} className={box} style={ink}>{approverOptions}</select>
+              <p className="text-[11px] text-gray-500 mt-1">Bấm "Tạo dự án" chỉ lưu nháp. Bạn vào chi tiết dự án kiểm tra rồi bấm "Gửi duyệt": tất cả người duyệt nhận cùng lúc, ai duyệt trước hay sau đều được. BOD duyệt xong dự án tự chuyển "Đang chạy". Để trống thì quản lý cùng phòng duyệt như cũ.</p>
+            </div>
+          )}
           <div>
             <label className={label}>Công ty / khách hàng bị ảnh hưởng</label>
             <input value={affected} onChange={e => setAffected(e.target.value)} className={box} style={ink} />
@@ -13750,7 +13801,11 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
     && (approved || project.approvalStatus === 'draft' || project.approvalStatus === 'rejected')
   const creator = users.find(u => u.id === project.createdBy)
   const approverIds = projectApproverIds(project, users)
-  const canDecide = project.approvalStatus === 'pending' && (!!currentUser.isDirector || approverIds.includes(currentUser.id))
+  const signedByMe = project.approvedIds.includes(currentUser.id)
+  const canDecide = project.approvalStatus === 'pending' && (!!currentUser.isDirector || approverIds.includes(currentUser.id)) && !signedByMe
+  const approverLine = project.approverIds.length > 0
+    ? 'Người duyệt: ' + project.approverIds.map(id => `${nameOf(id)}${users.find(u => u.id === id)?.isDirector ? ' (BOD)' : ''} ${project.approvedIds.includes(id) ? '✅' : '⏳'}`).join(' · ')
+    : ''
   const isCreator = project.createdBy === currentUser.id
 
   const shown = list.filter(t =>
@@ -13813,8 +13868,23 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
     await supabase.from('notifications').insert(ids.map(id => ({ message, target_user_id: id, link_channel: `project:${project.id}` })))
   }
   const approveProject = async () => {
+    // Nhiều người duyệt: ai duyệt trước/sau đều được. BOD duyệt là dự án chạy ngay; không có BOD thì đủ mọi người duyệt là chạy
+    const explicit = project.approverIds.length > 0
+    const bodChosen = approverIds.some(id => users.find(u => u.id === id)?.isDirector)
+    const remaining = approverIds.filter(id => id !== currentUser.id && !project.approvedIds.includes(id))
+    const finalize = !explicit || !!currentUser.isDirector || (!bodChosen && remaining.length === 0)
+    if (explicit && approverIds.includes(currentUser.id)) {
+      const { error: e0 } = await supabase.from('project_members').update({ role: 'approver_ok' }).eq('project_id', project.id).eq('user_id', currentUser.id).eq('role', 'approver')
+      if (e0) { alert('Không ghi nhận được lượt duyệt: ' + e0.message); return }
+    }
+    if (!finalize) {
+      await logProjectEvent(project.id, currentUser.id, `✅ ${currentUser.name} đã duyệt dự án (còn chờ: ${remaining.map(nameOf).join(', ')})`)
+      if (project.createdBy) await notifyUsers([project.createdBy], `✅ ${currentUser.name} đã duyệt dự án "${project.name}". Còn chờ: ${remaining.map(nameOf).join(', ')}`)
+      onChanged()
+      return
+    }
     const { error } = await supabase.from('projects')
-      .update({ approval_status: 'approved', approval_note: null, approved_by: currentUser.id })
+      .update({ approval_status: 'approved', approval_note: null, approved_by: currentUser.id, status: 'active' })
       .eq('id', project.id).eq('approval_status', 'pending')
     if (error) { alert('Không duyệt được: ' + error.message); return }
     // Duyệt dự án = duyệt luôn các task nháp trong dự án: giao việc, thông báo và bắt đầu tính SLA
@@ -13829,7 +13899,20 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
         }
       }
     }
-    await logProjectEvent(project.id, currentUser.id, `✅ ${currentUser.name} duyệt dự án (các task nháp được giao, bắt đầu tính SLA)`)
+    // Trưởng bộ phận của các phòng có task trong dự án: được thấy dự án + nhận thông báo để làm hoặc phân công cho nhân viên
+    const taskRows = (drafts ?? []) as any[]
+    const teamsInvolved = Array.from(new Set(taskRows.flatMap(t => ((t.assigned_to ?? []) as string[]).map(uid => users.find(u => u.id === uid)?.teamId)).filter(Boolean) as string[]))
+    const heads = users.filter(u => u.role === 'manager' && !u.isDirector && u.id !== currentUser.id && teamsInvolved.includes(u.teamId))
+    if (heads.length > 0) {
+      const known = new Set([...project.memberIds, ...project.managerIds, ...project.approverIds])
+      const newMembers = heads.filter(h => !known.has(h.id))
+      if (newMembers.length > 0) await supabase.from('project_members').insert(newMembers.map(h => ({ project_id: project.id, user_id: h.id, role: 'member' })))
+      for (const h of heads) {
+        const n = taskRows.filter(t => ((t.assigned_to ?? []) as string[]).some(uid => users.find(u => u.id === uid)?.teamId === h.teamId)).length
+        await supabase.from('notifications').insert({ message: `🗂️ Dự án "${project.name}" đã được duyệt và đang chạy. Có ${n} task liên quan phòng bạn: vào dự án để làm hoặc phân công cho nhân viên.`, target_user_id: h.id, link_channel: `project:${project.id}` })
+      }
+    }
+    await logProjectEvent(project.id, currentUser.id, `✅ ${currentUser.name} duyệt dự án: dự án chuyển sang Đang chạy (các task nháp được giao, bắt đầu tính SLA)`)
     if (project.createdBy) await notifyUsers([project.createdBy], `✅ ${currentUser.name} đã duyệt dự án "${project.name}". Bạn có thể bắt đầu làm.`)
     onChanged()
   }
@@ -13851,6 +13934,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
       .update({ approval_status: 'pending', approval_note: null })
       .eq('id', project.id).eq('approval_status', 'draft')
     if (error) { alert('Không gửi duyệt được: ' + error.message); return }
+        await supabase.from('project_members').update({ role: 'approver' }).eq('project_id', project.id).eq('role', 'approver_ok')
     const nProp = proposals.filter(p => p.projectId === project.id).length
     await logProjectEvent(project.id, currentUser.id, `📤 ${currentUser.name} gửi dự án chờ duyệt (${list.length} task, ${nProp} tờ trình)`)
     await notifyUsers(approverIds, `🗂️ ${currentUser.name} gửi dự án "${project.name}" (${list.length} task, ${nProp} tờ trình) và chờ bạn duyệt`)
@@ -13861,6 +13945,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
       .update({ approval_status: 'pending', approval_note: null })
       .eq('id', project.id).eq('approval_status', 'rejected')
     if (error) { alert('Không gửi lại được: ' + error.message); return }
+        await supabase.from('project_members').update({ role: 'approver' }).eq('project_id', project.id).eq('role', 'approver_ok')
     await logProjectEvent(project.id, currentUser.id, `📤 ${currentUser.name} gửi lại dự án chờ duyệt`)
     await notifyUsers(approverIds, `🗂️ ${currentUser.name} gửi lại dự án "${project.name}" và chờ bạn duyệt`)
     onChanged()
@@ -13904,9 +13989,10 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
                 {project.approvalStatus === 'pending' && (
           <div className="rounded-xl p-4 mb-4 flex items-center justify-between gap-3 flex-wrap" style={{ background: '#f59e0b1a', border: '1px solid #f59e0b66' }}>
             <div>
-              <p className="text-sm font-bold" style={{ color: '#b45309' }}>⏳ Dự án đang chờ trưởng bộ phận duyệt</p>
+              <p className="text-sm font-bold" style={{ color: '#b45309' }}>⏳ Dự án đang trình duyệt</p>
+              {approverLine && <p className="text-xs mt-0.5 font-semibold" style={{ color: 'var(--text-primary)' }}>{approverLine}</p>}
               <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                {canDecide ? `${nameOf(project.createdBy)} đề xuất dự án này. Xem thông tin, task và tờ trình bên dưới rồi duyệt. Duyệt xong các task sẽ được giao và bắt đầu tính SLA.` : 'Chưa thể thêm task cho đến khi được duyệt.'}
+                {canDecide ? `${nameOf(project.createdBy)} đề xuất dự án này. Xem thông tin, task và tờ trình bên dưới rồi duyệt. BOD duyệt xong dự án chuyển sang Đang chạy, các task được giao và bắt đầu tính SLA.` : (signedByMe ? 'Bạn đã duyệt, đang chờ những người còn lại.' : 'Chưa thể thêm task cho đến khi được duyệt.')}
               </p>
             </div>
             {canDecide && (
@@ -13932,10 +14018,11 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
           <div className="rounded-xl p-4 mb-4 flex items-center justify-between gap-3 flex-wrap" style={{ background: '#0284c71a', border: '1px solid #0284c766' }}>
             <div>
               <p className="text-sm font-bold" style={{ color: '#0369a1' }}>📝 Dự án chưa gửi duyệt</p>
+              {approverLine && <p className="text-xs mt-0.5 font-semibold" style={{ color: 'var(--text-primary)' }}>{approverLine} (sẽ gửi cùng lúc cho tất cả khi bạn bấm Gửi)</p>}
               <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>Bạn có thể thêm task và tờ trình bên dưới. Khi gửi, quản lý sẽ thấy đủ thông tin, task và tờ trình để duyệt.</p>
             </div>
             {isCreator && (
-              <button type="button" onClick={sendForApproval} className="px-4 py-2 rounded-lg text-sm font-bold text-white" style={{ background: '#7c3aed' }}>📤 Gửi quản lý duyệt</button>
+              <button type="button" onClick={sendForApproval} className="px-4 py-2 rounded-lg text-sm font-bold text-white" style={{ background: '#7c3aed' }}>📤 Gửi duyệt</button>
             )}
           </div>
         )}
@@ -14092,7 +14179,7 @@ function ProjectDetailModal({ project, users, tasks, proposals, onClose, onOpenD
     : 'Đã duyệt'
   const approvalText =
     project.approvalStatus === 'approved' ? '✅ Đã duyệt'
-    : project.approvalStatus === 'pending' ? '⏳ Chờ quản lý duyệt'
+    : project.approvalStatus === 'pending' ? '⏳ Trình duyệt'
     : project.approvalStatus === 'rejected' ? '❌ Bị từ chối'
     : '📝 Nháp'
   const members = project.memberIds.filter(id => !project.managerIds.includes(id))
@@ -14394,8 +14481,13 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
       supabase.from('project_members').select('project_id, user_id, role'),
     ])
     const byProject: Record<string, string[]> = {}; const byManager: Record<string, string[]> = {}
-    ;(m.data ?? []).forEach((x: any) => { (byProject[x.project_id] ??= []).push(x.user_id); if (x.role === 'manager') (byManager[x.project_id] ??= []).push(x.user_id) })
-    setProjects((p.data ?? []).map((x: any) => mapDbProject(x, byProject[x.id] ?? [], byManager[x.id] ?? [])))
+    const byAppr: Record<string, string[]> = {}; const byApprOk: Record<string, string[]> = {}
+;(m.data ?? []).forEach((x: any) => {
+  if (x.role === 'approver') { (byAppr[x.project_id] ??= []).push(x.user_id); return }
+  if (x.role === 'approver_ok') { (byApprOk[x.project_id] ??= []).push(x.user_id); return }
+  (byProject[x.project_id] ??= []).push(x.user_id); if (x.role === 'manager') (byManager[x.project_id] ??= []).push(x.user_id)
+})
+setProjects((p.data ?? []).map((x: any) => mapDbProject(x, byProject[x.id] ?? [], byManager[x.id] ?? [], byAppr[x.id] ?? [], byApprOk[x.id] ?? [])))
     setLoading(false)
   }
 
@@ -14425,7 +14517,7 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
     .filter(p => !q.trim() || `${p.code} ${p.name}`.toLowerCase().includes(q.trim().toLowerCase()))
   const dated = base.filter(p => matchDateFilter(projDay(p), dateFilter))
   const needMine = (p: Project) =>
-    p.approvalStatus === 'pending' && p.createdBy !== currentUser.id && (isDir || projectApproverIds(p, users).includes(currentUser.id))
+    p.approvalStatus === 'pending' && p.createdBy !== currentUser.id && !p.approvedIds.includes(currentUser.id) && (isDir || projectApproverIds(p, users).includes(currentUser.id))
   const countOf = (k: string) => dated.filter(p => p.approvalStatus === 'approved' && p.status === k).length
   const approvalCount = dated.filter(needMine).length
   const visible = dated.filter(p => fStatus === 'need_approval' ? needMine(p) : (!fStatus || (p.approvalStatus === 'approved' && p.status === fStatus)))
