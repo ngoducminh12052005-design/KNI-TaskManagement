@@ -839,6 +839,13 @@ const byCreatedAsc = (a: Task, b: Task) => {
 }
 // Task mới nhất ở trên cùng (dùng cho dạng Thẻ)
 const byCreatedDesc = (a: Task, b: Task) => byCreatedAsc(b, a)
+// Mốc bắt đầu tính SLA: không bao giờ sớm hơn 0h ngày bắt đầu của task (nhân viên làm sớm thì SLA vẫn chỉ tính từ ngày bắt đầu)
+function getSlaStartMs(task: Task): number | null {
+  const ref = task.slaStartAt ?? task.startedAt
+  if (!task.slaLevel || !ref) return null
+  const dayMs = task.startDate ? new Date(`${task.startDate}T00:00:00`).getTime() : 0
+  return Math.max(new Date(ref).getTime(), Number.isNaN(dayMs) ? 0 : dayMs)
+}
 // Tính hạn SLA và kiểm tra trễ hạn
 function getSlaDeadline(task: Task): Date | null {
   // Đồng hồ SLA chạy từ lúc được giao (slaStartAt), không chờ nhân viên bấm Bắt đầu.
@@ -846,7 +853,7 @@ function getSlaDeadline(task: Task): Date | null {
   const startRef = task.slaStartAt ?? task.startedAt
   if (!task.slaLevel || !startRef) return null
 
-  const start = new Date(startRef)
+  const start = new Date(getSlaStartMs(task) ?? startRef)
   const slaMs = SLA_LEVELS[task.slaLevel].hours * 3600000
   const now = Date.now()
 
@@ -2800,6 +2807,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   // Nhân viên được giao: bấm "Bắt đầu" ngay trong chi tiết, bắt đầu rồi mới có nút Complete
   const isBeforeStart = !!task.startDate && task.startDate > localToday()
   const canStart = isAssignee && task.status === 'open' && !task.crossDeptPending && !task.crossDeptRejected && !isTaskGated(task) && !isBeforeStart
+    const canStartEarly = isAssignee && task.status === 'open' && !task.crossDeptPending && !task.crossDeptRejected && !isTaskGated(task) && isBeforeStart
   const canPending = isAssignee && task.status === 'in-progress' && task.workStatus === 'processing' && !task.pendingRequestedAt && !task.isLocked && !isTaskGated(task)
   // Người được giao, hoặc quản lý liên quan (BOD, người giao task, PM, quản lý phòng của người làm) đều được bấm Tiếp tục
   const isMgrOfTask = currentUser.role === 'manager' && (
@@ -2813,6 +2821,10 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
       status: 'in-progress', started_at: now, work_status: 'processing', processing_started_at: now,
     }).eq('id', task.id)
     if (error) alert('Không bắt đầu được task: ' + error.message)
+  }
+  const startEarly = async () => {
+    if (!window.confirm(`Chưa tới ngày bắt đầu (${new Date(task.startDate ?? '').toLocaleDateString('vi-VN')}). Bắt đầu sớm thì bạn làm ngay được, nhưng SLA vẫn chỉ tính từ ngày bắt đầu. Bắt đầu ngay?`)) return
+    await startTask()
   }
   const f: any = task.formData ?? {}
   const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
@@ -2971,6 +2983,9 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
               <span className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
                 🔒 Chưa tới ngày bắt đầu ({fmtD(task.startDate)})
               </span>
+            )}
+            {canStartEarly && (
+              <button type="button" onClick={startEarly} className={`${btn} text-white`} style={{ background: '#2563eb' }}>▶️ Bắt đầu sớm</button>
             )}
             {canApproveCross && (
               <>
@@ -4588,17 +4603,14 @@ async function approveSelfTask(task: Task, approver: User) {
     creation_approved_by: approver.id,
     creation_approved_at: nowIso,
     creation_rejected_reason: null,
-    // Duyệt xong: tự chuyển sang "Đang xử lý", nhân viên không cần bấm Bắt đầu nữa
-    status: 'in-progress',
-    work_status: 'processing',
-    started_at: nowIso,
-    processing_started_at: nowIso,
+    // Duyệt xong: tự chuyển sang "Đang xử lý" (trừ khi ngày bắt đầu ở tương lai: chờ tới ngày hoặc nhân viên bấm "Bắt đầu sớm")
+    ...((task.startDate && task.startDate > localToday()) ? {} : { status: 'in-progress', work_status: 'processing', started_at: nowIso, processing_started_at: nowIso }),
     // SLA chỉ bắt đầu tính từ lúc quản lý duyệt (nếu ngày bắt đầu ở tương lai thì tính từ ngày đó)
     sla_start_at: task.slaLevel ? new Date(Math.max(Date.now(), task.startDate ? new Date(`${task.startDate}T00:00:00`).getTime() : 0)).toISOString() : null,
   }).eq('id', task.id).eq('creation_approval', 'pending')
   if (error) { alert('Không duyệt được task: ' + error.message); return }
   await supabase.from('notifications').insert({
-    message: `✅ ${approver.name} đã duyệt task [${task.taskCode ?? task.title}] bạn tự tạo, task đã chuyển sang Đang xử lý, bạn có thể làm ngay`,
+    message: `✅ ${approver.name} đã duyệt task [${task.taskCode ?? task.title}] bạn tự tạo, ${(task.startDate && task.startDate > localToday()) ? `chưa tới ngày bắt đầu (${new Date(task.startDate ?? '').toLocaleDateString('vi-VN')}), bạn có thể bấm Bắt đầu sớm` : 'task đã chuyển sang Đang xử lý, bạn có thể làm ngay'}`,
     target_user_id: task.createdBy, link_task_id: task.id,
   })
 }
@@ -4739,6 +4751,9 @@ function SlaCell({ task, compact = false, users = [] }: { task: Task; compact?: 
     const lv = SLA_LEVELS[task.slaLevel]
     if (task.isLocked) { text = '🔒 Đã khoá — quá hạn SLA'; color = '#dc2626'; bg = '#dc262618' }
     else if (done) { text = '✅ Đã hoàn tất'; color = '#059669' }
+    else if (deadline && (getSlaStartMs(task) ?? 0) > Date.now()) {
+      text = `⏳ SLA tính từ ${new Date(getSlaStartMs(task)!).toLocaleDateString('vi-VN')}`; color = '#d97706'; bg = '#d9770618'
+    }
     else if (!deadline) { text = `${slaIdleText(task)} · SLA ${lv.label}` }
     else {
       const remain = Math.floor((deadline.getTime() - Date.now()) / 1000)
@@ -4752,7 +4767,7 @@ function SlaCell({ task, compact = false, users = [] }: { task: Task; compact?: 
   }
   if (task.slaLevel && task.startedAt) {
     const startLate = getSlaStartLateSeconds(task)
-    sub = `▶️ Bắt đầu ${fmtClockVN(task.startedAt)}${startLate > 0 ? ` · trễ ${formatLate(startLate)}` : ''}`
+    sub = `▶️ Bắt đầu ${fmtClockVN(task.startedAt)}${startLate > 0 ? ` · trễ ${formatLate(startLate)}` : ''}${new Date(task.startedAt).getTime() < (getSlaStartMs(task) ?? 0) ? ' · làm sớm, SLA tính từ ngày bắt đầu' : ''}`
   }
   if (task.slaLevel && done) {
     const doneLate = getSlaDoneLateSeconds(task)
@@ -6280,10 +6295,11 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
           ...((currentUser.isBodAssistant && !currentUser.isDirector && form.fromBod && !creatingForSelf) ? { fromBod: true } : {}),
           ...(bodGate ? { bodGate: true } : {}),
         }),
-        work_status: (creatingForSelf && !needsApproval) ? 'processing' : 'received',
-        status: (creatingForSelf && !needsApproval) ? 'in-progress' : 'open',
-        started_at: (creatingForSelf && !needsApproval) ? new Date().toISOString() : null,
-        processing_started_at: (creatingForSelf && !needsApproval) ? new Date().toISOString() : null,
+        // Task tự tạo chạy ngay, trừ khi ngày bắt đầu ở tương lai: lúc đó chờ tới ngày (hoặc bấm "Bắt đầu sớm")
+        work_status: (creatingForSelf && !needsApproval && !(form.startDate > localToday())) ? 'processing' : 'received',
+        status: (creatingForSelf && !needsApproval && !(form.startDate > localToday())) ? 'in-progress' : 'open',
+        started_at: (creatingForSelf && !needsApproval && !(form.startDate > localToday())) ? new Date().toISOString() : null,
+        processing_started_at: (creatingForSelf && !needsApproval && !(form.startDate > localToday())) ? new Date().toISOString() : null,
         assigned_to: creatingForSelf ? [currentUser.id] : finalAssigned,
         project_manager: form.projectManager, supporters: form.supporters,
         created_by: currentUser.id,
@@ -6828,6 +6844,12 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                           <span className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
                             🔒 Chưa tới ngày bắt đầu ({fmtDate(task.startDate!)})
                           </span>
+                        )}
+                        {task.status === 'open' && !task.crossDeptPending && isBeforeStartDate && (
+                          <button onClick={() => { if (window.confirm(`Chưa tới ngày bắt đầu (${fmtDate(task.startDate!)}). Bắt đầu sớm thì bạn làm ngay được, nhưng SLA vẫn chỉ tính từ ngày bắt đầu. Bắt đầu ngay?`)) handleStart(task.id) }}
+                            className="px-4 py-2 rounded-xl text-sm font-bold" style={{ background: '#3b82f622', color: '#2563eb' }}>
+                            Bắt đầu sớm
+                          </button>
                         )}
                         {task.status === 'open' && !task.crossDeptPending && !isBeforeStartDate && (
                           <button onClick={() => handleStart(task.id)}
