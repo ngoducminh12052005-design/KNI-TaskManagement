@@ -3206,6 +3206,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   )
 }
 
+
 // Xem task dạng phiếu giao task (chỉ đọc) — thay cho khung chi tiết nhỏ cũ
 function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, canSend = false, onClose, onOpenInTasks, onEdit }: {
   task: Task; users: User[]; currentUser: User; canApprove: boolean; canEdit: boolean; canSend?: boolean
