@@ -2799,7 +2799,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   const canApproveCross = canApproveCrossTask(task, currentUser)
   // Nhân viên được giao: bấm "Bắt đầu" ngay trong chi tiết, bắt đầu rồi mới có nút Complete
   const isBeforeStart = !!task.startDate && task.startDate > localToday()
-  const canStart = isAssignee && task.status === 'open' && !task.crossDeptPending && !task.crossDeptRejected && !isTaskGated(task)
+  const canStart = isAssignee && task.status === 'open' && !task.crossDeptPending && !task.crossDeptRejected && !isTaskGated(task) && !isBeforeStart
   const canPending = isAssignee && task.status === 'in-progress' && task.workStatus === 'processing' && !task.pendingRequestedAt && !task.isLocked && !isTaskGated(task)
   // Người được giao, hoặc quản lý liên quan (BOD, người giao task, PM, quản lý phòng của người làm) đều được bấm Tiếp tục
   const isMgrOfTask = currentUser.role === 'manager' && (
@@ -2808,12 +2808,9 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   const canResume = (isAssignee || isMgrOfTask) && task.status === 'in-progress' && task.workStatus === 'pending' && !task.pendingRequestedAt && !task.isLocked && !isTaskGated(task)
   const canDecide = canDecidePending(task, currentUser, users)
   const startTask = async () => {
-    if (isBeforeStart && !window.confirm(`Task này dự kiến bắt đầu ngày ${fmtD(task.startDate)}. Bạn muốn bắt đầu làm sớm ngay bây giờ?\nSLA sẽ được tính từ lúc bạn bấm Bắt đầu.`)) return
     const now = new Date().toISOString()
     const { error } = await supabase.from('tasks').update({
       status: 'in-progress', started_at: now, work_status: 'processing', processing_started_at: now,
-      // làm sớm: SLA tính từ lúc bấm Bắt đầu (không chờ tới ngày bắt đầu)
-      ...(task.slaLevel && (!task.slaStartAt || new Date(task.slaStartAt).getTime() > Date.now()) ? { sla_start_at: now } : {}),
     }).eq('id', task.id)
     if (error) alert('Không bắt đầu được task: ' + error.message)
   }
@@ -2951,7 +2948,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
               </>
             )}
             {canStart && (
-              <button type="button" onClick={startTask} className={`${btn} text-white`} style={{ background: '#2563eb' }}>▶️ {isBeforeStart ? 'Bắt đầu sớm' : 'Bắt đầu'}</button>
+              <button type="button" onClick={startTask} className={`${btn} text-white`} style={{ background: '#2563eb' }}>▶️ Bắt đầu</button>
             )}
             {canPending && (
               <button type="button" onClick={() => requestPendingTask(task, currentUser, users)} className={btn}
@@ -2969,6 +2966,11 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
                 <button type="button" onClick={() => rejectPendingTask(task, currentUser)} className={btn} style={{ background: '#f8717122', color: '#dc2626' }}>✕ Từ chối tạm dừng</button>
                 <button type="button" onClick={() => approvePendingTask(task, currentUser)} className={`${btn} text-white`} style={{ background: '#059669' }}>✓ Duyệt tạm dừng</button>
               </>
+            )}
+            {isAssignee && task.status === 'open' && isBeforeStart && !isTaskGated(task) && (
+              <span className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
+                🔒 Chưa tới ngày bắt đầu ({fmtD(task.startDate)})
+              </span>
             )}
             {canApproveCross && (
               <>
@@ -4581,22 +4583,22 @@ const canApproveSelfTask = (task: Task, user: User, users: User[]) => {
 
 async function approveSelfTask(task: Task, approver: User) {
   const nowIso = new Date().toISOString()
-  const startsNow = !task.startDate || task.startDate <= localToday()   // chưa tới ngày bắt đầu thì chưa cho làm
   const { error } = await supabase.from('tasks').update({
     creation_approval: 'approved',
     creation_approved_by: approver.id,
     creation_approved_at: nowIso,
     creation_rejected_reason: null,
-    // Duyệt xong: đã tới ngày bắt đầu thì tự chuyển "Đang xử lý"; chưa tới ngày thì giữ ở Received, tới ngày nhân viên bấm Bắt đầu
-    ...(startsNow
-      ? { status: 'in-progress', work_status: 'processing', started_at: nowIso, processing_started_at: nowIso }
-      : { status: 'open', work_status: 'received' }),
+    // Duyệt xong: tự chuyển sang "Đang xử lý", nhân viên không cần bấm Bắt đầu nữa
+    status: 'in-progress',
+    work_status: 'processing',
+    started_at: nowIso,
+    processing_started_at: nowIso,
     // SLA chỉ bắt đầu tính từ lúc quản lý duyệt (nếu ngày bắt đầu ở tương lai thì tính từ ngày đó)
     sla_start_at: task.slaLevel ? new Date(Math.max(Date.now(), task.startDate ? new Date(`${task.startDate}T00:00:00`).getTime() : 0)).toISOString() : null,
   }).eq('id', task.id).eq('creation_approval', 'pending')
   if (error) { alert('Không duyệt được task: ' + error.message); return }
   await supabase.from('notifications').insert({
-    message: `✅ ${approver.name} đã duyệt task [${task.taskCode ?? task.title}] bạn tự tạo, ${startsNow ? 'task đã chuyển sang Đang xử lý, bạn có thể làm ngay' : `task sẽ bắt đầu được từ ngày ${new Date(task.startDate!).toLocaleDateString('vi-VN')}`}`,
+    message: `✅ ${approver.name} đã duyệt task [${task.taskCode ?? task.title}] bạn tự tạo, task đã chuyển sang Đang xử lý, bạn có thể làm ngay`,
     target_user_id: task.createdBy, link_task_id: task.id,
   })
 }
@@ -6026,15 +6028,12 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
   const handleStart = async (id: string) => {
     const t0 = tasks.find(x => x.id === id)
     if (t0 && isTaskGated(t0)) { alert('Task này chưa được quản lý duyệt nên chưa thể bắt đầu.'); return }
-    if (t0?.startDate && t0.startDate > localToday() && !window.confirm(`Task này dự kiến bắt đầu ngày ${new Date(t0.startDate).toLocaleDateString('vi-VN')}. Bạn muốn bắt đầu làm sớm ngay bây giờ?\nSLA sẽ được tính từ lúc bạn bấm Bắt đầu.`)) return
     const now = new Date().toISOString()
     const { error } = await supabase.from('tasks').update({
       status: 'in-progress',
       started_at: now,
       work_status: 'processing',
       processing_started_at: now,
-      // làm sớm: SLA tính từ lúc bấm Bắt đầu (không chờ tới ngày bắt đầu)
-      ...(t0?.slaLevel && (!t0.slaStartAt || new Date(t0.slaStartAt).getTime() > Date.now()) ? { sla_start_at: now } : {}),
     }).eq('id', id)
     if (error) { alert('Không bắt đầu được task: ' + error.message); return }
   }
@@ -6268,7 +6267,6 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
 
            const projectDraft = !!projectCtx && projectCtx.approvalStatus !== 'approved'   // dự án chưa duyệt: task nháp, chưa giao, chưa tính SLA
       const taskCode = projectCtx ? await generateProjectTaskCode(projectCtx.id, projectCtx.code) : generateTaskCode(form.startDate, tasks)
-      const startsNow = creatingForSelf && !needsApproval && (!form.startDate || form.startDate <= localToday())   // chưa tới ngày bắt đầu thì chưa cho làm
       const { data: newTask } = await supabase.from('tasks').insert({
         title: finalTitle, company: form.company || null, description: form.description, exp_reward: form.expReward,
         task_code: taskCode,
@@ -6282,10 +6280,10 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
           ...((currentUser.isBodAssistant && !currentUser.isDirector && form.fromBod && !creatingForSelf) ? { fromBod: true } : {}),
           ...(bodGate ? { bodGate: true } : {}),
         }),
-        work_status: startsNow ? 'processing' : 'received',
-        status: startsNow ? 'in-progress' : 'open',
-        started_at: startsNow ? new Date().toISOString() : null,
-        processing_started_at: startsNow ? new Date().toISOString() : null,
+        work_status: (creatingForSelf && !needsApproval) ? 'processing' : 'received',
+        status: (creatingForSelf && !needsApproval) ? 'in-progress' : 'open',
+        started_at: (creatingForSelf && !needsApproval) ? new Date().toISOString() : null,
+        processing_started_at: (creatingForSelf && !needsApproval) ? new Date().toISOString() : null,
         assigned_to: creatingForSelf ? [currentUser.id] : finalAssigned,
         project_manager: form.projectManager, supporters: form.supporters,
         created_by: currentUser.id,
@@ -6826,10 +6824,15 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                   ) : isMyTask ? (
                     <div className="flex flex-col gap-1 items-end">
                       <div className="flex gap-1.5">
-                        {task.status === 'open' && !task.crossDeptPending && (
+                        {task.status === 'open' && !task.crossDeptPending && isBeforeStartDate && (
+                          <span className="px-3 py-2 rounded-xl text-xs font-semibold" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
+                            🔒 Chưa tới ngày bắt đầu ({fmtDate(task.startDate!)})
+                          </span>
+                        )}
+                        {task.status === 'open' && !task.crossDeptPending && !isBeforeStartDate && (
                           <button onClick={() => handleStart(task.id)}
                             className="px-4 py-2 rounded-xl text-sm font-bold" style={{ background: '#3b82f622', color: '#2563eb' }}>
-                            {isBeforeStartDate ? 'Bắt đầu sớm' : 'Bắt đầu'}
+                            Bắt đầu
                           </button>
                         )}
                         {task.status === 'in-progress' && task.workStatus !== 'pending' && (
