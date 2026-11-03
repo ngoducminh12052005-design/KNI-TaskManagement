@@ -2440,33 +2440,6 @@ function WordBtn() {
   )
 }
 
-// Nút nổi "Xuất Word": tự hiện khi đang mở một form dạng tờ giấy (tờ trình, phiếu giao task, dự án, đề nghị thanh toán...)
-function WordExportButton() {
-  const [has, setHas] = useState(false)
-  useEffect(() => {
-    const find = () => {
-      const marked = Array.from(document.querySelectorAll<HTMLElement>('[data-word-root]'))
-      if (marked.length > 0) return marked
-      const paper = document.querySelector<HTMLElement>('div[class*="max-w-[860px]"][class*="shadow-xl"]')
-      return paper ? [paper] : []
-    }
-    let t: any = null
-    const check = () => { clearTimeout(t); t = setTimeout(() => setHas(find().length > 0), 150) }
-    check()
-    const mo = new MutationObserver(check)
-    mo.observe(document.body, { childList: true, subtree: true })
-    return () => { mo.disconnect(); clearTimeout(t) }
-  }, [])
-  if (!has) return null
-  const go = exportWordFromScreen
-  return (
-    <button type="button" onClick={go} title="Tải form này về file Word"
-      className="fixed z-[90] right-4 top-[112px] px-3 py-2 rounded-lg text-xs font-bold text-white shadow-lg"
-      style={{ background: '#2563eb' }}>📄 Xuất Word</button>
-  )
-}
-
-
 
 // ===== Luồng xem task: Phiếu giao task -> (đóng) -> Trang chi tiết công việc =====
 function TaskViewFlow({ task, tasks, users, currentUser, readOnly = false, initialStage = 'detail', onClose, onEdit, onOpenInTasks, forceEdit = false }: {
@@ -15416,7 +15389,6 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto" style={{ background: 'var(--bg-app)' }}>{renderView()}</div>
-        <WordExportButton />
       </div>
     </div>
   )
