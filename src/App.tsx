@@ -13690,10 +13690,10 @@ function ProjectProposals({ project, proposals, users, currentUser, canManage, o
   )
 }
 
-function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit, onClose, onChanged, onOpenTask, onOpenProposal, onCreateTask, onEditTask, focusTaskId, onFocusTaskHandled }: {
+function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit, onClose, onChanged, onOpenTask, onOpenProposal, onCreateTask, onEditTask, focusTaskId, onFocusTaskHandled, onOpenPhieu }: {
   project: Project; users: User[]; tasks: Task[]; proposals: Proposal[]; currentUser: User; canEdit: boolean
   onClose: () => void; onChanged: () => void; onOpenTask?: (taskId: string) => void; onOpenProposal?: (proposalId: string) => void; onCreateTask?: (projectId: string) => void; onEditTask?: (taskId: string, projectId: string) => void
-  focusTaskId?: string | null; onFocusTaskHandled?: () => void
+  focusTaskId?: string | null; onFocusTaskHandled?: () => void; onOpenPhieu?: () => void
 }) {
   const [showTaskForm, setShowTaskForm] = useState(false)
   const [viewTask, setViewTask] = useState<Task | null>(null)   // khung chi tiết task mở ngay trong dự án
@@ -13860,7 +13860,10 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
       <div className="max-w-5xl mx-auto" data-word-root>
         <div className="flex items-center justify-between mb-3" data-no-word>
           <button type="button" onClick={onClose} className="text-xs" style={{ color: 'var(--text-muted)' }}>← Danh sách dự án</button>
-          <WordBtn />
+          <div className="flex items-center gap-2">
+            {onOpenPhieu && <button type="button" onClick={onOpenPhieu} className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-primary)' }}>📄 Xem phiếu</button>}
+            <WordBtn />
+          </div>
         </div>
         <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
           <span className="font-mono text-sm mr-2" style={{ color: 'var(--text-muted)' }}>[{project.code}]</span>{project.name}
@@ -14032,6 +14035,127 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
   )
 }
 
+// ===== Luồng xem dự án: Phiếu dự án -> (đóng) -> Trang chi tiết dự án =====
+function ProjectViewFlow(props: {
+  project: Project; users: User[]; tasks: Task[]; proposals: Proposal[]; currentUser: User; canEdit: boolean
+  onClose: () => void; onChanged: () => void; onOpenTask?: (taskId: string) => void; onOpenProposal?: (proposalId: string) => void
+  onCreateTask?: (projectId: string) => void; onEditTask?: (taskId: string, projectId: string) => void
+  focusTaskId?: string | null; onFocusTaskHandled?: () => void
+}) {
+  // Nếu đang đi tới 1 task cụ thể trong dự án thì vào thẳng trang chi tiết, không hiện phiếu
+  const [stage, setStage] = useState<'phieu' | 'detail'>(props.focusTaskId ? 'detail' : 'phieu')
+  return stage === 'phieu' ? (
+    <ProjectDetailModal project={props.project} users={props.users} tasks={props.tasks}
+      onClose={() => setStage('detail')} onOpenDetail={() => setStage('detail')} />
+  ) : (
+    <ProjectDetail {...props} onOpenPhieu={() => setStage('phieu')} />
+  )
+}
+
+// ===== PHIẾU DỰ ÁN (bố cục giống tờ trình / phiếu giao task) =====
+function ProjectDetailModal({ project, users, tasks, onClose, onOpenDetail }: {
+  project: Project; users: User[]; tasks: Task[]; onClose: () => void; onOpenDetail: () => void
+}) {
+  const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
+  const names = (ids: string[]) => (ids.length ? ids.map(nameOf).join(', ') : '—')
+  const fmtD = (s?: string) => (s ? new Date(s).toLocaleDateString('vi-VN') : '—')
+  const st = PROJECT_STATUS[project.status]
+  const rk = PROJECT_RISK[project.riskLevel] ?? ['—', '#111827']
+  const projTasks = tasks.filter(t => t.projectId === project.id)
+  const approvalText =
+    project.approvalStatus === 'approved' ? '✅ Đã duyệt'
+    : project.approvalStatus === 'pending' ? '⏳ Chờ quản lý duyệt'
+    : project.approvalStatus === 'rejected' ? '❌ Bị từ chối'
+    : '📝 Nháp'
+  const members = project.memberIds.filter(id => !project.managerIds.includes(id))
+  const ink = { color: '#111827' }
+  const th = 'border border-gray-400 px-1.5 py-1 text-xs font-bold text-center bg-gray-50'
+  const td = 'border border-gray-400 px-1.5 py-1 text-xs'
+  const lab = `${td} font-bold bg-gray-50`
+  const heading = (t: string) => <p className="font-bold mb-1">{t}</p>
+  const para = (text?: string) => (text ? <p className="whitespace-pre-wrap mb-4">{text}</p> : null)
+  const taskStatusText = (t: Task) =>
+    t.status === 'completed' ? 'Hoàn thành' : t.status === 'submitted' ? 'Chờ nghiệm thu' : t.status === 'in-progress' ? 'Đang làm' : 'Chưa bắt đầu'
+
+  return (
+    <div className="fixed right-0 left-0 md:left-[var(--sidebar-w)] top-16 bottom-14 md:bottom-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
+      <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
+        <span className="text-sm font-bold text-gray-800">📄 Phiếu dự án {project.code}</span>
+        <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-[860px] mx-auto my-4 bg-white shadow-xl p-6 sm:p-12 text-[13px] leading-relaxed" style={{ ...ink, fontFamily: 'Arial, Helvetica, sans-serif' }}>
+          <p className="font-bold text-gray-500">TẬP ĐOÀN KHÔI NGUYÊN INVESTMENT (KNI)</p>
+          <p className="font-bold text-gray-500">{project.company ? `CÔNG TY ${project.company.toUpperCase()}` : ''}</p>
+          <div className="grid grid-cols-3 border border-black my-5">
+            <div className="p-3 text-xs border-r border-black flex items-center">Số/No: <span className="ml-1 font-mono">{project.code || '—'}</span></div>
+            <div className="col-span-2 p-3 text-center text-3xl font-bold">PHIẾU DỰ ÁN<span className="text-blue-400">/ PROJECT</span></div>
+          </div>
+          <p className="text-center text-base font-bold uppercase whitespace-pre-wrap">{project.name}</p>
+          <p className="text-right italic my-3">HCMC, {fmtD(project.createdAt)}</p>
+
+          <div className="flex gap-3 mb-1"><b className="shrink-0 w-28">Người tạo:</b><span>{nameOf(project.createdBy)}</span></div>
+          <div className="flex gap-3 mb-1"><b className="shrink-0 w-28">Quản lý (PM):</b><span>{names(project.managerIds)}</span></div>
+          <div className="flex gap-3 mb-3"><b className="shrink-0 w-28">Thành viên:</b><span>{names(members)}</span></div>
+
+          {project.objective && <>{heading('MỤC TIÊU VÀ LÝ DO')}{para(project.objective)}</>}
+          {project.description && <>{heading('MÔ TẢ DỰ ÁN')}{para(project.description)}</>}
+
+          {heading('THÔNG TIN DỰ ÁN')}
+          <table className="w-full border-collapse mb-4">
+            <tbody>
+              <tr><td className={lab} style={{ width: '22%' }}>Ngày bắt đầu</td><td className={td}>{fmtD(project.plannedStart)}</td><td className={lab} style={{ width: '22%' }}>Ngày kết thúc</td><td className={td}>{fmtD(project.plannedEnd)}</td></tr>
+              <tr><td className={lab}>Danh mục</td><td className={td}>{projectCategoryLabel(project.cls)}</td><td className={lab}>Mức ưu tiên</td><td className={td}>{project.priority}</td></tr>
+              <tr><td className={lab}>Trạng thái</td><td className={td}>{st ? st[0] : project.status}</td><td className={lab}>Mức rủi ro</td><td className={td}>{rk[0]}</td></tr>
+              <tr><td className={lab}>Ngân sách (VNĐ)</td><td className={td}>{project.budget ? fmtTaskMoney(project.budget) : '—'}</td><td className={lab}>Nhà cung cấp</td><td className={td}>{[project.supplierName, project.supplierRef].filter(Boolean).join(' · ') || '—'}</td></tr>
+              <tr><td className={lab}>Bên bị ảnh hưởng</td><td className={td} colSpan={3}>{project.affected || '—'}</td></tr>
+              <tr><td className={lab}>Phê duyệt</td><td className={td} colSpan={3}>{approvalText}{project.approvalNote ? ` — ${project.approvalNote}` : ''}</td></tr>
+            </tbody>
+          </table>
+
+          {projTasks.length > 0 && (
+            <>
+              {heading('DANH SÁCH TASK THUỘC DỰ ÁN')}
+              <div className="overflow-x-auto mb-4">
+                <table className="w-full border-collapse" style={{ minWidth: 520 }}>
+                  <thead><tr><th className={th} style={{ width: 36 }}>STT</th><th className={th}>Mã task</th><th className={th}>Tên task</th><th className={th}>Phụ trách</th><th className={th}>Hạn</th><th className={th}>Trạng thái</th></tr></thead>
+                  <tbody>
+                    {projTasks.map((t, i) => (
+                      <tr key={t.id}>
+                        <td className={`${td} text-center`}>{i + 1}</td>
+                        <td className={td}>{t.taskCode ?? ''}</td>
+                        <td className={td}>{t.title}</td>
+                        <td className={td}>{names(t.assignedTo)}</td>
+                        <td className={`${td} text-center`}>{t.dueDate ? fmtD(t.dueDate) : ''}</td>
+                        <td className={td}>{taskStatusText(t)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          <div className="grid grid-cols-3 gap-4 mt-8 text-center">
+            <div><p className="font-bold">Người tạo dự án</p><p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p><p className="mt-8 font-semibold">{nameOf(project.createdBy)}</p></div>
+            <div><p className="font-bold">Quản lý dự án (PM)</p><p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p><p className="mt-8 font-semibold">{names(project.managerIds)}</p></div>
+            <div>
+              <p className="font-bold">Người duyệt</p><p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+              <p className="mt-8 font-semibold">{project.approvedBy ? nameOf(project.approvedBy) : '—'}</p>
+              {project.approvalStatus === 'approved' && <p className="text-xs font-bold" style={{ color: '#059669' }}>Đã duyệt</p>}
+              {project.approvalStatus === 'rejected' && <p className="text-xs font-bold" style={{ color: '#dc2626' }}>Từ chối</p>}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="shrink-0 px-4 py-3 flex items-center justify-end gap-3" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
+        <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600">Đóng</button>
+        <WordBtn />
+        <button type="button" onClick={onOpenDetail} className="px-5 py-2 rounded-lg text-sm font-bold text-white" style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>Mở trang dự án →</button>
+      </div>
+    </div>
+  )
+}
 
 // ===== Bảng dự án: một khung, giống bảng Task =====
 const PROJECT_STATUS_ICON: Record<string, string> = { planning: '📝', active: '🚀', on_hold: '⏸', done: '✅', closed: '🔒' }
@@ -14303,7 +14427,7 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
             canSee={canSee} onOpen={p => setOpenId(p.id)} />}
 
       {showForm && <ProjectForm currentUser={currentUser} users={users} proposals={proposals} onClose={() => setShowForm(false)} onCreated={async (id) => { await load(); setOpenId(id) }} />}
-      {open && <ProjectDetail project={open} users={users} tasks={tasks} proposals={proposals} currentUser={currentUser} canEdit={canEditProject(open)} onClose={() => setOpenId(null)} onChanged={load} onOpenTask={onOpenTask} onOpenProposal={onOpenProposal} onCreateTask={onCreateTask} onEditTask={onEditTask} focusTaskId={focusTaskId} onFocusTaskHandled={onFocusTaskHandled} />}
+      {open && <ProjectViewFlow key={open.id} project={open} users={users} tasks={tasks} proposals={proposals} currentUser={currentUser} canEdit={canEditProject(open)} onClose={() => setOpenId(null)} onChanged={load} onOpenTask={onOpenTask} onOpenProposal={onOpenProposal} onCreateTask={onCreateTask} onEditTask={onEditTask} focusTaskId={focusTaskId} onFocusTaskHandled={onFocusTaskHandled} />}
     </div>
   )
 }
