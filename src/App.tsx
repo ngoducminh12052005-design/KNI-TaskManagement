@@ -14045,7 +14045,7 @@ function ProjectViewFlow(props: {
   // Nếu đang đi tới 1 task cụ thể trong dự án thì vào thẳng trang chi tiết, không hiện phiếu
   const [stage, setStage] = useState<'phieu' | 'detail'>(props.focusTaskId ? 'detail' : 'phieu')
   return stage === 'phieu' ? (
-    <ProjectDetailModal project={props.project} users={props.users} tasks={props.tasks}
+    <ProjectDetailModal project={props.project} users={props.users} tasks={props.tasks} proposals={props.proposals}
       onClose={() => setStage('detail')} onOpenDetail={() => setStage('detail')} />
   ) : (
     <ProjectDetail {...props} onOpenPhieu={() => setStage('phieu')} />
@@ -14053,8 +14053,8 @@ function ProjectViewFlow(props: {
 }
 
 // ===== PHIẾU DỰ ÁN (bố cục giống tờ trình / phiếu giao task) =====
-function ProjectDetailModal({ project, users, tasks, onClose, onOpenDetail }: {
-  project: Project; users: User[]; tasks: Task[]; onClose: () => void; onOpenDetail: () => void
+function ProjectDetailModal({ project, users, tasks, proposals, onClose, onOpenDetail }: {
+  project: Project; users: User[]; tasks: Task[]; proposals: Proposal[]; onClose: () => void; onOpenDetail: () => void
 }) {
   const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
   const names = (ids: string[]) => (ids.length ? ids.map(nameOf).join(', ') : '—')
@@ -14062,6 +14062,12 @@ function ProjectDetailModal({ project, users, tasks, onClose, onOpenDetail }: {
   const st = PROJECT_STATUS[project.status]
   const rk = PROJECT_RISK[project.riskLevel] ?? ['—', '#111827']
   const projTasks = tasks.filter(t => t.projectId === project.id)
+  const linkedProposals = proposals.filter(p => p.projectId === project.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  const proposalGroup = (p: Proposal) => p.groupName ?? (p.kind === 'totrinh' ? 'Tờ trình' : 'Đề xuất')
+  const proposalStatusText = (p: Proposal) =>
+    p.status === 'pending' ? 'Chờ duyệt'
+    : p.status === 'rejected' ? 'Từ chối'
+    : 'Đã duyệt'
   const approvalText =
     project.approvalStatus === 'approved' ? '✅ Đã duyệt'
     : project.approvalStatus === 'pending' ? '⏳ Chờ quản lý duyệt'
@@ -14135,7 +14141,29 @@ function ProjectDetailModal({ project, users, tasks, onClose, onOpenDetail }: {
               </div>
             </>
           )}
-
+          
+                    {linkedProposals.length > 0 && (
+            <>
+              {heading('TỜ TRÌNH VÀ ĐỀ XUẤT LIÊN QUAN')}
+              <div className="overflow-x-auto mb-4">
+                <table className="w-full border-collapse" style={{ minWidth: 520 }}>
+                  <thead><tr><th className={th} style={{ width: 36 }}>STT</th><th className={th}>Mã</th><th className={th}>Loại</th><th className={th}>Tiêu đề</th><th className={th}>Người đề xuất</th><th className={th}>Trạng thái</th></tr></thead>
+                  <tbody>
+                    {linkedProposals.map((p, i) => (
+                      <tr key={p.id}>
+                        <td className={`${td} text-center`}>{i + 1}</td>
+                        <td className={td}>{p.code ?? ''}</td>
+                        <td className={td}>{proposalGroup(p)}</td>
+                        <td className={td}>{p.title}</td>
+                        <td className={td}>{nameOf(p.submittedBy)}</td>
+                        <td className={td}>{proposalStatusText(p)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
           <div className="grid grid-cols-3 gap-4 mt-8 text-center">
             <div><p className="font-bold">Người tạo dự án</p><p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p><p className="mt-8 font-semibold">{nameOf(project.createdBy)}</p></div>
             <div><p className="font-bold">Quản lý dự án (PM)</p><p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p><p className="mt-8 font-semibold">{names(project.managerIds)}</p></div>
