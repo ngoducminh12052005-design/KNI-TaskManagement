@@ -2420,6 +2420,26 @@ function exportWordDoc(els: HTMLElement[], fileName: string) {
   setTimeout(() => URL.revokeObjectURL(url), 2000)
 }
 
+// Xuất Word đúng form đang mở trên màn hình (form nằm trên cùng)
+function exportWordFromScreen() {
+  const marked = Array.from(document.querySelectorAll<HTMLElement>('[data-word-root]'))
+  const els = marked.length > 0
+    ? marked
+    : Array.from(document.querySelectorAll<HTMLElement>('div[class*="max-w-[860px]"][class*="shadow-xl"]')).slice(-1)
+  if (els.length === 0) { alert('Không tìm thấy nội dung để xuất Word.'); return }
+  const text = els.map(e => e.textContent ?? '').join(' ')
+  const code = text.match(/(?:RTASK|PTASK|TASK)[A-Z0-9.\-]*\d/)?.[0]
+  exportWordDoc(els, `KNI-${code ?? 'bieu-mau'}`)
+}
+
+// Nút "Xuất Word" nhỏ đặt trong thanh tiêu đề của các form
+function WordBtn() {
+  return (
+    <button type="button" onClick={exportWordFromScreen} title="Tải form này về file Word"
+      className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#2563eb' }}>📄 Xuất Word</button>
+  )
+}
+
 // Nút nổi "Xuất Word": tự hiện khi đang mở một form dạng tờ giấy (tờ trình, phiếu giao task, dự án, đề nghị thanh toán...)
 function WordExportButton() {
   const [has, setHas] = useState(false)
@@ -2438,14 +2458,7 @@ function WordExportButton() {
     return () => { mo.disconnect(); clearTimeout(t) }
   }, [])
   if (!has) return null
-  const go = () => {
-    const marked = Array.from(document.querySelectorAll<HTMLElement>('[data-word-root]'))
-    const els = marked.length > 0 ? marked : Array.from(document.querySelectorAll<HTMLElement>('div[class*="max-w-[860px]"][class*="shadow-xl"]')).slice(0, 1)
-    if (els.length === 0) return
-    const text = els.map(e => e.textContent ?? '').join(' ')
-    const code = text.match(/(?:RTASK|PTASK|TASK)[A-Z0-9.\-]*\d/)?.[0]
-    exportWordDoc(els, `KNI-${code ?? 'bieu-mau'}`)
-  }
+  const go = exportWordFromScreen
   return (
     <button type="button" onClick={go} title="Tải form này về file Word"
       className="fixed z-[90] right-4 top-[112px] px-3 py-2 rounded-lg text-xs font-bold text-white shadow-lg"
@@ -3340,6 +3353,7 @@ function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, canSen
       <div className="shrink-0 px-4 py-3 flex items-center justify-end gap-3" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
         {canApprove && <span className="text-xs mr-auto" style={{ color: '#d97706' }}>🎯 {nameOf(task.createdBy)} tự tạo task này, cần bạn duyệt trước khi làm.</span>}
         <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600">Đóng</button>
+        <WordBtn />
         {canApproveCross && (
           <>
             <button type="button" onClick={() => rejectCrossDept(task, currentUser)} className="px-4 py-2 rounded-lg text-sm font-bold" style={{ background: '#fee2e2', color: '#dc2626' }}>Từ chối</button>
@@ -9056,6 +9070,7 @@ function ProposalDocView({ p, users, currentUserId, onClose, canAct, onApprove, 
       <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
         <span className="text-sm font-bold text-gray-800">📄 Tờ trình {p.code ?? ''}</span>
         <div className="flex items-center gap-2">
+          <WordBtn />
           <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
         </div>
       </div>
@@ -10203,7 +10218,7 @@ function ProposalFormDocView({ p, users, currentUserId, onClose, canAct, onAppro
     <div className="fixed right-0 left-0 md:left-[var(--sidebar-w)] top-16 bottom-14 md:bottom-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
       <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
         <span className="text-sm font-bold text-gray-800">{cfg.icon} {cfg.title.charAt(0) + cfg.title.slice(1).toLowerCase()} {p.code ?? ''}</span>
-        <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
+        <div className="flex items-center gap-2"><WordBtn /><button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button></div>
       </div>
       <div className="flex-1 overflow-y-auto">
         {isReview && (
@@ -10373,7 +10388,7 @@ function ProposalDnttView({ p, users, currentUserId, onClose, canAct, onApprove,
     <div className="fixed right-0 left-0 md:left-[var(--sidebar-w)] top-16 bottom-14 md:bottom-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
       <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
         <span className="text-sm font-bold text-gray-800">💳 Đề nghị thanh toán {p.code ?? ''}</span>
-        <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
+        <div className="flex items-center gap-2"><WordBtn /><button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button></div>
       </div>
       <div className="flex-1 overflow-y-auto">
         {isReview && (
@@ -12055,6 +12070,22 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
       else sessionStorage.removeItem('proposalDetailId')
     } catch {}
   }, [detailProposal, restoreId])
+
+  // Nhớ cả màn XEM GIẤY (tờ trình, văn bản mẫu, đề nghị thanh toán): tải lại trang vẫn ở đúng tờ trình đó
+  const [restoreDocId, setRestoreDocId] = useState<string | null>(() => { try { return sessionStorage.getItem('proposalDocId') } catch { return null } })
+  useEffect(() => {
+    if (!restoreDocId) return
+    const target = proposals.find(x => x.id === restoreDocId)
+    if (target) { setDocProposal(target); setRestoreDocId(null) }
+    else if (proposals.length > 0) setRestoreDocId(null)   // đã tải dữ liệu mà không còn tờ trình này thì bỏ
+  }, [restoreDocId, proposals])
+  useEffect(() => {
+    if (restoreDocId) return   // đang chờ khôi phục, chưa ghi đè
+    try {
+      if (docProposal) sessionStorage.setItem('proposalDocId', docProposal.id)
+      else sessionStorage.removeItem('proposalDocId')
+    } catch {}
+  }, [docProposal, restoreDocId])
   const loadPendingMine = async () => {
     const { data } = await supabase.from('proposal_steps').select('proposal_id').eq('approver_id', currentUser.id).eq('status', 'pending')
     setPendingMine((data ?? []).map((s: any) => s.proposal_id))
@@ -13854,7 +13885,10 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
   return (
     <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 md:left-[var(--sidebar-w)] z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
       <div className="max-w-5xl mx-auto" data-word-root>
-        <button type="button" onClick={onClose} className="text-xs mb-3" style={{ color: 'var(--text-muted)' }} data-no-word>← Danh sách dự án</button>
+        <div className="flex items-center justify-between mb-3" data-no-word>
+          <button type="button" onClick={onClose} className="text-xs" style={{ color: 'var(--text-muted)' }}>← Danh sách dự án</button>
+          <WordBtn />
+        </div>
         <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
           <span className="font-mono text-sm mr-2" style={{ color: 'var(--text-muted)' }}>[{project.code}]</span>{project.name}
         </h2>
