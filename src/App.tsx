@@ -2289,6 +2289,172 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
   )
 }
 
+// ===== Xuất form ra file Word (.doc) =====
+// Chụp lại đúng giao diện form đang hiển thị (ô nhập đổi thành chữ, lưới/cột đổi thành bảng để Word hiểu) rồi tải về .doc
+const _wordColorCache: Record<string, [number, number, number, number]> = {}
+function wordRgba(c: string): [number, number, number, number] {
+  if (_wordColorCache[c]) return _wordColorCache[c]
+  let out: [number, number, number, number] = [0, 0, 0, 0]
+  try {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 1
+    const ctx = cv.getContext('2d', { willReadFrequently: true })!
+    ctx.clearRect(0, 0, 1, 1); ctx.fillStyle = '#000'; ctx.fillStyle = c; ctx.fillRect(0, 0, 1, 1)
+    const d = ctx.getImageData(0, 0, 1, 1).data
+    out = [d[0], d[1], d[2], d[3] / 255]
+  } catch {}
+  return (_wordColorCache[c] = out)
+}
+const wordLum = (r: number, g: number, b: number) => (0.299 * r + 0.587 * g + 0.114 * b) / 255
+const wordHex = (r: number, g: number, b: number) => '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('')
+const wordEsc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+function wordNode(src: Node, isRoot = false): string {
+  if (src.nodeType === 3) return wordEsc(src.textContent ?? '')
+  if (src.nodeType !== 1) return ''
+  const el = src as HTMLElement
+  const tag = el.tagName.toLowerCase()
+  if (['button', 'svg', 'script', 'style', 'canvas', 'img', 'iframe', 'datalist', 'option'].includes(tag) || el.hasAttribute('data-no-word')) return ''
+  const cs = getComputedStyle(el)
+  if (cs.display === 'none' || cs.visibility === 'hidden') return ''
+
+  // Ô nhập -> chữ
+  if (tag === 'input') {
+    const t = (el as HTMLInputElement).type
+    if (['file', 'hidden', 'checkbox', 'radio', 'button', 'submit'].includes(t)) return t === 'checkbox' || t === 'radio' ? ((el as HTMLInputElement).checked ? '☑' : '☐') : ''
+    return `<span>${wordEsc((el as HTMLInputElement).value)}</span>`
+  }
+  if (tag === 'textarea') return `<div style="white-space:pre-wrap">${wordEsc((el as HTMLTextAreaElement).value).replace(/\n/g, '<br/>')}</div>`
+  if (tag === 'select') { const s = el as HTMLSelectElement; return `<span>${wordEsc(s.selectedOptions[0]?.text ?? '')}</span>` }
+
+  // Style cần giữ
+  const st: string[] = []
+  const px2pt = (v: string) => `${Math.round(parseFloat(v) * 0.75 * 10) / 10}pt`
+  st.push(`font-family:${cs.fontFamily.replace(/"/g, "'")}`, `font-size:${px2pt(cs.fontSize)}`)
+  if (parseInt(cs.fontWeight, 10) >= 600) st.push('font-weight:bold')
+  if (cs.fontStyle === 'italic') st.push('font-style:italic')
+  if (cs.textDecorationLine.includes('underline')) st.push('text-decoration:underline')
+  if (['center', 'right', 'justify'].includes(cs.textAlign)) st.push(`text-align:${cs.textAlign}`)
+  if (cs.textTransform === 'uppercase') st.push('text-transform:uppercase')
+  if (cs.whiteSpace.startsWith('pre')) st.push('white-space:pre-wrap')
+  const [cr, cg, cb, ca] = wordRgba(cs.color)
+  st.push(`color:${wordLum(cr, cg, cb) > 0.75 && ca > 0 ? '#111827' : wordHex(cr, cg, cb)}`)
+  if (!isRoot) {
+    const [br, bg, bb, ba] = wordRgba(cs.backgroundColor)
+    if (ba > 0.5 && wordLum(br, bg, bb) > 0.6) st.push(`background:${wordHex(br, bg, bb)}`)
+    for (const side of ['top', 'right', 'bottom', 'left']) {
+      const w = parseFloat((cs as any)[`border${side[0].toUpperCase()}${side.slice(1)}Width`])
+      const bs = (cs as any)[`border${side[0].toUpperCase()}${side.slice(1)}Style`]
+      if (w > 0 && bs !== 'none') {
+        const [r, g, b] = wordRgba((cs as any)[`border${side[0].toUpperCase()}${side.slice(1)}Color`])
+        st.push(`border-${side}:${Math.max(0.5, Math.round(w * 0.75 * 10) / 10)}pt solid ${wordHex(r, g, b)}`)
+      }
+      const pad = parseFloat((cs as any)[`padding${side[0].toUpperCase()}${side.slice(1)}`])
+      if (pad > 0) st.push(`padding-${side}:${px2pt(String(pad))}`)
+      const mar = parseFloat((cs as any)[`margin${side[0].toUpperCase()}${side.slice(1)}`])
+      if (mar > 0 && (side === 'top' || side === 'bottom')) st.push(`margin-${side}:${px2pt(String(mar))}`)
+    }
+  } else {
+    st.push('margin:0')
+  }
+
+  const kids = Array.from(el.childNodes)
+  const isGrid = cs.display === 'grid'
+  const isFlexRow = cs.display === 'flex' && cs.flexDirection === 'row' && cs.flexWrap === 'nowrap'
+  const elKids = kids.filter(k => k.nodeType === 1 && getComputedStyle(k as HTMLElement).display !== 'none') as HTMLElement[]
+
+  // Grid / flex hàng ngang -> bảng
+  if ((isGrid || isFlexRow) && elKids.length >= 2 && kids.every(k => k.nodeType === 1 || !(k.textContent ?? '').trim())) {
+    const total = el.getBoundingClientRect().width || 1
+    const cols = isGrid ? Math.max(1, cs.gridTemplateColumns.split(' ').filter(Boolean).length) : elKids.length
+    // viền ngoài của khung được áp lên các ô ngoài rìa (Word / LibreOffice đọc viền của ô ổn định hơn viền của bảng)
+    const edge = (side: string) => st.find(x => x.startsWith(`border-${side}:`))
+    const rows: { span: number; w: number; html: string; lastFlex: boolean }[][] = []
+    let cur: { span: number; w: number; html: string; lastFlex: boolean }[] = []
+    let used = 0
+    elKids.forEach((k, idx) => {
+      const kcs = getComputedStyle(k)
+      const spanM = isGrid ? (kcs.gridColumnStart + ' ' + kcs.gridColumnEnd).match(/span\s+(\d+)/) : null
+      const span = Math.min(cols, spanM ? parseInt(spanM[1], 10) : 1)
+      if (used + span > cols) { rows.push(cur); cur = []; used = 0 }
+      cur.push({ span, w: Math.round((k.getBoundingClientRect().width / total) * 100), html: wordNode(k), lastFlex: !isGrid && idx === elKids.length - 1 })
+      used += span
+    })
+    if (cur.length) rows.push(cur)
+    const rowsHtml = rows.map((r, ri) => `<tr>${r.map((c, ci) => {
+      const bd: string[] = []
+      if (ri === 0 && edge('top')) bd.push(edge('top')!)
+      if (ri === rows.length - 1 && edge('bottom')) bd.push(edge('bottom')!)
+      if (ci === 0 && edge('left')) bd.push(edge('left')!)
+      if (ci === r.length - 1 && edge('right')) bd.push(edge('right')!)
+      return `<td colspan="${c.span}" valign="top"${c.lastFlex ? '' : ` width="${c.w}%"`} style="vertical-align:top${c.lastFlex ? '' : `;width:${c.w}%`}${bd.length ? ';' + bd.join(';') : ''}">${c.html}</td>`
+    }).join('')}</tr>`).join('')
+    const margins = st.filter(x => x.startsWith('margin'))
+    return `<table width="100%" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse${margins.length ? ';' + margins.join(';') : ''}"><tbody>${rowsHtml}</tbody></table>`
+  }
+
+  const inner = kids.map(k => wordNode(k)).join('')
+  if (['table', 'thead', 'tbody', 'tfoot', 'tr'].includes(tag)) {
+    const extra = tag === 'table' ? ` width="100%" cellspacing="0" cellpadding="0"` : ''
+    return `<${tag}${extra} style="${st.join(';')}${tag === 'table' ? ';border-collapse:collapse;width:100%' : ''}">${inner}</${tag}>`
+  }
+  if (tag === 'td' || tag === 'th') {
+    const c = (el as HTMLTableCellElement)
+    const w = el.getBoundingClientRect().width
+    return `<${tag}${c.colSpan > 1 ? ` colspan="${c.colSpan}"` : ''}${c.rowSpan > 1 ? ` rowspan="${c.rowSpan}"` : ''} valign="top" style="${st.join(';')};vertical-align:top${w ? `;width:${Math.round(w * 0.75)}pt` : ''}">${inner}</${tag}>`
+  }
+  if (tag === 'br') return '<br/>'
+  const out = cs.display.startsWith('inline') && tag !== 'div' ? 'span' : (['p', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li'].includes(tag) ? tag : 'div')
+  return `<${out} style="${st.join(';')}">${inner}</${out}>`
+}
+
+function exportWordDoc(els: HTMLElement[], fileName: string) {
+  const body = els.map(e => wordNode(e, true)).join('<p style="margin:0">&nbsp;</p>')
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${wordEsc(fileName)}</title>`
+    + `<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->`
+    + `<style>@page{size:21cm 29.7cm;margin:1.8cm 2cm}body{font-family:Arial,sans-serif;font-size:11pt}table{border-collapse:collapse}</style></head><body>${body}</body></html>`
+  const blob = new Blob(['\ufeff', html], { type: 'application/msword' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = `${fileName}.doc`
+  document.body.appendChild(a); a.click(); a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 2000)
+}
+
+// Nút nổi "Xuất Word": tự hiện khi đang mở một form dạng tờ giấy (tờ trình, phiếu giao task, dự án, đề nghị thanh toán...)
+function WordExportButton() {
+  const [has, setHas] = useState(false)
+  useEffect(() => {
+    const find = () => {
+      const marked = Array.from(document.querySelectorAll<HTMLElement>('[data-word-root]'))
+      if (marked.length > 0) return marked
+      const paper = document.querySelector<HTMLElement>('div[class*="max-w-[860px]"][class*="shadow-xl"]')
+      return paper ? [paper] : []
+    }
+    let t: any = null
+    const check = () => { clearTimeout(t); t = setTimeout(() => setHas(find().length > 0), 150) }
+    check()
+    const mo = new MutationObserver(check)
+    mo.observe(document.body, { childList: true, subtree: true })
+    return () => { mo.disconnect(); clearTimeout(t) }
+  }, [])
+  if (!has) return null
+  const go = () => {
+    const marked = Array.from(document.querySelectorAll<HTMLElement>('[data-word-root]'))
+    const els = marked.length > 0 ? marked : Array.from(document.querySelectorAll<HTMLElement>('div[class*="max-w-[860px]"][class*="shadow-xl"]')).slice(0, 1)
+    if (els.length === 0) return
+    const text = els.map(e => e.textContent ?? '').join(' ')
+    const code = text.match(/(?:RTASK|PTASK|TASK)[A-Z0-9.\-]*\d/)?.[0]
+    exportWordDoc(els, `KNI-${code ?? 'bieu-mau'}`)
+  }
+  return (
+    <button type="button" onClick={go} title="Tải form này về file Word"
+      className="fixed z-[90] right-4 top-[112px] px-3 py-2 rounded-lg text-xs font-bold text-white shadow-lg"
+      style={{ background: '#2563eb' }}>📄 Xuất Word</button>
+  )
+}
+
+
+
 // ===== Luồng xem task: Phiếu giao task -> (đóng) -> Trang chi tiết công việc =====
 function TaskViewFlow({ task, tasks, users, currentUser, readOnly = false, initialStage = 'detail', onClose, onEdit, onOpenInTasks, forceEdit = false }: {
   task: Task; tasks: Task[]; users: User[]; currentUser: User; readOnly?: boolean; initialStage?: 'phieu' | 'detail'
@@ -13686,8 +13852,8 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
 
   return (
     <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 md:left-[var(--sidebar-w)] z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
-      <div className="max-w-5xl mx-auto">
-        <button type="button" onClick={onClose} className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>← Danh sách dự án</button>
+      <div className="max-w-5xl mx-auto" data-word-root>
+        <button type="button" onClick={onClose} className="text-xs mb-3" style={{ color: 'var(--text-muted)' }} data-no-word>← Danh sách dự án</button>
         <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>
           <span className="font-mono text-sm mr-2" style={{ color: 'var(--text-muted)' }}>[{project.code}]</span>{project.name}
         </h2>
@@ -13781,7 +13947,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
         </div>
       </div>
       <div className="max-w-5xl mx-auto space-y-4 mt-4 pb-8">
-        <section className="rounded-xl p-4" style={card}>
+        <section className="rounded-xl p-4" style={card} data-word-root>
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Task của dự án ({list.length})</h3>
             {projectOpen ? (
@@ -15215,6 +15381,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto" style={{ background: 'var(--bg-app)' }}>{renderView()}</div>
+        <WordExportButton />
       </div>
     </div>
   )
