@@ -2545,23 +2545,29 @@ function exportWordFromScreen() {
   exportWordDoc(els, `KNI-${code ?? 'bieu-mau'}`)
 }
 
-// Xuất PDF: dựng lại đúng form bằng cùng bộ chuyển đổi như Word, rồi mở hộp thoại in của trình duyệt (chọn "Lưu dưới dạng PDF")
-function exportPdfDoc(els: HTMLElement[], fileName: string) {
+// Xuất PDF thẳng ra file: dựng lại đúng form bằng cùng bộ chuyển đổi như Word rồi lưu thành PDF khổ A4
+async function exportPdfDoc(els: HTMLElement[], fileName: string) {
   const body = els.map(e => wordNode(e, true)).join('<p style="margin:0">&nbsp;</p>')
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${wordEsc(fileName)}</title>`
-    + `<style>@page{size:A4;margin:1.8cm 2cm}html,body{margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:11pt;color:#111827}table{border-collapse:collapse;width:100%}tr,td,th{page-break-inside:avoid}</style></head><body>${body}</body></html>`
-  const iframe = document.createElement('iframe')
-  iframe.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0'
-  document.body.appendChild(iframe)
-  const doc = iframe.contentDocument
-  const win = iframe.contentWindow
-  if (!doc || !win) { iframe.remove(); alert('Không mở được bản in PDF.'); return }
-  doc.open(); doc.write(html); doc.close()
-  setTimeout(() => {
-    win.focus()
-    win.print()
-    setTimeout(() => iframe.remove(), 60000)
-  }, 400)
+  const box = document.createElement('div')
+  box.style.cssText = 'position:fixed;left:-10000px;top:0;width:642px;background:#fff;color:#111827;font-family:Arial,sans-serif;font-size:11pt'
+  box.innerHTML = `<style>table{border-collapse:collapse;width:100%}tr,td,th{page-break-inside:avoid}</style>${body}`
+  document.body.appendChild(box)
+  try {
+    const html2pdf = (await import('html2pdf.js')).default
+    const options: any = {
+      margin: [18, 20, 18, 20],
+      filename: `${fileName}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: 642 },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', 'p', 'h1', 'h2', 'h3'] },
+    }
+    await html2pdf().set(options).from(box).save()
+  } catch (e) {
+    alert('Không xuất được PDF: ' + (e as Error).message)
+  } finally {
+    box.remove()
+  }
 }
 
 // Xuất PDF đúng form đang mở trên màn hình (giống Xuất Word)
