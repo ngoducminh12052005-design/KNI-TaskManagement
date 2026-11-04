@@ -2548,24 +2548,19 @@ function exportWordFromScreen() {
 // Xuất PDF thẳng ra file: dựng lại đúng form bằng cùng bộ chuyển đổi như Word rồi lưu thành PDF khổ A4
 async function exportPdfDoc(els: HTMLElement[], fileName: string) {
   const body = els.map(e => wordNode(e, true)).join('<p style="margin:0">&nbsp;</p>')
-  // Khung này KHÔNG gắn vào trang và KHÔNG đặt position: để ngoài màn hình thì html2pdf chụp ra trang trắng
-  const box = document.createElement('div')
-  box.style.cssText = 'width:642px;padding-bottom:60px;background:#ffffff;color:#111827;font-family:Arial,sans-serif;font-size:11pt'
-  box.innerHTML = `<style>table{border-collapse:collapse;width:100%}tr,td,th{page-break-inside:avoid}</style>${body}<div style="height:40px">&nbsp;</div>`
-  try {
-    const html2pdf = (await import('html2pdf.js')).default
-    const options: any = {
-      margin: [18, 20, 18, 20],
-      filename: `${fileName}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: 642 },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', 'p', 'h1', 'h2', 'h3', 'table.keep-together'] },
-    }
-    await html2pdf().set(options).from(box).save()
-  } catch (e) {
-    alert('Không xuất được PDF: ' + (e as Error).message)
-  }
+  const iframe = document.createElement('iframe')
+  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'
+  document.body.appendChild(iframe)
+  const doc = iframe.contentDocument
+  const win = iframe.contentWindow
+  if (!doc || !win) { iframe.remove(); alert('Không mở được cửa sổ in.'); return }
+  doc.open()
+  doc.write(`<html><head><meta charset="utf-8"><title>${wordEsc(fileName)}</title><style>@page{size:A4;margin:18mm 20mm}body{font-family:Arial,sans-serif;font-size:11pt;color:#111827;margin:0;background:#fff}table{border-collapse:collapse;width:100%}tr,td,th{page-break-inside:avoid}.keep-together{page-break-inside:avoid}</style></head><body>${body}</body></html>`)
+  doc.close()
+  const oldTitle = document.title
+  document.title = fileName   // Chrome lấy tên file gợi ý từ tiêu đề trang
+  win.addEventListener('afterprint', () => { document.title = oldTitle; setTimeout(() => iframe.remove(), 500) })
+  setTimeout(() => { win.focus(); win.print() }, 300)
 }
 
 // Xuất PDF đúng form đang mở trên màn hình (giống Xuất Word)
