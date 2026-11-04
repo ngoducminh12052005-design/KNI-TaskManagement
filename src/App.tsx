@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo, createContext, useContext } from 'react'
 import { supabase } from './supabaseClient'
+import { createClient } from '@supabase/supabase-js'
 import companyLogo from './assets/company-logo.png'
 import * as XLSX from 'xlsx'
 // ==================== TYPES ====================
@@ -3857,6 +3858,56 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
   )
 }
 
+// ===== Xác nhận mật khẩu khi ký (BOD và quản lý) =====
+// Kiểm tra mật khẩu bằng một kết nối tạm riêng, KHÔNG đăng nhập lại và không làm đổi phiên đang dùng
+type PwReq = { label: string; email: string; resolve: (ok: boolean) => void }
+let pwHost: ((r: PwReq) => void) | null = null
+const needsPasswordToSign = (u: User) => u.role === 'manager' || !!u.isDirector
+async function confirmSign(u: User, label: string): Promise<boolean> {
+  if (!needsPasswordToSign(u)) return true
+  if (!pwHost) { alert('Chưa mở được hộp xác nhận mật khẩu, vui lòng tải lại trang.'); return false }
+  if (!u.email) { alert('Tài khoản chưa có email nên không xác nhận mật khẩu được.'); return false }
+  return new Promise<boolean>(resolve => pwHost!({ label, email: u.email!, resolve }))
+}
+function PasswordConfirmHost() {
+  const [req, setReq] = useState<PwReq | null>(null)
+  const [pw, setPw] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { pwHost = r => { setPw(''); setErr(''); setReq(r) }; return () => { pwHost = null } }, [])
+  if (!req) return null
+  const finish = (ok: boolean) => { const r = req; setReq(null); setPw(''); r.resolve(ok) }
+  const submit = async () => {
+    if (!pw) { setErr('Vui lòng nhập mật khẩu.'); return }
+    setBusy(true); setErr('')
+    try {
+      const tmp = createClient((supabase as any).supabaseUrl, (supabase as any).supabaseKey,
+        { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'kni-pw-check' } })
+      const { error } = await tmp.auth.signInWithPassword({ email: req.email, password: pw })
+      if (error) { setErr('Mật khẩu không đúng. Vui lòng thử lại.'); setBusy(false); return }
+    } catch { setErr('Không kiểm tra được mật khẩu, vui lòng thử lại.'); setBusy(false); return }
+    setBusy(false)
+    finish(true)
+  }
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.55)' }}>
+      <div className="w-full max-w-sm rounded-2xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+        <p className="text-base font-bold mb-1" style={{ color: 'var(--text-primary)' }}>🔐 Xác nhận ký</p>
+        <p className="text-sm mb-3 font-semibold" style={{ color: '#b45309' }}>{req.label}</p>
+        <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Nhập lại mật khẩu của bạn để xác nhận đúng là bạn đang ký.</p>
+        <input type="password" autoFocus value={pw} onChange={e => setPw(e.target.value)} placeholder="Mật khẩu"
+          onKeyDown={e => { if (e.key === 'Enter' && !busy) submit() }}
+          className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+        {err && <p className="text-xs mt-2 font-semibold" style={{ color: '#dc2626' }}>{err}</p>}
+        <div className="flex justify-end gap-2 mt-4">
+          <button type="button" disabled={busy} onClick={() => finish(false)} className="px-3 py-2 rounded-lg text-sm font-semibold" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-primary)' }}>Hủy</button>
+          <button type="button" disabled={busy} onClick={submit} className="px-4 py-2 rounded-lg text-sm font-bold text-white" style={{ background: '#059669' }}>{busy ? 'Đang kiểm tra...' : '✅ Xác nhận & ký'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 async function closeTask(
   task: Task, result: 'successful' | 'with_issue', closeNote: string,
   attachments: { name: string; path: string; size: number; type: string }[],
@@ -3865,6 +3916,7 @@ async function closeTask(
   if (isTargetDeptApprover(task, currentUser)) { alert('Quản lý trung gian chỉ nộp kết quả, người giao task mới được Close.'); return false }
   if (isBodAssigned(task, users) && !isBodSide(currentUser)) { alert('Task do BOD giao, chỉ BOD hoặc trợ lý BOD được Close.'); return false }
   const closeLabel = result === 'with_issue' ? 'Close with issue' : 'Close successful'
+  if (!(await confirmSign(currentUser, `${closeLabel} task [${task.taskCode ?? task.title}]`))) return false
   const approvedAt = new Date().toISOString()
 
   const { error: approveError } = await supabase.from('tasks').update({
@@ -12161,6 +12213,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   }
 
    const handleApprove = async (p: Proposal, note?: string) => {
+    if (!(await confirmSign(currentUser, `Duyệt ${p.kind === 'dntt' ? 'đề nghị thanh toán' : 'tờ trình'} "${p.title}"`))) return
     const steps = await loadSteps(p.id)
     const mine = steps.find(s => s.approver_id === currentUser.id && s.status === 'pending')
     
@@ -13909,6 +13962,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
     await supabase.from('notifications').insert(ids.map(id => ({ message, target_user_id: id, link_channel: `project:${project.id}` })))
   }
   const approveProject = async () => {
+  if (!(await confirmSign(currentUser, `Duyệt dự án [${project.code}] ${project.name}`))) return
     // Nhiều người duyệt: ai duyệt trước/sau đều được. BOD duyệt là dự án chạy ngay; không có BOD thì đủ mọi người duyệt là chạy
     const explicit = project.approverIds.length > 0
     const bodChosen = approverIds.some(id => users.find(u => u.id === id)?.isDirector)
@@ -15676,6 +15730,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
           </button>
         ))}
       </div>
+      <PasswordConfirmHost />
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden order-first md:order-none">
                 {/* Topbar */}
