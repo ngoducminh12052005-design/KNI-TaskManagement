@@ -2548,10 +2548,10 @@ function exportWordFromScreen() {
 // Xuất PDF thẳng ra file: dựng lại đúng form bằng cùng bộ chuyển đổi như Word rồi lưu thành PDF khổ A4
 async function exportPdfDoc(els: HTMLElement[], fileName: string) {
   const body = els.map(e => wordNode(e, true)).join('<p style="margin:0">&nbsp;</p>')
+  // Khung này KHÔNG gắn vào trang và KHÔNG đặt position: để ngoài màn hình thì html2pdf chụp ra trang trắng
   const box = document.createElement('div')
-  box.style.cssText = 'position:fixed;left:-10000px;top:0;width:642px;background:#fff;color:#111827;font-family:Arial,sans-serif;font-size:11pt'
+  box.style.cssText = 'width:642px;background:#ffffff;color:#111827;font-family:Arial,sans-serif;font-size:11pt'
   box.innerHTML = `<style>table{border-collapse:collapse;width:100%}tr,td,th{page-break-inside:avoid}</style>${body}`
-  document.body.appendChild(box)
   try {
     const html2pdf = (await import('html2pdf.js')).default
     const options: any = {
@@ -2565,8 +2565,6 @@ async function exportPdfDoc(els: HTMLElement[], fileName: string) {
     await html2pdf().set(options).from(box).save()
   } catch (e) {
     alert('Không xuất được PDF: ' + (e as Error).message)
-  } finally {
-    box.remove()
   }
 }
 
