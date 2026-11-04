@@ -1972,6 +1972,38 @@ const canApproveCrossTask = (t: Task, u: User) =>
   !!t.crossDeptPending && !!t.targetTeamId && u.role === 'manager' && t.createdBy !== u.id && !chainOf(t).includes(u.id) &&
   (u.isDirector ? deptPrefix(u.teamId) === deptPrefix(t.targetTeamId) : u.teamId === t.targetTeamId)
 
+// Task giao chéo bị quản lý phòng đích từ chối: người giao được sửa rồi gửi lại cho quản lý đó duyệt
+const canResendCrossTask = (t: Task, u: User) =>
+  !!t.crossDeptRejected && !!t.targetTeamId && (t.createdBy === u.id || (t.projectManager ?? []).includes(u.id))
+
+// Gửi lại task giao chéo (sau khi sửa) cho quản lý phòng đích duyệt lại
+async function resendCrossDept(task: Task, me: User, users: User[]) {
+  const { data: fresh } = await supabase.from('tasks').select('target_team_id, title, task_code, cross_dept_rejected_reason').eq('id', task.id).single()
+  const teamId: string | undefined = fresh?.target_team_id ?? task.targetTeamId
+  if (!teamId) { alert('Task chưa có phòng ban nhận.'); return false }
+  const targetManagers = users.filter(u => u.role === 'manager' && u.teamId === teamId)
+  if (targetManagers.length === 0) { alert('Phòng ban này chưa có quản lý nào để duyệt.'); return false }
+  const { error } = await supabase.from('tasks').update({
+    cross_dept_pending: true, cross_dept_rejected: false, cross_dept_rejected_reason: null, cross_dept_rejected_by: null,
+    sla_start_at: null,
+  }).eq('id', task.id).eq('cross_dept_rejected', true)
+  if (error) { alert('Không gửi lại được: ' + error.message); return false }
+  const code = fresh?.task_code ?? task.taskCode ?? task.title
+  const prevReason = fresh?.cross_dept_rejected_reason ?? task.crossDeptRejectedReason
+  await supabase.from('task_edit_logs').insert({
+    task_id: task.id, user_id: me.id,
+    changes: [{ label: 'Gửi lại duyệt giao chéo', from: `Bị từ chối${prevReason ? `: ${prevReason}` : ''}`, to: `Chờ ${targetManagers.map(m => m.name).join(', ')} duyệt` }],
+  })
+  await supabase.from('task_work_notes').insert({ task_id: task.id, user_id: me.id, note: `📤 Đã sửa và gửi lại cho quản lý phòng ban nhận duyệt${prevReason ? ` (lý do bị từ chối trước đó: ${prevReason})` : ''}` })
+  for (const mgr of targetManagers) {
+    await supabase.from('notifications').insert({
+      message: `🔁 ${me.name} đã sửa và gửi lại đề nghị giao / phối hợp task [${code}] "${fresh?.title ?? task.title}" để bạn duyệt lại`,
+      target_user_id: mgr.id, link_task_id: task.id,
+    })
+  }
+  return true
+}
+
 // Nhân viên đã nộp, quản lý cuối chuỗi chưa nộp lên người giao
 const isWaitingForward = (t: Task, _users?: User[]) => {
   const relay = relayIdOf(t)
@@ -2643,9 +2675,13 @@ async function rejectCrossDept(task: Task, currentUser: User) {
     cross_dept_rejected_reason: reason || null, cross_dept_rejected_by: currentUser.id,
   }).eq('id', task.id)
   if (error) { alert('Không từ chối được: ' + error.message); return }
+  await supabase.from('task_edit_logs').insert({
+    task_id: task.id, user_id: currentUser.id,
+    changes: [{ label: 'Từ chối giao chéo phòng ban', from: 'Chờ duyệt', to: `Bị từ chối${reason ? `: ${reason}` : ''}` }],
+  })
   if (task.createdBy !== currentUser.id) {
     await supabase.from('notifications').insert({
-      message: `❌ ${currentUser.name} đã từ chối task [${code}]${reason ? `: ${reason}` : ''}`,
+      message: `❌ ${currentUser.name} đã từ chối task [${code}]${reason ? `: ${reason}` : ''}. Bạn có thể sửa task rồi gửi lại để duyệt lại.`,
       target_user_id: task.createdBy, link_task_id: task.id,
     })
   }
@@ -3096,6 +3132,9 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
               <button type="button" onClick={onEdit} className={btn}
                 style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>✏️ Sửa</button>
             )}
+            {canResendCrossTask(task, currentUser) && (
+              <button type="button" onClick={() => resendCrossDept(task, currentUser, users)} className={`${btn} text-white`} style={{ background: '#0ea5e9' }}>📤 Gửi lại duyệt</button>
+            )}
             {canSend && (
               <button type="button" onClick={() => sendSelfTask(task, currentUser, users)} className={`${btn} text-white`} style={{ background: '#0ea5e9' }}>📤 Gửi task cho quản lý</button>
             )}
@@ -3496,6 +3535,7 @@ function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, canSen
         )}
         {showCross && <CrossDeptApproveModal task={task} currentUser={currentUser} users={users} onClose={() => setShowCross(false)} />}
         {canEdit && onEdit && <button type="button" onClick={onEdit} className="px-4 py-2 rounded-lg text-sm font-bold" style={{ background: '#f3f4f6', color: '#111827' }}>✏️ Sửa</button>}
+                {canResendCrossTask(task, currentUser) && <button type="button" onClick={() => resendCrossDept(task, currentUser, users)} className="px-4 py-2 rounded-lg text-sm font-bold text-white" style={{ background: '#0ea5e9' }}>📤 Gửi lại duyệt</button>}
         {task.createdBy === currentUser.id && (
           <button onClick={() => deleteTask(task, currentUser)} className="px-3 py-1.5 rounded-lg text-xs font-bold"
             style={{ background: '#f8717122', color: '#dc2626' }}>🗑 Xóa</button>
@@ -4750,6 +4790,7 @@ const isMgrSelfTask = (t: Task, users: User[]) =>
 const canEditTask = (t: Task, user: User, users: User[]) => {
   if (t.projectId && t.projectManager.includes(user.id)) return true   // quản lý dự án sửa được task trong dự án
   if (t.selfCreated && t.createdBy === user.id && t.creationApproval === 'draft') return true
+  if (canResendCrossTask(t, user)) return true   // task giao chéo bị từ chối: người giao sửa lại được
   if (user.role !== 'manager') return false
   if (isBodAssigned(t, users)) {
     if (isBodSide(user)) return true
@@ -6368,6 +6409,9 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
     if (!force && !canEditTask(task, currentUser, users)) return
     setEditingTask(task)
     setSelfMode(task.selfCreated)
+    // Task giao chéo bị từ chối: cho đổi phòng ban nhận / người đề xuất khi sửa
+    if (task.crossDeptRejected && task.targetTeamId && !currentUser.isDirector) { setCrossMode(true); setCrossTeamId(task.targetTeamId) }
+    else { setCrossMode(false); setCrossTeamId('') }
     setForm({
       title: task.title, description: task.description, expReward: task.expReward,
       startDate: task.startDate || todayStr, startTime: taskStartTime(task), dueDate: task.dueDate,
@@ -6408,9 +6452,16 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       // (task còn chờ quản lý phòng ban duyệt thì chờ duyệt xong mới tính, task tự tạo và task đã Close thì không áp dụng)
       const slaStartsNow = !!form.slaLevel && !editingTask.slaLevel && !editingTask.selfCreated && !editingTask.crossDeptPending && editingTask.status !== 'completed'
       if (slaStartsNow) editChanges.push({ label: 'Bắt đầu tính SLA', from: '—', to: new Date().toLocaleString('vi-VN') })
+      // Task giao chéo bị từ chối: sửa được phòng ban nhận; không chọn người thì để quản lý phòng đó tự làm / phân công
+      const reCross = !!editingTask.crossDeptRejected && crossMode && !!crossTeamId
+      const reCrossAssigned = reCross && form.assignedTo.length === 0
+        ? users.filter(u => u.role === 'manager' && u.teamId === crossTeamId).map(u => u.id) : form.assignedTo
+      if (reCross && crossTeamId !== editingTask.targetTeamId) {
+        editChanges.push({ label: 'Phòng ban nhận', from: TEAMS.find(t => t.id === editingTask.targetTeamId)?.name ?? '—', to: TEAMS.find(t => t.id === crossTeamId)?.name ?? '—' })
+      }
       const { error: updateError } = await supabase.from('tasks').update({
         title: finalTitle, company: form.company || null, description: form.description, exp_reward: form.expReward,
-        assigned_to: form.assignedTo, project_manager: form.projectManager, supporters: form.supporters,
+        assigned_to: reCrossAssigned, ...(reCross ? { target_team_id: crossTeamId } : {}), project_manager: form.projectManager, supporters: form.supporters,
         start_date: form.startDate, due_date: form.dueDate,
         ...(resubmit ? { creation_approval: 'pending', creation_rejected_reason: null } : {}),
         category: form.category, priority: form.priority,
@@ -6444,6 +6495,10 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       const sum = editChanges.map(c => `${c.label}: ${cut(c.from)} → ${cut(c.to)}`).join('; ')
       await supabase.from('task_work_notes').insert({ task_id: editingTask.id, user_id: currentUser.id, note: `✏️ Đã sửa task — ${sum}` })
       if (editingTask.projectId) await logProjectEvent(editingTask.projectId, currentUser.id, `✏️ ${currentUser.name} sửa task [${editingTask.taskCode ?? finalTitle}] — ${sum}`)
+    }
+    if (!updateError && editingTask.crossDeptRejected && canResendCrossTask(editingTask, currentUser)
+      && window.confirm('Đã lưu. Gửi lại cho quản lý phòng ban nhận duyệt luôn?')) {
+      await resendCrossDept(editingTask, currentUser, users)
     }
     if (resubmit) {
       for (const mgrId of getTaskApproverIds(currentUser.id, form.projectManager, users)) {
@@ -6894,6 +6949,15 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                       </span>
                       {task.crossDeptRejectedReason && (
                         <p className="text-xs text-right" style={{ color: 'var(--text-muted)' }}>Lý do: {task.crossDeptRejectedReason}</p>
+                      )}
+                      {canResendCrossTask(task, currentUser) && (
+                        <div className="flex gap-1.5 mt-1">
+                          <button onClick={() => openEditModal(task)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold"
+                            style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>✏️ Sửa</button>
+                          <button onClick={() => resendCrossDept(task, currentUser, users)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#0ea5e9' }}>📤 Gửi lại duyệt</button>
+                        </div>
                       )}
                     </div>
 
