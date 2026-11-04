@@ -6306,7 +6306,6 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       const isCrossDept = crossRequested || bodGate || (!creatingForSelf && !asBod && outsideAssignees.length > 0)
       const targetTeamId = crossRequested ? crossTeamId : bodGate ? bodDirectEmployees[0].teamId : (isCrossDept ? outsideAssignees[0].teamId : null)
 
-           const projectDraft = !!projectCtx && projectCtx.approvalStatus !== 'approved'   // dự án chưa duyệt: task nháp, chưa giao, chưa tính SLA
       const taskCode = projectCtx ? await generateProjectTaskCode(projectCtx.id, projectCtx.code) : generateTaskCode(form.startDate, tasks)
       const { data: newTask } = await supabase.from('tasks').insert({
         title: finalTitle, company: form.company || null, description: form.description, exp_reward: form.expReward,
@@ -6343,7 +6342,6 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       const newTaskId = newTask?.id
             if (newTaskId && !projectCtx) setOpenNewTaskId(newTaskId)
       if (newTaskId && projectCtx) {
-        if (projectDraft) await supabase.from('tasks').update({ creation_approval: 'draft', sla_start_at: null }).eq('id', newTaskId)
         const who = creatingForSelf ? [currentUser.id] : finalAssigned
         const { data: mem } = await supabase.from('project_members').select('user_id').eq('project_id', projectCtx.id)
         const have = new Set((mem ?? []).map((m: any) => m.user_id))
@@ -6353,7 +6351,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
 
       if (isManager && !selfMode) {
         const taskContent = form.description.trim() || form.title
-        for (const uid of (isCrossDept || projectDraft ? [] : finalAssigned)) {
+        for (const uid of (isCrossDept ? [] : finalAssigned)) {
           if (uid === currentUser.id) continue
           await supabase.from('notifications').insert({
             message: `📋 ${currentUser.name} vừa giao task [${taskCode}] cho bạn: ${taskContent}`,
@@ -6948,7 +6946,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       )}
             {showModal && projectCtx && (
         <div className="fixed top-2 left-1/2 -translate-x-1/2 z-[70] px-3 py-1.5 rounded-lg text-xs font-bold shadow" style={{ background: '#ede9fe', color: '#5b21b6' }}>
-          🗂️ Task sẽ nằm trong dự án [{projectCtx.code}] {projectCtx.name}{projectCtx.approvalStatus !== 'approved' ? ' (dự án chưa duyệt: task ở dạng nháp)' : ''}
+          🗂️ Task sẽ nằm trong dự án [{projectCtx.code}] {projectCtx.name}
         </div>
       )}
       {/* Create / Edit: phiếu giao task dạng tờ giấy */}
@@ -13089,8 +13087,7 @@ function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
       const ra = await supabase.from('project_members').insert(apprIds.map(uid => ({ project_id: created.id, user_id: uid, role: 'approver' })))
       if (ra.error) alert('Dự án đã tạo nhưng chưa lưu được danh sách người duyệt: ' + ra.error.message)
     }   
-    // Task nhập sẵn: dự án còn nháp thì task cũng nháp (duyệt dự án xong mới giao + tính SLA)
-    const projectActive = !needsApproval
+
     const nowIso = new Date().toISOString()
     const failed: string[] = []
     for (let i = 0; i < draftTasks.length; i++) {
@@ -13106,19 +13103,17 @@ function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
         category: 'projects_dev', priority: 'medium', self_created: false,
         important: false, urgent: false, is_team_project: false,
         cross_dept_pending: false, target_team_id: null,
-        creation_approval: projectActive ? 'approved' : 'draft',
+        creation_approval: 'approved',
         sla_level: d.slaLevel || null,
-        sla_start_at: projectActive && d.slaLevel ? new Date(Math.max(Date.now(), startMs(d.startDate, d.startTime))).toISOString() : null,
+        sla_start_at: d.slaLevel ? new Date(Math.max(Date.now(), startMs(d.startDate, d.startTime))).toISOString() : null,
         drive_folder_created: false, drive_folder_name: null,
       }).select('id, task_code').single()
       if (res2.error || !res2.data) { failed.push(d.title); continue }
-      if (projectActive) {
-        for (const uid of d.assignees.filter(u => u !== currentUser.id)) {
-          await supabase.from('notifications').insert({
-            message: `📋 ${currentUser.name} vừa giao task [${res2.data.task_code}] cho bạn trong dự án [${created.code}] ${name.trim()}: ${d.title}`,
-            target_user_id: uid, link_task_id: res2.data.id,
-          })
-        }
+      for (const uid of d.assignees.filter(u => u !== currentUser.id)) {
+        await supabase.from('notifications').insert({
+          message: `📋 ${currentUser.name} vừa giao task [${res2.data.task_code}] cho bạn trong dự án [${created.code}] ${name.trim()}: ${d.title}`,
+          target_user_id: uid, link_task_id: res2.data.id,
+        })
       }
     }
     if (attachIds.length > 0) await supabase.from('proposals').update({ project_id: created.id }).in('id', attachIds)
@@ -13447,9 +13442,9 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
         important: false, urgent: false, is_team_project: false,
         cross_dept_pending: false, target_team_id: null,
         // Dự án chưa duyệt thì task ở nháp (duyệt dự án xong mới giao + tính SLA)
-        creation_approval: project.approvalStatus !== 'approved' ? 'draft' : (creatingForSelf && currentUser.role === 'employee' ? 'pending' : 'approved'),
+        creation_approval: creatingForSelf && currentUser.role === 'employee' ? 'pending' : 'approved',
         sla_level: slaLevel || null,
-        sla_start_at: (slaLevel && project.approvalStatus === 'approved') ? new Date(Math.max(Date.now(), startMs(startDate, startTime))).toISOString() : null,
+        sla_start_at: slaLevel ? new Date(Math.max(Date.now(), startMs(startDate, startTime))).toISOString() : null,
         drive_folder_created: false, drive_folder_name: null,
       }).select('id').single()
       newTask = res.data; lastError = res.error
@@ -13464,7 +13459,6 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
     }
 
     // Thông báo: người được giao và quản lý dự án
-    if (project.approvalStatus !== 'approved') { setSaving(false); onClose(); return }
     const where = `trong dự án [${project.code}] ${project.name}`
     const notified = new Set<string>()
     if (canAssign) {
@@ -13846,7 +13840,6 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
   const canAssign = canEdit || currentUser.role === 'manager'
     const approved = project.approvalStatus === 'approved'
   const projectOpen = project.status !== 'closed' && project.status !== 'done'
-    && (approved || project.approvalStatus === 'draft' || project.approvalStatus === 'rejected')
   const creator = users.find(u => u.id === project.createdBy)
   const approverIds = projectApproverIds(project, users)
   const signedByMe = project.approvedIds.includes(currentUser.id)
@@ -13936,13 +13929,13 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
       .eq('id', project.id).eq('approval_status', 'pending')
     if (error) { alert('Không duyệt được: ' + error.message); return }
     // Duyệt dự án = duyệt luôn các task nháp trong dự án: giao việc, thông báo và bắt đầu tính SLA
-    const { data: drafts } = await supabase.from('tasks').select('id, title, task_code, assigned_to, start_date, form_data, sla_level').eq('project_id', project.id).eq('creation_approval', 'draft')
+    const { data: drafts } = await supabase.from('tasks').select('id, title, task_code, assigned_to, start_date, form_data, sla_level, sla_start_at').eq('project_id', project.id).eq('creation_approval', 'draft')
     if ((drafts ?? []).length > 0) {
       const nowIso = new Date().toISOString()
       // Mỗi task có mốc SLA riêng: từ lúc duyệt dự án, hoặc từ ngày + giờ bắt đầu nếu giờ đó còn ở phía sau
       for (const t of drafts ?? []) {
         const slaFrom = new Date(Math.max(Date.now(), startMs(t.start_date, taskStartTime({ formData: t.form_data })))).toISOString()
-        await supabase.from('tasks').update({ creation_approval: 'approved', ...(t.sla_level ? { sla_start_at: slaFrom } : {}) }).eq('id', t.id)
+        await supabase.from('tasks').update({ creation_approval: 'approved', ...(t.sla_level && !t.sla_start_at ? { sla_start_at: slaFrom } : {}) }).eq('id', t.id)
       }
       for (const t of drafts ?? []) {
         for (const uid of ((t.assigned_to ?? []) as string[]).filter(u => u !== currentUser.id)) {
@@ -14124,7 +14117,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
             {projectOpen ? (
               <button type="button" onClick={() => (onCreateTask ? onCreateTask(project.id) : setShowTaskForm(true))} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#7c3aed' }}>＋ Tạo TASK</button>
             ) : (
-              <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{approved ? 'Dự án đã đóng, không thêm task mới' : 'Dự án chưa được duyệt, chưa thêm task được'}</span>
+              <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Dự án đã đóng, không thêm task mới</span>
             )}
           </div>
           {projectOpen && (
