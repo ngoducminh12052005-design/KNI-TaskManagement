@@ -989,9 +989,16 @@ function isProjectLateTask(t: Task): boolean {
   return Date.now() > end
 }
 // Dự án trễ tiến độ: quá ngày kết thúc dự kiến mà chưa Hoàn thành / Đóng
-const isProjectLate = (p: Project): boolean =>
-  !!p.plannedEnd && p.status !== 'done' && p.status !== 'closed'
-  && Date.now() > new Date(`${p.plannedEnd.slice(0, 10)}T23:59:59`).getTime()
+const isProjectLate = (p: Project): boolean => {
+  if (!p.plannedEnd) return false
+  const end = new Date(`${p.plannedEnd.slice(0, 10)}T23:59:59`).getTime()
+  if (p.status === 'done' || p.status === 'closed') {
+    // Đã hoàn thành / đóng: trễ nếu xong SAU ngày kết thúc. Dự án cũ chưa có ngày hoàn thành thì tính theo hôm nay
+    const fin = p.completedAt ? new Date(p.completedAt).getTime() : Date.now()
+    return fin > end
+  }
+  return Date.now() > end
+}
 
 // Ai chịu trách nhiệm khi trễ SLA: người duyệt chậm (task chờ/duyệt sau hạn), hoặc người duyệt đầu tiên nếu task đã chuyển phòng ban
 type SlaBlame = { kind: 'assignee' | 'approver' | 'first-approver'; ids: string[] }
@@ -13263,6 +13270,7 @@ interface Project {
   approvedBy?: string
   approverIds: string[]   // người được chọn duyệt (lưu ở project_members, role 'approver' = chưa duyệt, 'approver_ok' = đã duyệt)
   approvedIds: string[]   // trong đó ai đã duyệt
+  completedAt?: string    // lần đầu dự án chuyển sang Hoàn thành / Đóng
 }
 
 function mapDbProject(p: any, memberIds: string[], managerIds: string[] = [], pendingApprIds: string[] = [], okApprIds: string[] = []): Project {
@@ -13278,6 +13286,7 @@ function mapDbProject(p: any, memberIds: string[], managerIds: string[] = [], pe
     managerIds: Array.from(new Set([...(p.manager_id ? [p.manager_id as string] : []), ...managerIds])),
     approvalStatus: p.approval_status ?? 'approved', approvalNote: p.approval_note ?? undefined, approvedBy: p.approved_by ?? undefined,
     approverIds: Array.from(new Set([...pendingApprIds, ...okApprIds])), approvedIds: okApprIds,
+    completedAt: p.completed_at ?? undefined,
   }
 }
 
@@ -14299,7 +14308,11 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
     </div>
   )
   const changeStatus = async (v: string) => {
-    const { error } = await supabase.from('projects').update({ status: v }).eq('id', project.id)
+    const patch: Record<string, any> = { status: v }
+    const toEnd = v === 'done' || v === 'closed'
+    if (toEnd && !project.completedAt) patch.completed_at = new Date().toISOString()   // lần đầu hoàn thành / đóng: ghi lại giờ
+    if (!toEnd) patch.completed_at = null                                                // mở lại dự án thì xóa mốc hoàn thành
+    const { error } = await supabase.from('projects').update(patch).eq('id', project.id)
     if (error) { alert('Không đổi được trạng thái: ' + error.message); return }
     await logProjectEvent(project.id, currentUser.id, `🔄 ${currentUser.name} đổi trạng thái dự án: ${(PROJECT_STATUS[project.status] ?? PROJECT_STATUS.planning)[0]} → ${(PROJECT_STATUS[v] ?? PROJECT_STATUS.planning)[0]}`)
     onChanged()
@@ -14495,7 +14508,9 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
               {row('Dự kiến bắt đầu', fmtD(project.plannedStart))}
               {row('Dự kiến kết thúc', fmtD(project.plannedEnd))}
               {isProjectLate(project) && (
-                <p className="text-xs font-bold mt-1" style={{ color: '#dc2626' }}>⚠️ Dự án trễ tiến độ: đã quá ngày kết thúc. {projectLateTasks} task bị ghi nhận trễ hạn dự án.</p>
+                <p className="text-xs font-bold mt-1" style={{ color: '#dc2626' }}>
+                  ⚠️ Dự án trễ tiến độ: {project.status === 'done' || project.status === 'closed' ? 'hoàn thành sau ngày kết thúc' : 'đã quá ngày kết thúc'}. {projectLateTasks} task bị ghi nhận trễ hạn dự án.
+                </p>
               )}
               {row('Ngân sách', `${money(project.budget)} VNĐ`)}
             </section>
