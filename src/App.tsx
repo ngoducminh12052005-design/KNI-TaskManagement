@@ -14244,6 +14244,8 @@ function ProjectDetailModal({ project, users, tasks, proposals, onClose, onOpenD
   const approverList: { id: string; ok: boolean }[] = project.approverIds.length > 0
     ? project.approverIds.map(id => ({ id, ok: project.approvedIds.includes(id) }))
     : (project.approvedBy ? [{ id: project.approvedBy, ok: project.approvalStatus === 'approved' }] : [])
+  // BOD luôn nằm cuối, những người còn lại giữ nguyên thứ tự
+  approverList.sort((a, b) => Number(!!users.find(x => x.id === a.id)?.isDirector) - Number(!!users.find(x => x.id === b.id)?.isDirector))
   const approvedNames = approverList.filter(a => a.ok).map(a => a.id)
   const approvalText =
     project.approvalStatus === 'approved' ? `✅ Đã duyệt${approvedNames.length ? ' bởi ' + names(approvedNames) : ''}`
