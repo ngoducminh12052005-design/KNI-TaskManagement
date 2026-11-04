@@ -8385,11 +8385,9 @@ if (!note.trim() && files.length === 0 && !link) { setMsg('Hãy nhập nội dun
 
     if (isRejected && flow.length > 0) {
       await supabase.from('proposal_steps')
-        .update({ status: p.approvalMode === 'par' ? 'pending' : 'waiting', decided_at: null, note: null })
+        .update({ status: 'waiting', decided_at: null, note: null })
         .eq('proposal_id', p.id)
-      if (p.approvalMode !== 'par') {
-        await supabase.from('proposal_steps').update({ status: 'pending' }).eq('proposal_id', p.id).eq('step_order', 1)
-      }
+      await supabase.from('proposal_steps').update({ status: 'pending' }).eq('proposal_id', p.id).eq('step_order', 1)
     }
 
     await supabase.from('notifications').insert({
@@ -8758,7 +8756,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
       // Làm lại các bước duyệt từ đầu (lịch sử duyệt cũ vẫn giữ trong proposal_approvals)
       await supabase.from('proposal_steps').delete().eq('proposal_id', editing.id)
       const { data: left } = await supabase.from('proposal_steps').select('*').eq('proposal_id', editing.id)
-      const stat = (k: number) => (k === 0 || approvalMode === 'par' ? 'pending' : 'waiting')
+      const stat = (k: number) => (k === 0 ? 'pending' : 'waiting')
       for (const [k, id] of approverIds.entries()) {
         const ex = (left ?? []).find((x: any) => x.approver_id === id)
         if (ex) await supabase.from('proposal_steps').update({ step_order: k + 1, status: stat(k), note: null, decided_at: null }).eq('id', ex.id)
@@ -8774,7 +8772,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
         added_note: diff.added || null,
         edited_note: diff.edited || (diff.added ? null : 'Gửi lại, không thay đổi nội dung'),
       })
-      for (const id of (approvalMode === 'par' ? approverIds : [recipientId]).filter(x => x !== currentUser.id)) {
+      for (const id of [recipientId].filter(x => x !== currentUser.id)) {
         await supabase.from('notifications').insert({
           message: `📜 ${currentUser.name} đã chỉnh sửa và gửi lại tờ trình "${title.trim()}" cho bạn`,
           target_user_id: id, link_proposal_id: editing.id,
@@ -8804,7 +8802,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
       if (!insertError && data?.id) {
         await supabase.from('proposal_steps').insert(approverIds.map((id, k) => ({
           proposal_id: data.id, approver_id: id, step_order: k + 1,
-          status: k === 0 || approvalMode === 'par' ? 'pending' : 'waiting',
+          status: k === 0 ? 'pending' : 'waiting',
         })))
       }
       if (!insertError || insertError.code !== '23505') break
@@ -8813,7 +8811,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
     if (insertError) { setError(insertError.message); return }
     if (data?.id) onCreated?.(data.id)
 
-    const notifyIds = (approvalMode === 'par' ? approverIds : [recipientId]).filter(x => x !== currentUser.id)
+    const notifyIds = [recipientId].filter(x => x !== currentUser.id)
     for (const id of notifyIds) {
       await supabase.from('notifications').insert({
         message: `📜 ${currentUser.name} vừa trình tờ trình "${title.trim()}" cho bạn`,
@@ -9010,11 +9008,11 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
             <option value="P4">P4 · Thấp</option>
           </select>
           <p className="text-[11px] text-gray-500 mt-1">
-            {approvalMode === 'par' ? '⚡ P1, P2: các người duyệt được gửi cùng lúc (song song).' : '➡️ P3, P4: duyệt lần lượt từng người (nối tiếp).'}
+            {approvalMode === 'par' ? '⚡ P1, P2: Trưởng bộ phận duyệt trước, sau đó các người còn lại nhận cùng lúc (song song).' : '➡️ P3, P4: duyệt lần lượt từng người (nối tiếp).'}
           </p>
           {approvalMode === 'par' && (
             <p className="text-[11px] text-gray-500 mt-0.5">
-              🏛️ Ban Giám đốc Tập đoàn duyệt thì tờ trình coi như đã được duyệt, những người còn lại không cần duyệt nữa.
+              🏛️ Luôn phải qua Trưởng bộ phận trước. Sau đó Ban Giám đốc Tập đoàn duyệt thì tờ trình coi như đã được duyệt, những người còn lại không cần duyệt nữa.
             </p>
           )}
         </div>
@@ -9372,7 +9370,7 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated }: { currentU
       if (!insertError && data?.id) {
         await supabase.from('proposal_steps').insert(approverIds.map((id, k) => ({
           proposal_id: data.id, approver_id: id, step_order: k + 1,
-          status: k === 0 || approvalMode === 'par' ? 'pending' : 'waiting',
+          status: k === 0 ? 'pending' : 'waiting',
         })))
       }
       if (!insertError || insertError.code !== '23505') break
@@ -9381,7 +9379,7 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated }: { currentU
     if (insertError) { setError(insertError.message); return }
     if (data?.id) onCreated?.(data.id)
 
-    const notifyIds = (approvalMode === 'par' ? approverIds : [recipientId]).filter(x => x !== currentUser.id)
+    const notifyIds = [recipientId].filter(x => x !== currentUser.id)
     for (const id of notifyIds) {
       await supabase.from('notifications').insert({
         message: `💳 ${currentUser.name} vừa gửi đề nghị thanh toán "${content.trim().slice(0, 80)}" cho bạn`,
@@ -9567,7 +9565,7 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated }: { currentU
             <label className="block text-xs text-gray-500 mb-1">Luồng phê duyệt</label>
             <select value={approvalMode} onChange={e => setApprovalMode(e.target.value as 'seq' | 'par')} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
               <option value="seq">Nối tiếp (lần lượt)</option>
-              <option value="par">Song song (cùng lúc)</option>
+              <option value="par">Song song (Trưởng bộ phận trước, rồi cùng lúc)</option>
             </select>
           </div>
         </div>
@@ -10054,7 +10052,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
       if (!insertError && data?.id) {
         await supabase.from('proposal_steps').insert(approverIds.map((id, k) => ({
           proposal_id: data.id, approver_id: id, step_order: k + 1,
-          status: k === 0 || approvalMode === 'par' ? 'pending' : 'waiting',
+          status: k === 0 ? 'pending' : 'waiting',
         })))
       }
       if (!insertError || insertError.code !== '23505') break
@@ -10063,7 +10061,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
     if (insertError) { setError(insertError.message); return }
     if (data?.id) onCreated?.(data.id)
 
-    const notifyIds = (approvalMode === 'par' ? approverIds : [recipientId]).filter(x => x !== currentUser.id)
+    const notifyIds = [recipientId].filter(x => x !== currentUser.id)
     for (const id of notifyIds) {
       await supabase.from('notifications').insert({
         message: `${cfg.icon} ${currentUser.name} vừa gửi ${cfg.noun} "${title.slice(0, 80)}" cho bạn`,
@@ -10168,7 +10166,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
             <label className="block text-xs text-gray-500 mb-1">Luồng phê duyệt</label>
             <select value={approvalMode} onChange={e => setApprovalMode(e.target.value as 'seq' | 'par')} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
               <option value="seq">Nối tiếp (lần lượt)</option>
-              <option value="par">Song song (cùng lúc)</option>
+              <option value="par">Song song (Trưởng bộ phận trước, rồi cùng lúc)</option>
             </select>
           </div>
         </div>
@@ -11175,7 +11173,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
             <section className="rounded-xl p-4" style={card}>
               <h3 className="text-sm font-bold mb-1" style={{ color: 'var(--text-primary)' }}>Luồng phê duyệt</h3>
               <p className="text-[11px] mb-3" style={{ color: 'var(--text-muted)' }}>
-                {p.approvalMode === 'par' ? 'Duyệt song song: cùng lúc.' : 'Duyệt nối tiếp: lần lượt từng người.'}
+                {p.approvalMode === 'par' ? 'Duyệt song song: Trưởng bộ phận duyệt trước, sau đó các người còn lại duyệt cùng lúc.' : 'Duyệt nối tiếp: lần lượt từng người.'}
               </p>
               <div className="space-y-3">
                 {flow.map(s => (
@@ -11366,7 +11364,7 @@ function ProposalModal({ currentUser, users, editingProposal, onClose, onCreated
           const approverIds = [recipientId, ...extraApprovers.filter(id => id !== recipientId)]
           await supabase.from('proposal_steps').insert(approverIds.map((id, i) => ({
             proposal_id: data.id, approver_id: id, step_order: i + 1,
-            status: i === 0 || approvalMode === 'par' ? 'pending' : 'waiting',
+            status: i === 0 ? 'pending' : 'waiting',
           })))
         }
         if (!insertError || insertError.code !== '23505') break
@@ -11380,15 +11378,6 @@ function ProposalModal({ currentUser, users, editingProposal, onClose, onCreated
         target_user_id: recipientId,
         link_proposal_id: data?.id,
       })
-            if (approvalMode === 'par') {
-        for (const id of extraApprovers) {
-          await supabase.from('notifications').insert({
-            message: `📜 ${currentUser.name} vừa trình tờ trình "${title.trim()}" cho bạn`,
-            target_user_id: id,
-            link_proposal_id: data?.id,
-          })
-        }
-      }
     }
     onClose()
   }
@@ -11604,7 +11593,7 @@ function ProposalModal({ currentUser, users, editingProposal, onClose, onCreated
                   className="w-full px-3 py-2.5 rounded-lg text-sm outline-none"
                   style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
                   <option value="seq">Nối tiếp (lần lượt)</option>
-                  <option value="par">Song song (cùng lúc)</option>
+                  <option value="par">Song song (Trưởng bộ phận trước, rồi cùng lúc)</option>
                 </select>
               </div>
             </>
@@ -12176,6 +12165,12 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
    const handleApprove = async (p: Proposal, note?: string) => {
     const steps = await loadSteps(p.id)
     const mine = steps.find(s => s.approver_id === currentUser.id && s.status === 'pending')
+    
+    // Chưa đến lượt (Trưởng bộ phận chưa duyệt) thì không được duyệt
+    if (!mine && steps.some(s => s.approver_id === currentUser.id && s.status === 'waiting')) {
+      alert('Chưa đến lượt bạn duyệt: tờ trình cần Trưởng bộ phận duyệt trước.')
+      return
+    }
 
     // Đề xuất cũ (chưa có luồng nhiều người): duyệt như trước
     if (!mine) {
@@ -12218,6 +12213,25 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
       }
       loadPendingMine()
       return
+    }
+
+        // P1, P2 (song song): phải qua Trưởng bộ phận (bước 1) trước. Duyệt xong, các người còn lại mới nhận để duyệt cùng lúc
+    if ((p.approvalMode ?? 'seq') === 'par' && mine.step_order === 1) {
+      const waitingOthers = steps.filter(s => s.id !== mine.id && s.status === 'waiting')
+      if (waitingOthers.length > 0) {
+        await supabase.from('proposal_steps').update({ status: 'pending' }).in('id', waitingOthers.map(s => s.id))
+        await supabase.from('proposals').update({
+          participants: Array.from(new Set([...p.participants, ...waitingOthers.map(s => s.approver_id)])),
+        }).eq('id', p.id)
+        for (const s of waitingOthers) {
+          if (s.approver_id === p.submittedBy) continue
+          await supabase.from('notifications').insert({
+            message: `📜 Tờ trình "${p.title}" của ${getUserById(p.submittedBy)?.name} đã qua ${currentUser.name} (Trưởng bộ phận), đến lượt bạn duyệt`,
+            target_user_id: s.approver_id,
+            link_proposal_id: p.id,
+          })
+        }
+      }
     }
     const rest = steps.filter(s => s.id !== mine.id)
     let nextStep: StepRow | undefined
