@@ -1868,6 +1868,10 @@ const fmtTaskMoney = (n: number) => Math.round(n).toLocaleString('vi-VN')
 // Bỏ dòng trống trước khi lưu vào cột tasks.form_data
 // Các lần nộp kết quả lưu trong form_data._meta.submissions (không cần thêm cột trong database)
 const taskMeta = (t: { formData?: any }): any => (t.formData && typeof t.formData === 'object' ? (t.formData as any)._meta : undefined) ?? {}
+// Giờ bắt đầu của task ("HH:MM", lưu trong form_data._meta.startTime, không cần thêm cột database)
+const taskStartTime = (t: { formData?: any }): string => taskMeta(t).startTime || ''
+// Mốc bắt đầu = ngày + giờ bắt đầu (không nhập giờ thì lấy 00:00)
+const startMs = (date?: string, time?: string) => (date ? new Date(`${date}T${time || '00:00'}:00`).getTime() : 0)
 
 // ===== Giao chéo / ủy quyền qua quản lý =====
 const deptPrefix = (id?: string) => id?.match(/^t\d+/)?.[0] ?? ''
@@ -2201,7 +2205,22 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
           <tbody>
             <tr>
               <td className={`${td} font-bold bg-gray-50`} style={{ width: '22%' }}>Ngày bắt đầu</td>
-              <td className={td}><input type="date" value={form.startDate} onChange={e => patchForm({ startDate: e.target.value }, { startDate: e.target.value })} className={cell} style={ink} /></td>
+              <td className={td}>
+                <div className="flex gap-2">
+                  <input type="date" value={form.startDate} onChange={e => patchForm({ startDate: e.target.value }, { startDate: e.target.value })} className={cell} style={ink} />
+                  <input type="time" value={form.startTime ?? ''} onChange={e => patchForm({ startTime: e.target.value })} className={cell}
+                    style={{ ...ink, maxWidth: 110 }} title="Giờ bắt đầu (để trống = tính ngay khi giao)" />
+                </div>
+                {form.slaLevel && (SLA_LEVELS as any)[form.slaLevel] && (() => {
+                  const from = Math.max(Date.now(), startMs(form.startDate, form.startTime))
+                  const f = (ms: number) => new Date(ms).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })
+                  return (
+                    <p className="text-[10px] mt-1" style={{ color: '#b45309' }}>
+                      ⏱ SLA tính từ {f(from)} → hạn {f(from + (SLA_LEVELS as any)[form.slaLevel].hours * 3600000)} (cần quản lý phòng khác duyệt thì tính từ lúc được duyệt)
+                    </p>
+                  )
+                })()}
+              </td>
               <td className={`${td} font-bold bg-gray-50`} style={{ width: '22%' }}>Hạn hoàn thành</td>
               <td className={td}><input type="date" value={form.dueDate} min={form.startDate || undefined} onChange={e => patchForm({ dueDate: e.target.value }, { dueDate: e.target.value })} className={cell} style={ink} /></td>
             </tr>
@@ -2530,7 +2549,7 @@ function CrossDeptApproveModal({ task, currentUser, users, onClose }: { task: Ta
     const { error: upErr } = await supabase.from('tasks').update({
       cross_dept_pending: false, assigned_to: assignedTo,
       // SLA chỉ tính từ lúc quản lý phòng ban duyệt (BOD giao cũng vậy); nếu ngày bắt đầu ở tương lai thì tính từ ngày đó
-      sla_start_at: task.slaLevel ? new Date(Math.max(Date.now(), task.startDate ? new Date(`${task.startDate}T00:00:00`).getTime() : 0)).toISOString() : null,
+      sla_start_at: task.slaLevel ? new Date(Math.max(Date.now(), startMs(task.startDate, taskStartTime(task)))).toISOString() : null,
       form_data: { ...(task.formData ?? {}), _meta: { ...taskMeta(task), crossApprovedBy: currentUser.id, crossApprovedAt: new Date().toISOString(), transfer: null,
         chain: chainOf(task).includes(currentUser.id) ? chainOf(task) : [...chainOf(task), currentUser.id] } },
     }).eq('id', task.id)
@@ -2736,7 +2755,7 @@ type TaskChange = { label: string; from: string; to: string }
 function diffTaskEdit(old: Task, f: {
   title: string; company: string; description: string; expReward: number
   assignedTo: string[]; projectManager: string[]; supporters: string[]
-  startDate: string; dueDate: string; category: string; priority: TaskPriority
+  startDate: string; startTime?: string; dueDate: string; category: string; priority: TaskPriority
   important: boolean; urgent: boolean; isTeamProject: boolean; slaLevel: string
   doc: any
 }, users: User[]): TaskChange[] {
@@ -2756,6 +2775,7 @@ function diffTaskEdit(old: Task, f: {
   if (!sameIds(old.supporters, f.supporters)) out.push({ label: 'Người hỗ trợ', from: names(old.supporters), to: names(f.supporters) })
   if (!sameIds(old.projectManager, f.projectManager)) out.push({ label: 'Quản lý (PM)', from: names(old.projectManager), to: names(f.projectManager) })
   pushVal('Ngày bắt đầu', date(old.startDate), date(f.startDate))
+  pushVal('Giờ bắt đầu', taskStartTime(old) || '—', f.startTime || '—')
   pushVal('Hạn hoàn thành', date(old.dueDate), date(f.dueDate))
   pushVal('Danh mục', taskCategoryLabel(old.category) || '—', taskCategoryLabel(f.category) || '—')
   pushVal('Ưu tiên', PRIORITY_CONFIG[old.priority]?.label ?? old.priority, PRIORITY_CONFIG[f.priority]?.label ?? f.priority)
@@ -3044,7 +3064,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
               {info('Người phụ trách', names(task.assignedTo))}
               {info('Hỗ trợ', names(task.supporters))}
               {info('Quản lý (PM)', names(task.projectManager))}
-              {info('Ngày bắt đầu', fmtD(task.startDate))}
+              {info('Ngày bắt đầu', `${fmtD(task.startDate)}${taskStartTime(task) ? ` · ${taskStartTime(task)}` : ''}`)}
               {info('Hạn hoàn thành', fmtD(task.dueDate))}
               {info('Mức độ SLA', task.slaLevel ? SLA_LEVELS[task.slaLevel].label : 'Không áp dụng SLA')}
               {task.slaLevel && info('Hạn SLA', getSlaDeadline(task) ? fmtClockVN(getSlaDeadline(task)!.toISOString()) : slaIdleText(task))}
@@ -3316,7 +3336,7 @@ function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, canSen
           {heading('THÔNG TIN GIAO VIỆC')}
           <table className="w-full border-collapse mb-4">
             <tbody>
-              <tr><td className={lab} style={{ width: '22%' }}>Ngày bắt đầu</td><td className={td}>{fmtD(task.startDate)}</td><td className={lab} style={{ width: '22%' }}>Hạn hoàn thành</td><td className={td}>{fmtD(task.dueDate)}</td></tr>
+              <tr><td className={lab} style={{ width: '22%' }}>Ngày bắt đầu</td><td className={td}>{fmtD(task.startDate)}{taskStartTime(task) ? ` · ${taskStartTime(task)}` : ''}</td><td className={lab} style={{ width: '22%' }}>Hạn hoàn thành</td><td className={td}>{fmtD(task.dueDate)}</td></tr>
               <tr><td className={lab}>Danh mục</td><td className={td} colSpan={3}>{taskCategoryLabel(task.category)}</td></tr>
               <tr><td className={lab}>Mức độ SLA</td><td className={td}>{task.slaLevel ? SLA_LEVELS[task.slaLevel].label : 'Không áp dụng SLA'}</td><td className={lab}>EXP thưởng</td><td className={td}>+{task.expReward}</td></tr>
               <tr><td className={lab}>Trạng thái</td><td className={td} colSpan={3}>{statusText}</td></tr>
@@ -4612,7 +4632,7 @@ async function approveSelfTask(task: Task, approver: User) {
     // Duyệt xong: tự chuyển sang "Đang xử lý" (trừ khi ngày bắt đầu ở tương lai: chờ tới ngày hoặc nhân viên bấm "Bắt đầu sớm")
     ...((task.startDate && task.startDate > localToday()) ? {} : { status: 'in-progress', work_status: 'processing', started_at: nowIso, processing_started_at: nowIso }),
     // SLA chỉ bắt đầu tính từ lúc quản lý duyệt (nếu ngày bắt đầu ở tương lai thì tính từ ngày đó)
-    sla_start_at: task.slaLevel ? new Date(Math.max(Date.now(), task.startDate ? new Date(`${task.startDate}T00:00:00`).getTime() : 0)).toISOString() : null,
+    sla_start_at: task.slaLevel ? new Date(Math.max(Date.now(), startMs(task.startDate, taskStartTime(task)))).toISOString() : null,
   }).eq('id', task.id).eq('creation_approval', 'pending')
   if (error) { alert('Không duyệt được task: ' + error.message); return }
   await supabase.from('notifications').insert({
@@ -5982,7 +6002,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
   const now = new Date()
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   const [form, setForm] = useState({
-    title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '',
+    title: '', description: '', expReward: 80, startDate: todayStr, startTime: '', dueDate: '',
     category: 'operations', priority: 'medium' as TaskPriority,
     important: false, urgent: false, isTeamProject: false,
     assignedTo: [] as string[], projectManager: [] as string[], supporters: [] as string[],
@@ -6175,7 +6195,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
     setSelfMode(task.selfCreated)
     setForm({
       title: task.title, description: task.description, expReward: task.expReward,
-      startDate: task.startDate || todayStr, dueDate: task.dueDate,
+      startDate: task.startDate || todayStr, startTime: taskStartTime(task), dueDate: task.dueDate,
       category: task.category, priority: task.priority,
       important: task.important, urgent: task.urgent, isTeamProject: task.isTeamProject ?? false,
       assignedTo: task.assignedTo, projectManager: task.projectManager, supporters: task.supporters,
@@ -6225,9 +6245,9 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       sla_level: form.slaLevel || null,
       // Mới đặt SLA → mốc tính là lúc sửa (nếu ngày bắt đầu ở tương lai thì tính từ ngày đó). Bỏ SLA → xoá mốc.
       // Đổi giữa các mức SLA (VD P3 → P1) thì giữ nguyên mốc cũ.
-      ...(slaStartsNow ? { sla_start_at: new Date(Math.max(Date.now(), form.startDate ? new Date(`${form.startDate}T00:00:00`).getTime() : 0)).toISOString() } : {}),
+      ...(slaStartsNow ? { sla_start_at: new Date(Math.max(Date.now(), startMs(form.startDate, form.startTime))).toISOString() } : {}),
       ...(!form.slaLevel ? { sla_start_at: null } : {}),
-      form_data: withMeta(cleanTaskDoc(form.doc), taskMeta(editingTask)),
+      form_data: withMeta(cleanTaskDoc(form.doc), { ...taskMeta(editingTask), startTime: form.startTime || undefined }),
     }).eq('id', editingTask.id)
     if (updateError) {
       alert('Không lưu được thay đổi: ' + updateError.message)
@@ -6296,8 +6316,9 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         // Quản lý / BOD giao task có SLA: đồng hồ SLA chạy ngay từ lúc giao (nếu có ngày bắt đầu ở tương lai thì tính từ ngày đó).
         // Task chờ quản lý phòng khác duyệt thì tính giờ sau khi được duyệt.
         sla_start_at: (form.slaLevel && !creatingForSelf && !isCrossDept && finalAssigned.length > 0)
-          ? new Date(Math.max(Date.now(), form.startDate ? new Date(`${form.startDate}T00:00:00`).getTime() : 0)).toISOString() : null,
+          ? new Date(Math.max(Date.now(), startMs(form.startDate, form.startTime))).toISOString() : null,
         form_data: withMeta(cleanTaskDoc(form.doc), {
+          ...(form.startTime ? { startTime: form.startTime } : {}),
           ...((currentUser.isBodAssistant && !currentUser.isDirector && form.fromBod && !creatingForSelf) ? { fromBod: true } : {}),
           ...(bodGate ? { bodGate: true } : {}),
         }),
@@ -6385,7 +6406,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
     // Tạo task từ dự án xong thì quay lại chi tiết dự án
     if (projectCtx) { const pid = projectCtx.id; setProjectCtx(null); onCreateForProjectDone?.(pid) }
     if (returnProjectId) { const pid = returnProjectId; setReturnProjectId(null); onCreateForProjectDone?.(pid, editingTask?.id) }
-    setForm({ title: '', description: '', expReward: 80, startDate: todayStr, dueDate: '', category: 'operations', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '', slaLevel: '', company: '', fromBod: !!(currentUser.isBodAssistant && !currentUser.isDirector), doc: emptyTaskDoc() })
+    setForm({ title: '', description: '', expReward: 80, startDate: todayStr, startTime: '', dueDate: '', category: 'operations', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '', slaLevel: '', company: '', fromBod: !!(currentUser.isBodAssistant && !currentUser.isDirector), doc: emptyTaskDoc() })
   }
 
   const toggleFormArray = (field: 'assignedTo' | 'projectManager' | 'supporters', uid: string) => {
@@ -12934,7 +12955,7 @@ function ProjectMemberPicker({ users, excludeIds, value, onChange }: {
 // Đã giữ phần "Danh mục" dự án mà bạn đổi sau này.
 
 // Task nhập sẵn trong form tạo dự án (tạo cùng lúc với dự án)
-type DraftProjectTask = { title: string; description: string; assignees: string[]; slaLevel: string; exp: number; startDate: string; dueDate: string }
+type DraftProjectTask = { title: string; description: string; assignees: string[]; slaLevel: string; exp: number; startDate: string; startTime?: string; dueDate: string }
 
 function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
   currentUser: User; users: User[]; proposals: Proposal[]; onClose: () => void; onCreated: (id: string) => void
@@ -12967,7 +12988,7 @@ function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
   // ===== Mục TASK và TỜ TRÌNH ngay trong form =====
   const isStaff = !currentUser.isDirector && currentUser.role !== 'manager'
   const todayStr = localToday()
-  const blankTask = (): DraftProjectTask => ({ title: '', description: '', assignees: isStaff ? [currentUser.id] : [], slaLevel: '', exp: slaExpRange('').suggested, startDate: todayStr, dueDate: '' })
+  const blankTask = (): DraftProjectTask => ({ title: '', description: '', assignees: isStaff ? [currentUser.id] : [], slaLevel: '', exp: slaExpRange('').suggested, startDate: todayStr, startTime: '', dueDate: '' })
   const [openTask, setOpenTask] = useState(false)
   const [openProp, setOpenProp] = useState(false)
   const [draftTasks, setDraftTasks] = useState<DraftProjectTask[]>([])
@@ -13067,12 +13088,13 @@ function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
         assigned_to: d.assignees, project_manager: managerIds, supporters: [],
         created_by: currentUser.id,
         start_date: d.startDate, due_date: d.dueDate || localDateStr(new Date(Date.now() + 7 * 86400000)),
+        form_data: d.startTime ? { _meta: { startTime: d.startTime } } : null,
         category: 'projects_dev', priority: 'medium', self_created: false,
         important: false, urgent: false, is_team_project: false,
         cross_dept_pending: false, target_team_id: null,
         creation_approval: projectActive ? 'approved' : 'draft',
         sla_level: d.slaLevel || null,
-        sla_start_at: projectActive && d.slaLevel ? nowIso : null,
+        sla_start_at: projectActive && d.slaLevel ? new Date(Math.max(Date.now(), startMs(d.startDate, d.startTime))).toISOString() : null,
         drive_folder_created: false, drive_folder_name: null,
       }).select('id, task_code').single()
       if (res2.error || !res2.data) { failed.push(d.title); continue }
@@ -13244,7 +13266,7 @@ function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
                     <div>
                       <p className="font-semibold text-gray-800">{i + 1}. {d.title}</p>
                       {d.description && <p className="text-gray-600">{d.description}</p>}
-                      <p className="text-gray-500">Phụ trách: {d.assignees.map(uname).join(', ')} · SLA: {d.slaLevel || 'Không áp dụng'} · EXP {d.exp} · {d.startDate} → {d.dueDate || 'chưa đặt hạn'}</p>
+                      <p className="text-gray-500">Phụ trách: {d.assignees.map(uname).join(', ')} · SLA: {d.slaLevel || 'Không áp dụng'} · EXP {d.exp} · {d.startDate}{d.startTime ? ` ${d.startTime}` : ''} → {d.dueDate || 'chưa đặt hạn'}</p>
                     </div>
                     <button type="button" onClick={() => setDraftTasks(l => l.filter((_, k) => k !== i))} className="text-red-600 font-bold">✕</button>
                   </div>
@@ -13262,7 +13284,13 @@ function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
                     <tbody>
                       <tr>
                         <td className="border border-gray-400 bg-gray-50 font-bold p-1.5 w-[22%]">Ngày bắt đầu</td>
-                        <td className="border border-gray-400 p-1"><input type="date" value={nt.startDate} onChange={e => setNt({ ...nt, startDate: e.target.value })} className={box} style={ink} /></td>
+                        <td className="border border-gray-400 p-1">
+                          <div className="flex gap-1.5">
+                            <input type="date" value={nt.startDate} onChange={e => setNt({ ...nt, startDate: e.target.value })} className={box} style={ink} />
+                            <input type="time" value={nt.startTime ?? ''} onChange={e => setNt({ ...nt, startTime: e.target.value })} className={box}
+                              style={{ ...ink, maxWidth: 110 }} title="Giờ bắt đầu (để trống = tính ngay khi dự án được duyệt)" />
+                          </div>
+                        </td>
                         <td className="border border-gray-400 bg-gray-50 font-bold p-1.5 w-[22%]">Hạn hoàn thành</td>
                         <td className="border border-gray-400 p-1"><input type="date" value={nt.dueDate} onChange={e => setNt({ ...nt, dueDate: e.target.value })} className={box} style={ink} /></td>
                       </tr>
@@ -13363,6 +13391,7 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
   const [slaLevel, setSlaLevel] = useState('')
   const [exp, setExp] = useState(slaExpRange('').suggested)
   const [startDate, setStartDate] = useState(todayStr)
+  const [startTime, setStartTime] = useState('')
   const [dueDate, setDueDate] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -13399,13 +13428,14 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
         supporters: [],
         created_by: currentUser.id,
         start_date: startDate, due_date: finalDue,
+        form_data: startTime ? { _meta: { startTime } } : null,
         category: 'projects_dev', priority: 'medium', self_created: creatingForSelf,
         important: false, urgent: false, is_team_project: false,
         cross_dept_pending: false, target_team_id: null,
         // Dự án chưa duyệt thì task ở nháp (duyệt dự án xong mới giao + tính SLA)
         creation_approval: project.approvalStatus !== 'approved' ? 'draft' : (creatingForSelf && currentUser.role === 'employee' ? 'pending' : 'approved'),
         sla_level: slaLevel || null,
-        sla_start_at: (slaLevel && project.approvalStatus === 'approved') ? new Date().toISOString() : null,
+        sla_start_at: (slaLevel && project.approvalStatus === 'approved') ? new Date(Math.max(Date.now(), startMs(startDate, startTime))).toISOString() : null,
         drive_folder_created: false, drive_folder_name: null,
       }).select('id').single()
       newTask = res.data; lastError = res.error
@@ -13515,7 +13545,10 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
             </div>
             <div>
               <label className={lab} style={{ color: 'var(--text-muted)' }}>Ngày bắt đầu</label>
-              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inp} />
+              <div className="flex gap-2">
+                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inp} />
+                <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} className="px-2 py-2 rounded-lg text-sm outline-none" style={{ ...inp, maxWidth: 110 }} title="Giờ bắt đầu (để trống = tính ngay khi giao)" />
+              </div>
             </div>
             <div>
               <label className={lab} style={{ color: 'var(--text-muted)' }}>Hạn hoàn thành</label>
@@ -13889,11 +13922,14 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
       .eq('id', project.id).eq('approval_status', 'pending')
     if (error) { alert('Không duyệt được: ' + error.message); return }
     // Duyệt dự án = duyệt luôn các task nháp trong dự án: giao việc, thông báo và bắt đầu tính SLA
-    const { data: drafts } = await supabase.from('tasks').select('id, title, task_code, assigned_to').eq('project_id', project.id).eq('creation_approval', 'draft')
+    const { data: drafts } = await supabase.from('tasks').select('id, title, task_code, assigned_to, start_date, form_data, sla_level').eq('project_id', project.id).eq('creation_approval', 'draft')
     if ((drafts ?? []).length > 0) {
       const nowIso = new Date().toISOString()
-      await supabase.from('tasks').update({ creation_approval: 'approved', sla_start_at: nowIso }).eq('project_id', project.id).eq('creation_approval', 'draft').not('sla_level', 'is', null)
-      await supabase.from('tasks').update({ creation_approval: 'approved' }).eq('project_id', project.id).eq('creation_approval', 'draft')
+      // Mỗi task có mốc SLA riêng: từ lúc duyệt dự án, hoặc từ ngày + giờ bắt đầu nếu giờ đó còn ở phía sau
+      for (const t of drafts ?? []) {
+        const slaFrom = new Date(Math.max(Date.now(), startMs(t.start_date, taskStartTime({ formData: t.form_data })))).toISOString()
+        await supabase.from('tasks').update({ creation_approval: 'approved', ...(t.sla_level ? { sla_start_at: slaFrom } : {}) }).eq('id', t.id)
+      }
       for (const t of drafts ?? []) {
         for (const uid of ((t.assigned_to ?? []) as string[]).filter(u => u !== currentUser.id)) {
           await supabase.from('notifications').insert({ message: `📋 Task [${t.task_code}] trong dự án "${project.name}" đã được giao cho bạn: ${t.title}`, target_user_id: uid, link_task_id: t.id })
