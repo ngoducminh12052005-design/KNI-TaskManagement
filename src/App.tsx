@@ -928,6 +928,8 @@ function getSlaDeadline(task: Task): Date | null {
 
 
 function isSlaOverdue(task: Task): boolean {
+  // Task thuộc dự án đã quá ngày kết thúc: luôn tính là trễ SLA, kể cả đã hoàn thành hoặc đóng
+  if (isProjectLateTask(task)) return true
   if (task.workStatus === 'pending') return false
   const deadline = getSlaDeadline(task)
   if (!deadline) return false
@@ -961,6 +963,36 @@ function getSlaDoneLateSeconds(task: Task): number {
   if (!deadline || !task.submittedAt) return 0
   return Math.max(0, Math.floor((new Date(task.submittedAt).getTime() - deadline.getTime()) / 1000))
 }
+
+// ===== Trễ hạn dự án =====
+// Ngày kết thúc dự kiến của từng dự án (id -> yyyy-mm-dd), nạp ở App và mỗi lần tải danh sách dự án
+const PROJECT_END_BY_ID = new Map<string, string>()
+const projectEndMs = (projectId?: string): number | null => {
+  const e = projectId ? PROJECT_END_BY_ID.get(projectId) : undefined
+  if (!e) return null
+  const t = new Date(`${e.slice(0, 10)}T23:59:59`).getTime()
+  return Number.isNaN(t) ? null : t
+}
+// Mốc xong việc: nhân viên nộp kết quả (Complete); task đã đóng mà không có mốc nộp thì lấy mốc đóng
+const taskFinishedMs = (t: Task): number | null => {
+  const ref = t.submittedAt ?? (t.status === 'completed' ? t.approvedAt : undefined)
+  return ref ? new Date(ref).getTime() : null
+}
+// Task trễ hạn dự án: qua ngày kết thúc dự án mà chưa xong, hoặc xong (Complete/đóng) SAU ngày kết thúc
+function isProjectLateTask(t: Task): boolean {
+  const end = projectEndMs(t.projectId)
+  if (end === null) return false
+  if (t.status === 'submitted' || t.status === 'completed') {
+    const fin = taskFinishedMs(t)
+    return fin !== null && fin > end
+  }
+  return Date.now() > end
+}
+// Dự án trễ tiến độ: quá ngày kết thúc dự kiến mà chưa Hoàn thành / Đóng
+const isProjectLate = (p: Project): boolean =>
+  !!p.plannedEnd && p.status !== 'done' && p.status !== 'closed'
+  && Date.now() > new Date(`${p.plannedEnd.slice(0, 10)}T23:59:59`).getTime()
+
 // Ai chịu trách nhiệm khi trễ SLA: người duyệt chậm (task chờ/duyệt sau hạn), hoặc người duyệt đầu tiên nếu task đã chuyển phòng ban
 type SlaBlame = { kind: 'assignee' | 'approver' | 'first-approver'; ids: string[] }
 function slaBlameOf(t: Task, users: User[]): SlaBlame {
@@ -1781,7 +1813,7 @@ setProjects((p.data ?? []).map((x: any) => mapDbProject(x, byProject[x.id] ?? []
                       {pm ? <div className="flex items-center gap-1.5"><CharAvatar user={pm} size={20} /><span className="truncate">{pm.name}{p.managerIds.length > 1 ? ` +${p.managerIds.length - 1}` : ''}</span></div> : '—'}
                     </td>
                     <td className={td}>{fmtShort(p.plannedStart)}</td>
-                    <td className={td}>{fmtShort(p.plannedEnd)}</td>
+                    <td className={td}>{fmtShort(p.plannedEnd)}{isProjectLate(p) && <div className="text-[10px] font-bold" style={{ color: '#dc2626' }}>⚠️ Trễ tiến độ</div>}</td>
                     <td className={td}>
                       <button type="button" onClick={e => { e.stopPropagation(); setNoteFor(p) }}
                         className="px-2 py-1.5 rounded-lg text-[11px] font-bold leading-tight"
@@ -4894,12 +4926,13 @@ function SlaCell({ task, compact = false, users = [] }: { task: Task; compact?: 
     const doneLate = getSlaDoneLateSeconds(task)
     if (doneLate > 0) sub += `${sub ? ' · ' : ''}hoàn tất trễ ${formatLate(doneLate)}`
   }
-  if (task.slaLevel && (isSlaOverdue(task) || getSlaStartLateSeconds(task) > 0 || getSlaDoneLateSeconds(task) > 0)) {
+  if (task.slaLevel && (isSlaOverdue(task) || getSlaStartLateSeconds(task) > 0 || getSlaDoneLateSeconds(task) > 0)) { 
     const b = slaBlameOf(task, users)
     if (b.kind !== 'assignee' && b.ids.length > 0) {
       sub += `${sub ? ' · ' : ''}Trễ do ${b.kind === 'first-approver' ? 'người duyệt đầu tiên' : 'người duyệt'}: ${b.ids.map(id => users.find(u => u.id === id)?.name ?? '—').join(', ')}`
     }
   }
+  if (isProjectLateTask(task)) sub += `${sub ? ' · ' : ''}Trễ hạn dự án`
   const showElapsed = task.workStatus === 'processing' || task.workStatus === 'pending' || task.workStatus === 'complete' || done
 
   return (
@@ -6699,6 +6732,11 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
                 {isSlaOverdue(task) && !task.isLocked && (
                   <span className="text-xs px-2 py-0.5 rounded font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>
                     ⚠️ Quá hạn SLA
+                  </span>
+                )}
+                {isProjectLateTask(task) && (
+                  <span className="text-xs px-2 py-0.5 rounded font-bold" style={{ background: '#f8717122', color: '#dc2626' }}>
+                    🗂️ Trễ hạn dự án
                   </span>
                 )}
                 {task.isLocked && (
@@ -13228,6 +13266,7 @@ interface Project {
 }
 
 function mapDbProject(p: any, memberIds: string[], managerIds: string[] = [], pendingApprIds: string[] = [], okApprIds: string[] = []): Project {
+  if (p.planned_end) PROJECT_END_BY_ID.set(p.id, p.planned_end); else PROJECT_END_BY_ID.delete(p.id)
   return {
     id: p.id, code: p.code ?? '', name: p.name, company: p.company ?? undefined, cls: p.class ?? 'project',
     status: p.status ?? 'planning', priority: p.priority ?? 'P3', objective: p.objective ?? undefined,
@@ -14188,12 +14227,13 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
   const st = PROJECT_STATUS[project.status] ?? PROJECT_STATUS.planning
   const rk = PROJECT_RISK[project.riskLevel] ?? PROJECT_RISK.medium
   const todayStr = localToday()
-  const isOverdue = (t: Task) => t.status !== 'completed' && !!t.dueDate && t.dueDate < todayStr
+  const isOverdue = (t: Task) => (t.status !== 'completed' && !!t.dueDate && t.dueDate < todayStr) || isProjectLateTask(t)
   const seq = (t: Task) => { const m = (t.taskCode ?? '').match(/\.(\d+)$/); return m ? parseInt(m[1], 10) : 0 }
   const list = tasks.filter(t => t.projectId === project.id).sort((a, b) => seq(a) - seq(b))
   const done = list.filter(t => t.status === 'completed').length
   const waiting = list.filter(t => t.status === 'submitted').length
   const overdue = list.filter(isOverdue).length
+  const projectLateTasks = list.filter(isProjectLateTask).length
   const working = list.length - done - waiting
   const pct = list.length ? Math.round((done / list.length) * 100) : 0
   const team = TEAMS.find(t => t.id === project.teamId)
@@ -14454,6 +14494,9 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
               <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{pct}% · {done}/{list.length} task hoàn thành</p>
               {row('Dự kiến bắt đầu', fmtD(project.plannedStart))}
               {row('Dự kiến kết thúc', fmtD(project.plannedEnd))}
+              {isProjectLate(project) && (
+                <p className="text-xs font-bold mt-1" style={{ color: '#dc2626' }}>⚠️ Dự án trễ tiến độ: đã quá ngày kết thúc. {projectLateTasks} task bị ghi nhận trễ hạn dự án.</p>
+              )}
               {row('Ngân sách', `${money(project.budget)} VNĐ`)}
             </section>
             <section className="rounded-xl p-4" style={card}>
@@ -14643,7 +14686,7 @@ function ProjectDetailModal({ project, users, tasks, proposals, onClose, onOpenD
           {heading('THÔNG TIN DỰ ÁN')}
           <table className="w-full border-collapse mb-4">
             <tbody>
-              <tr><td className={lab} style={{ width: '22%' }}>Ngày bắt đầu</td><td className={td}>{fmtD(project.plannedStart)}</td><td className={lab} style={{ width: '22%' }}>Ngày kết thúc</td><td className={td}>{fmtD(project.plannedEnd)}</td></tr>
+              <tr><td className={lab} style={{ width: '22%' }}>Ngày bắt đầu</td><td className={td}>{fmtD(project.plannedStart)}</td><td className={lab} style={{ width: '22%' }}>Ngày kết thúc</td><td className={td}>{fmtD(project.plannedEnd)}{isProjectLate(project) ? ' — ⚠️ Trễ tiến độ' : ''}</td></tr>
               <tr><td className={lab}>Danh mục</td><td className={td}>{projectCategoryLabel(project.cls)}</td><td className={lab}>Mức ưu tiên</td><td className={td}>{project.priority}</td></tr>
               <tr><td className={lab}>Trạng thái</td><td className={td}>{st ? st[0] : project.status}</td><td className={lab}>Mức rủi ro</td><td className={td}>{rk[0]}</td></tr>
               <tr><td className={lab}>Ngân sách (VNĐ)</td><td className={td}>{project.budget ? fmtTaskMoney(project.budget) : '—'}</td><td className={lab}>Nhà cung cấp</td><td className={td}>{[project.supplierName, project.supplierRef].filter(Boolean).join(' · ') || '—'}</td></tr>
@@ -14666,7 +14709,7 @@ function ProjectDetailModal({ project, users, tasks, proposals, onClose, onOpenD
                         <td className={td}>{t.title}</td>
                         <td className={td}>{names(t.assignedTo)}</td>
                         <td className={`${td} text-center`}>{t.dueDate ? fmtD(t.dueDate) : ''}</td>
-                        <td className={td}>{taskStatusText(t)}</td>
+                        <td className={td}>{taskStatusText(t)}{isProjectLateTask(t) ? ' · Trễ hạn dự án' : ''}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -14854,7 +14897,7 @@ function ProjectListTable({ projects, tasks, users, currentUser, canSee, onOpen 
                   {pm ? <div className="flex items-center gap-1.5"><CharAvatar user={pm} size={20} /><span className="truncate">{pm.name}{p.managerIds.length > 1 ? ` +${p.managerIds.length - 1}` : ''}</span></div> : '—'}
                 </td>
                 <td className={td}>{fmtShort(p.plannedStart)}</td>
-                <td className={td}>{fmtShort(p.plannedEnd)}</td>
+                <td className={td}>{fmtShort(p.plannedEnd)}{isProjectLate(p) && <div className="text-[10px] font-bold" style={{ color: '#dc2626' }}>⚠️ Trễ tiến độ</div>}</td>
                 <td className={td}>
                   <div className="h-1.5 rounded-full overflow-hidden mb-1" style={{ background: 'var(--bg-card-alt)' }}>
                     <div className="h-full" style={{ width: `${pct}%`, background: '#059669' }} />
@@ -16391,11 +16434,19 @@ useEffect(() => {
 
   useEffect(() => {
   if (!session) return
+  // Ngày kết thúc của dự án: để biết task nào trễ hạn dự án
+  const loadProjectEnds = () => supabase.from('projects').select('id, planned_end').then(({ data }) => {
+    if (!data) return
+    PROJECT_END_BY_ID.clear()
+    data.forEach((p: any) => { if (p.planned_end) PROJECT_END_BY_ID.set(p.id, p.planned_end) })
+    setTasks(prev => [...prev])   // vẽ lại để cập nhật nhãn trễ hạn dự án
+  })
   supabase.from('tasks').select('*').then(({ data }) => data && setTasks(data.map(mapDbTask)))
-
+  loadProjectEnds()
   const channel = supabase.channel('tasks-changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => {
       supabase.from('tasks').select('*').then(({ data }) => data && setTasks(data.map(mapDbTask)))
+      loadProjectEnds()
     }).subscribe()
   return () => { supabase.removeChannel(channel) }
 }, [session])
