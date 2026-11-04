@@ -2502,7 +2502,7 @@ function wordNode(src: Node, isRoot = false): string {
       return `<td colspan="${c.span}" valign="top"${c.lastFlex ? '' : ` width="${c.w}%"`} style="vertical-align:top${c.lastFlex ? '' : `;width:${c.w}%`}${bd.length ? ';' + bd.join(';') : ''}">${c.html}</td>`
     }).join('')}</tr>`).join('')
     const margins = st.filter(x => x.startsWith('margin'))
-    return `<table width="100%" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse${margins.length ? ';' + margins.join(';') : ''}"><tbody>${rowsHtml}</tbody></table>`
+    return `<table${rows.length <= 3 ? ' class="keep-together"' : ''} width="100%" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse${margins.length ? ';' + margins.join(';') : ''}"><tbody>${rowsHtml}</tbody></table>`
   }
 
   const inner = kids.map(k => wordNode(k)).join('')
@@ -2550,8 +2550,8 @@ async function exportPdfDoc(els: HTMLElement[], fileName: string) {
   const body = els.map(e => wordNode(e, true)).join('<p style="margin:0">&nbsp;</p>')
   // Khung này KHÔNG gắn vào trang và KHÔNG đặt position: để ngoài màn hình thì html2pdf chụp ra trang trắng
   const box = document.createElement('div')
-  box.style.cssText = 'width:642px;background:#ffffff;color:#111827;font-family:Arial,sans-serif;font-size:11pt'
-  box.innerHTML = `<style>table{border-collapse:collapse;width:100%}tr,td,th{page-break-inside:avoid}</style>${body}`
+  box.style.cssText = 'width:642px;padding-bottom:60px;background:#ffffff;color:#111827;font-family:Arial,sans-serif;font-size:11pt'
+  box.innerHTML = `<style>table{border-collapse:collapse;width:100%}tr,td,th{page-break-inside:avoid}</style>${body}<div style="height:40px">&nbsp;</div>`
   try {
     const html2pdf = (await import('html2pdf.js')).default
     const options: any = {
@@ -2560,7 +2560,7 @@ async function exportPdfDoc(els: HTMLElement[], fileName: string) {
       image: { type: 'jpeg', quality: 0.98 },
       html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', windowWidth: 642 },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', 'p', 'h1', 'h2', 'h3'] },
+      pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', 'p', 'h1', 'h2', 'h3', 'table.keep-together'] },
     }
     await html2pdf().set(options).from(box).save()
   } catch (e) {
