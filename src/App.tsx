@@ -14240,9 +14240,14 @@ function ProjectDetailModal({ project, users, tasks, proposals, onClose, onOpenD
     p.status === 'pending' ? 'Chờ duyệt'
     : p.status === 'rejected' ? 'Từ chối'
     : 'Đã duyệt'
+  // Người duyệt đã chọn khi tạo dự án (approverIds) và ai đã duyệt (approvedIds). Dự án cũ chưa có danh sách thì dùng approvedBy
+  const approverList: { id: string; ok: boolean }[] = project.approverIds.length > 0
+    ? project.approverIds.map(id => ({ id, ok: project.approvedIds.includes(id) }))
+    : (project.approvedBy ? [{ id: project.approvedBy, ok: project.approvalStatus === 'approved' }] : [])
+  const approvedNames = approverList.filter(a => a.ok).map(a => a.id)
   const approvalText =
-    project.approvalStatus === 'approved' ? '✅ Đã duyệt'
-    : project.approvalStatus === 'pending' ? '⏳ Trình duyệt'
+    project.approvalStatus === 'approved' ? `✅ Đã duyệt${approvedNames.length ? ' bởi ' + names(approvedNames) : ''}`
+    : project.approvalStatus === 'pending' ? `⏳ Chờ duyệt${approverList.length ? ` (đã duyệt ${approvedNames.length}/${approverList.length})` : ''}`
     : project.approvalStatus === 'rejected' ? '❌ Bị từ chối'
     : '📝 Nháp'
   const members = project.memberIds.filter(id => !project.managerIds.includes(id))
@@ -14336,15 +14341,25 @@ function ProjectDetailModal({ project, users, tasks, proposals, onClose, onOpenD
               </div>
             </>
           )}
-          <div className="grid grid-cols-3 gap-4 mt-8 text-center">
+          <div className="grid gap-4 mt-8 text-center" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
             <div><p className="font-bold">Người tạo dự án</p><p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p><p className="mt-8 font-semibold">{nameOf(project.createdBy)}</p></div>
             <div><p className="font-bold">Quản lý dự án (PM)</p><p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p><p className="mt-8 font-semibold">{names(project.managerIds)}</p></div>
-            <div>
-              <p className="font-bold">Người duyệt</p><p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
-              <p className="mt-8 font-semibold">{project.approvedBy ? nameOf(project.approvedBy) : '—'}</p>
-              {project.approvalStatus === 'approved' && <p className="text-xs font-bold" style={{ color: '#059669' }}>Đã duyệt</p>}
-              {project.approvalStatus === 'rejected' && <p className="text-xs font-bold" style={{ color: '#dc2626' }}>Từ chối</p>}
-            </div>
+            {approverList.length === 0 ? (
+              <div><p className="font-bold">Người duyệt</p><p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p><p className="mt-8 font-semibold">—</p></div>
+            ) : approverList.map(a => {
+              const u = users.find(x => x.id === a.id)
+              const skipped = !a.ok && project.approvalStatus === 'approved'   // BOD duyệt rồi thì những người còn lại không cần duyệt
+              return (
+                <div key={a.id}>
+                  <p className="font-bold">Người duyệt{u ? (u.isDirector ? ' (BOD)' : ' (Trưởng bộ phận)') : ''}</p>
+                  <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+                  <p className="mt-8 font-semibold">{nameOf(a.id)}</p>
+                  {a.ok && <p className="text-xs font-bold" style={{ color: '#059669' }}>✅ Đã duyệt</p>}
+                  {skipped && <p className="text-xs font-bold" style={{ color: '#6b7280' }}>Không cần duyệt</p>}
+                  {!a.ok && !skipped && project.approvalStatus === 'pending' && <p className="text-xs font-bold" style={{ color: '#d97706' }}>⏳ Chờ duyệt</p>}
+                </div>
+              )
+            })}
           </div>
         </div>
       </div>
