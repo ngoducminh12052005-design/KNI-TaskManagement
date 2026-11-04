@@ -13070,6 +13070,115 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
     </ProposalLinkContext.Provider>
   )
 }
+
+function MfaChallengeScreen({ onDone }: { onDone: () => void }) {
+  const [code, setCode] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const verify = async () => {
+    if (code.length !== 6) return
+    setError(''); setLoading(true)
+    const { data: factors } = await supabase.auth.mfa.listFactors()
+    const factor = factors?.totp?.[0]
+    if (!factor) { setLoading(false); setError('Không tìm thấy thiết bị xác thực.'); return }
+    const { error: vErr } = await supabase.auth.mfa.challengeAndVerify({ factorId: factor.id, code })
+    setLoading(false)
+    if (vErr) { setError('Mã không đúng hoặc đã hết hạn, thử lại.'); setCode(''); return }
+    onDone()
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center" style={{ background: '#060610', fontFamily: 'Inter, sans-serif' }}>
+      <div className="w-full max-w-sm mx-4 rounded-2xl p-6" style={{ background: '#12121f', border: '1px solid #2a2a40' }}>
+        <h2 className="text-lg font-bold text-white mb-1">🔐 Xác thực 2 bước</h2>
+        <p className="text-xs mb-4" style={{ color: '#9ca3af' }}>Mở Google Authenticator và nhập mã 6 số của tài khoản này.</p>
+        <input value={code} onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+          onKeyDown={e => e.key === 'Enter' && verify()} inputMode="numeric" autoFocus placeholder="000000"
+          className="w-full px-3 py-3 rounded-lg text-center text-2xl tracking-[0.5em] outline-none"
+          style={{ background: '#0a0a16', border: '1px solid #2a2a40', color: '#fff' }} />
+        {error && <p className="text-xs mt-2" style={{ color: '#f87171' }}>{error}</p>}
+        <button type="button" onClick={verify} disabled={code.length !== 6 || loading}
+          className="w-full mt-4 py-2.5 rounded-lg text-sm font-bold text-white disabled:opacity-40" style={{ background: '#7c3aed' }}>
+          {loading ? 'Đang kiểm tra...' : 'Xác nhận'}
+        </button>
+        <button type="button" onClick={() => supabase.auth.signOut()} className="w-full mt-2 text-xs" style={{ color: '#6b7280' }}>Đăng xuất</button>
+      </div>
+    </div>
+  )
+}
+
+function MfaSettings() {
+  const [factorId, setFactorId] = useState<string | null>(null)
+  const [enroll, setEnroll] = useState<{ id: string; qr: string; secret: string } | null>(null)
+  const [code, setCode] = useState('')
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const load = async () => {
+    const { data } = await supabase.auth.mfa.listFactors()
+    setFactorId(data?.totp?.[0]?.id ?? null)
+  }
+  useEffect(() => { load() }, [])
+
+  const start = async () => {
+    setMsg(''); setBusy(true)
+    // dọn các factor đăng ký dở dang (tránh lỗi trùng tên)
+    const { data: all } = await supabase.auth.mfa.listFactors()
+    for (const f of (all?.all ?? [])) if (f.status === 'unverified') await supabase.auth.mfa.unenroll({ factorId: f.id })
+    const { data, error } = await supabase.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'Google Authenticator' })
+    setBusy(false)
+    if (error || !data) { setMsg(error?.message ?? 'Không tạo được mã QR.'); return }
+    setEnroll({ id: data.id, qr: data.totp.qr_code, secret: data.totp.secret })
+  }
+
+  const confirm = async () => {
+    if (!enroll || code.length !== 6) return
+    setBusy(true)
+    const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId: enroll.id, code })
+    setBusy(false)
+    if (error) { setMsg('Mã không đúng, thử lại.'); setCode(''); return }
+    setEnroll(null); setCode(''); setMsg('✅ Đã bật xác thực 2 bước.'); load()
+  }
+
+  const disable = async () => {
+    if (!factorId || !window.confirm('Tắt xác thực 2 bước cho tài khoản này?')) return
+    const { error } = await supabase.auth.mfa.unenroll({ factorId })
+    if (error) { setMsg(error.message); return }
+    setMsg('Đã tắt xác thực 2 bước.'); load()
+  }
+
+  return (
+    <div className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+      <h4 className="font-bold mb-1" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>🔐 Xác thực 2 bước (Google Authenticator)</h4>
+      {factorId && !enroll ? (
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs" style={{ color: '#059669' }}>✅ Đang bật. Mỗi lần đăng nhập sẽ cần mã 6 số.</p>
+          <button type="button" onClick={disable} className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: '#f8717118', color: '#dc2626' }}>Tắt</button>
+        </div>
+      ) : enroll ? (
+        <div>
+          <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>1. Mở Google Authenticator → dấu ＋ → Quét mã QR.<br />2. Nhập mã 6 số app hiển thị để xác nhận.</p>
+          <img src={enroll.qr} alt="QR" className="w-40 h-40 bg-white rounded-lg p-2 mb-2" />
+          <p className="text-[11px] mb-2 break-all" style={{ color: 'var(--text-muted)' }}>Không quét được? Nhập tay khoá: <span className="font-mono font-bold">{enroll.secret}</span></p>
+          <div className="flex gap-2">
+            <input value={code} onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" placeholder="000000"
+              className="flex-1 px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+            <button type="button" onClick={confirm} disabled={code.length !== 6 || busy} className="px-4 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40" style={{ background: '#7c3aed' }}>Xác nhận</button>
+            <button type="button" onClick={() => { setEnroll(null); setCode('') }} className="px-3 py-2 rounded-lg text-xs" style={{ color: 'var(--text-muted)' }}>Huỷ</button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Tăng bảo mật: đăng nhập cần thêm mã 6 số từ điện thoại.</p>
+          <button type="button" onClick={start} disabled={busy} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white disabled:opacity-40" style={{ background: '#7c3aed' }}>Bật</button>
+        </div>
+      )}
+      {msg && <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>{msg}</p>}
+    </div>
+  )
+}
+
 function ProfileView({ currentUser, setCurrentUser, tasks }: {
   currentUser: User; setCurrentUser: (u: User) => void; tasks: Task[]
 }) {
@@ -13157,6 +13266,7 @@ function ProfileView({ currentUser, setCurrentUser, tasks }: {
 
         {/* Right */}
         <div className="col-span-2 space-y-4">
+          <MfaSettings />
           {currentUser.role === 'manager' && (
             <div className="rounded-xl p-4" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
               <h4 className="font-bold mb-1 flex items-center gap-2" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>
@@ -16228,6 +16338,17 @@ export default function App() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [messages, setMessages] = useState<Message[]>([])
   const [checkingSession, setCheckingSession] = useState(true)
+  const [mfaPending, setMfaPending] = useState(false)
+  const [mfaChecked, setMfaChecked] = useState(false)
+  const checkMfa = async () => {
+    const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+    setMfaPending(!!data && data.nextLevel === 'aal2' && data.currentLevel !== 'aal2')
+    setMfaChecked(true)
+  }
+  useEffect(() => {
+    if (!session) { setMfaPending(false); setMfaChecked(false); return }
+    checkMfa()
+  }, [session?.user?.id])
   const [redemptions, setRedemptions] = useState<{ id: string; userId: string; rewardId: string; cost: number }[]>([])
   const [notifications, setNotifications] = useState<{ id: string; message: string; createdAt: string; targetUserId?: string; linkChannel?: string; linkDmUserId?: string; linkTaskId?: string; linkProposalId?: string }[]>([])
   const [collaborations, setCollaborations] = useState<Collaboration[]>([])
@@ -16623,8 +16744,10 @@ useEffect(() => {
 
 
   if (checkingSession) return <div style={{ background: '#060610', minHeight: '100vh' }} />
+  if (session && !mfaChecked) return <div style={{ background: '#060610', minHeight: '100vh' }} />
+  if (session && mfaPending) return <MfaChallengeScreen onDone={checkMfa} />
   if (!session || !currentProfile) return <LoginScreen onLoggedIn={() => {}} />
-    if (currentProfile.mustChangePassword) return <ForcePasswordScreen user={currentProfile} onDone={() => setCurrentProfile({ ...currentProfile, mustChangePassword: false })} />
+  if (currentProfile.mustChangePassword) return <ForcePasswordScreen user={currentProfile} onDone={() => setCurrentProfile({ ...currentProfile, mustChangePassword: false })} />
 
   return (
     <AppShell
