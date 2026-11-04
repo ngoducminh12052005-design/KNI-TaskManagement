@@ -9,7 +9,7 @@ type Role = 'manager' | 'employee'
 type View = 'dashboard' | 'tasks' | 'projects' | 'directory' | 'useradmin' | 'leaderboard' | 'rewards' | 'social' | 'profile' | 'proposals' | 'bodlog'
 type TaskStatus = 'open' | 'in-progress' | 'submitted' | 'completed'
 type TaskPriority = 'low' | 'medium' | 'high'
-type ChatChannel = 'general' | 'team' | 'announcements' | 'dm' | 'proposal' | 'leaders'
+type ChatChannel = 'general' | 'team' | 'announcements' | 'dm' | 'proposal' | 'leaders' | 'room'
 
 interface AvatarConfig {
   type: 'custom' | 'photo'
@@ -124,6 +124,7 @@ interface Message {
   channel: ChatChannel
   toUserId?: string // chỉ dùng khi channel === 'dm': id của người nhận
   proposalId?: string
+  roomId?: string // chỉ dùng khi channel === 'room'
 }
 interface ProposalApproval {
   id: string
@@ -7660,18 +7661,187 @@ function BrowseByDepartmentModal({ users, currentUser, onSelectUser, onClose }: 
     </div>
   )
 }
+
+// ===== Phòng chat do BOD / quản lý tạo =====
+type ChatRoom = { id: string; name: string; createdBy: string }
+
+function CreateRoomModal({ currentUser, users, onClose, onCreated }: { currentUser: User; users: User[]; onClose: () => void; onCreated: (roomId: string) => void }) {
+  const [name, setName] = useState('')
+  const [picked, setPicked] = useState<string[]>([])
+  const [q, setQ] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const list = users.filter(u => u.id !== currentUser.id && u.name.toLowerCase().includes(q.toLowerCase()))
+  const toggle = (id: string) => setPicked(p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]))
+  const create = async () => {
+    if (!name.trim()) { setError('Nhập tên phòng.'); return }
+    setSaving(true); setError('')
+    const { data: room, error: e1 } = await supabase.from('chat_rooms').insert({ name: name.trim(), created_by: currentUser.id }).select('id').single()
+    if (e1 || !room) { setSaving(false); setError('Không tạo được phòng: ' + (e1?.message ?? '')); return }
+    const { error: e2 } = await supabase.from('chat_room_members').insert([currentUser.id, ...picked].map(uid => ({ room_id: room.id, user_id: uid, added_by: currentUser.id })))
+    if (e2) { setSaving(false); setError('Phòng đã tạo nhưng thêm thành viên bị lỗi: ' + e2.message); return }
+    for (const uid of picked) {
+      await supabase.from('notifications').insert({ message: `👥 ${currentUser.name} đã thêm bạn vào phòng "${name.trim()}"`, target_user_id: uid, link_channel: `room:${room.id}` })
+    }
+    setSaving(false); onCreated(room.id)
+  }
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.6)' }}>
+      <div className="w-full max-w-md rounded-2xl p-5 max-h-[88vh] flex flex-col" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+        <h3 className="font-bold text-lg mb-3" style={{ color: 'var(--text-primary)' }}>＋ Tạo phòng mới</h3>
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Tên phòng *" className="w-full px-3 py-2 rounded-lg text-sm outline-none mb-3"
+          style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+        <p className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Thành viên ({picked.length + 1}, gồm cả bạn)</p>
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Tìm tên..." className="w-full px-3 py-1.5 rounded-lg text-xs outline-none mb-2"
+          style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+        <div className="flex-1 overflow-y-auto rounded-lg p-1 mb-3" style={{ border: '1px solid var(--border)', minHeight: 120 }}>
+          {list.map(u => (
+            <label key={u.id} className="flex items-center gap-2 px-2 py-1 text-sm cursor-pointer" style={{ color: 'var(--text-primary)' }}>
+              <input type="checkbox" checked={picked.includes(u.id)} onChange={() => toggle(u.id)} />
+              <span className="truncate">{u.name}</span>
+              {u.role === 'manager' && <span className="text-[9px]" style={{ color: '#8b5cf6' }}>QL</span>}
+            </label>
+          ))}
+        </div>
+        {error && <p className="text-xs mb-2" style={{ color: '#dc2626' }}>{error}</p>}
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 py-2 rounded-lg text-sm font-semibold" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>Hủy</button>
+          <button onClick={create} disabled={saving} className="flex-1 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40" style={{ background: '#7c3aed' }}>{saving ? 'Đang tạo...' : 'Tạo phòng'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RoomMembersModal({ room, memberIds, currentUser, users, onClose, onGone }: { room: ChatRoom; memberIds: string[]; currentUser: User; users: User[]; onClose: () => void; onGone: () => void }) {
+  const isOwner = room.createdBy === currentUser.id
+  const [q, setQ] = useState('')
+  const [busy, setBusy] = useState(false)
+  const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? '—'
+  const addable = users.filter(u => !memberIds.includes(u.id) && u.name.toLowerCase().includes(q.toLowerCase()))
+  const sys = (text: string) => supabase.from('messages').insert({ user_id: currentUser.id, content: text, channel: 'room', room_id: room.id })
+
+  const add = async (uid: string) => {
+    setBusy(true)
+    const { error } = await supabase.from('chat_room_members').insert({ room_id: room.id, user_id: uid, added_by: currentUser.id })
+    if (error) { alert('Không thêm được: ' + error.message); setBusy(false); return }
+    await sys(`➕ ${currentUser.name} đã thêm ${nameOf(uid)} vào phòng`)
+    await supabase.from('notifications').insert({ message: `👥 ${currentUser.name} đã thêm bạn vào phòng "${room.name}"`, target_user_id: uid, link_channel: `room:${room.id}` })
+    setBusy(false)
+  }
+  const remove = async (uid: string) => {
+    if (!window.confirm(`Xóa ${nameOf(uid)} khỏi phòng "${room.name}"?`)) return
+    setBusy(true)
+    const { error } = await supabase.from('chat_room_members').delete().eq('room_id', room.id).eq('user_id', uid)
+    if (error) { alert('Không xóa được: ' + error.message); setBusy(false); return }
+    await sys(`🚪 ${currentUser.name} đã xóa ${nameOf(uid)} khỏi phòng`)
+    await supabase.from('notifications').insert({ message: `🚪 ${currentUser.name} đã xóa bạn khỏi phòng "${room.name}"`, target_user_id: uid })
+    setBusy(false)
+  }
+  const leave = async () => {
+    if (!window.confirm(`Rời phòng "${room.name}"?`)) return
+    await sys(`🚪 ${currentUser.name} đã rời phòng`)   // gửi trước khi rời (còn là thành viên mới gửi được)
+    await supabase.from('chat_room_members').delete().eq('room_id', room.id).eq('user_id', currentUser.id)
+    onGone()
+  }
+  const deleteRoom = async () => {
+    if (!window.confirm(`Xóa hẳn phòng "${room.name}" và toàn bộ tin nhắn trong phòng?`)) return
+    const { error } = await supabase.from('chat_rooms').delete().eq('id', room.id)
+    if (error) { alert('Không xóa được phòng: ' + error.message); return }
+    onGone()
+  }
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.6)' }}>
+      <div className="w-full max-w-md rounded-2xl p-5 max-h-[88vh] flex flex-col" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-bold text-lg truncate" style={{ color: 'var(--text-primary)' }}>👥 {room.name}</h3>
+          <button onClick={onClose} className="text-lg px-2" style={{ color: 'var(--text-muted)' }}>✕</button>
+        </div>
+        <p className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Thành viên ({memberIds.length})</p>
+        <div className="overflow-y-auto rounded-lg mb-3" style={{ border: '1px solid var(--border)', maxHeight: 190 }}>
+          {memberIds.map(id => (
+            <div key={id} className="flex items-center gap-2 px-3 py-1.5 text-sm" style={{ color: 'var(--text-primary)' }}>
+              <span className="truncate flex-1">{nameOf(id)}</span>
+              {id === room.createdBy && <span className="text-[10px] px-1.5 rounded" style={{ background: '#ede9fe', color: '#5b21b6' }}>Chủ phòng</span>}
+              {isOwner && id !== currentUser.id && (
+                <button disabled={busy} onClick={() => remove(id)} className="text-xs font-bold px-2 py-0.5 rounded disabled:opacity-40" style={{ background: '#fee2e2', color: '#dc2626' }}>Xóa</button>
+              )}
+            </div>
+          ))}
+        </div>
+        {isOwner && (
+          <>
+            <p className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>Thêm người vào phòng</p>
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Tìm tên..." className="w-full px-3 py-1.5 rounded-lg text-xs outline-none mb-2"
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+            <div className="overflow-y-auto rounded-lg mb-3" style={{ border: '1px solid var(--border)', maxHeight: 150 }}>
+              {addable.length === 0 && <p className="text-xs p-2" style={{ color: 'var(--text-muted)' }}>Không còn ai để thêm.</p>}
+              {addable.map(u => (
+                <div key={u.id} className="flex items-center gap-2 px-3 py-1.5 text-sm" style={{ color: 'var(--text-primary)' }}>
+                  <span className="truncate flex-1">{u.name}</span>
+                  <button disabled={busy} onClick={() => add(u.id)} className="text-xs font-bold px-2 py-0.5 rounded disabled:opacity-40" style={{ background: '#dcfce7', color: '#15803d' }}>＋ Thêm</button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+        <div className="flex gap-2">
+          {isOwner
+            ? <button onClick={deleteRoom} className="flex-1 py-2 rounded-lg text-sm font-bold" style={{ background: '#fee2e2', color: '#dc2626' }}>🗑 Xóa phòng</button>
+            : <button onClick={leave} className="flex-1 py-2 rounded-lg text-sm font-bold" style={{ background: '#fee2e2', color: '#dc2626' }}>🚪 Rời phòng</button>}
+          <button onClick={onClose} className="flex-1 py-2 rounded-lg text-sm font-semibold" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>Đóng</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
 // ==================== SOCIAL ====================
 
 function SocialView({ currentUser, users, messages, setMessages, showMentions, setShowMentions, markMentionsSeen, navigateTarget, clearNavigateTarget, proposals }: {
   currentUser: User; users: User[]; messages: Message[]; setMessages: (m: Message[]) => void
   showMentions: boolean; setShowMentions: (v: boolean) => void; markMentionsSeen: () => void
-  navigateTarget?: { channel: ChatChannel; dmUserId?: string; proposalId?: string } | null
+  navigateTarget?: { channel: ChatChannel; dmUserId?: string; proposalId?: string; roomId?: string } | null
   clearNavigateTarget?: () => void
   proposals: Proposal[]
 }) {
   const [channel, setChannel] = useState<ChatChannel>('general')
   const [proposalId, setProposalId] = useState<string | null>(null)
   const [dmUserId, setDmUserId] = useState<string | null>(null)
+
+  // ===== Phòng chat do BOD / quản lý tạo =====
+  const [roomId, setRoomId] = useState<string | null>(null)
+  const [rooms, setRooms] = useState<ChatRoom[]>([])
+  const [roomMembers, setRoomMembers] = useState<Record<string, string[]>>({})
+  const [roomsLoaded, setRoomsLoaded] = useState(false)
+  const [showCreateRoom, setShowCreateRoom] = useState(false)
+  const [showMembers, setShowMembers] = useState(false)
+  const canCreateRoom = currentUser.role === 'manager' || !!currentUser.isDirector || !!currentUser.isBodAssistant
+  const loadRooms = async () => {
+    const [r, m] = await Promise.all([
+      supabase.from('chat_rooms').select('*').order('created_at'),
+      supabase.from('chat_room_members').select('room_id, user_id'),
+    ])
+    setRooms((r.data ?? []).map((x: any) => ({ id: x.id, name: x.name, createdBy: x.created_by })))
+    const map: Record<string, string[]> = {}
+    ;(m.data ?? []).forEach((x: any) => { if (!map[x.room_id]) map[x.room_id] = []; map[x.room_id].push(x.user_id) })
+    setRoomMembers(map)
+    setRoomsLoaded(true)
+  }
+  useEffect(() => {
+    loadRooms()
+    const ch = supabase.channel(`chat-rooms-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_rooms' }, () => { loadRooms() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_room_members' }, () => { loadRooms() })
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [])
+  const myRooms = rooms.filter(r => (roomMembers[r.id] ?? []).includes(currentUser.id))
+  // Bị xóa khỏi phòng hoặc phòng bị xóa khi đang xem: tự về kênh chung
+  useEffect(() => {
+    if (roomsLoaded && channel === 'room' && roomId && !myRooms.some(r => r.id === roomId)) { setChannel('general'); setRoomId(null); setShowMembers(false) }
+  }, [roomsLoaded, rooms, roomMembers])
   const [input, setInput] = useState('')
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
   const [profileUser, setProfileUser] = useState<User | null>(null)
@@ -7699,7 +7869,10 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
   useEffect(() => {
   if (!navigateTarget) return
   setShowMentions(false)
-  if (navigateTarget.channel === 'proposal' && navigateTarget.proposalId) {
+  if (navigateTarget.channel === 'room' && navigateTarget.roomId) {
+    setChannel('room'); setDmUserId(null); setProposalId(null); setRoomId(navigateTarget.roomId)
+    markSeen(`room:${navigateTarget.roomId}`)
+  } else if (navigateTarget.channel === 'proposal' && navigateTarget.proposalId) {
     setChannel('proposal')
     setDmUserId(null)
     setProposalId(navigateTarget.proposalId)
@@ -7729,12 +7902,17 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
     parseMentions(m.content, users).some(x => x.user.id === currentUser.id)
   )
 
+  const isRoom = channel === 'room' && roomId !== null
+  const currentRoom = isRoom ? rooms.find(r => r.id === roomId) : undefined
+  const currentRoomMembers = isRoom && roomId ? (roomMembers[roomId] ?? []) : []
   const isProposal = channel === 'proposal' && proposalId !== null
   const currentProposal = isProposal ? proposals.find(p => p.id === proposalId) : undefined
   const filtered = showMentions
     ? mentionMessages
     : isProposal
     ? messages.filter(m => m.channel === 'proposal' && m.proposalId === proposalId)
+    : isRoom
+    ? messages.filter(m => m.channel === 'room' && m.roomId === roomId)
     : isDm
     ? messages.filter(m => m.channel === 'dm' &&
         ((m.userId === currentUser.id && m.toUserId === dmUserId) ||
@@ -7749,6 +7927,7 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
   useEffect(() => {
     if (showMentions) return
     if (isDm && dmUserId) markSeen(`dm:${dmUserId}`)
+    else if (isRoom && roomId) markSeen(`room:${roomId}`)
     else if (!isDm) markSeen(`channel:${channel}`)
   }, [filtered.length, channel, dmUserId, showMentions])
 
@@ -7766,9 +7945,15 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
     return messages.some(m => m.channel === 'dm' && m.userId === partnerId && m.toUserId === currentUser.id && m.timestamp > seen)
   }
 
+  const roomUnread = (rid: string) => {
+    const seen = lastSeenMap[`room:${rid}`] || ''
+    return messages.some(m => m.channel === 'room' && m.roomId === rid && m.userId !== currentUser.id && m.timestamp > seen)
+  }
+
   const mentionCandidates = mentionQuery === null ? [] : users
     .filter(u => u.id !== currentUser.id)
     .filter(u => u.name.toLowerCase().includes(mentionQuery.toLowerCase()))
+    .filter(u => !isRoom || currentRoomMembers.includes(u.id))
     .filter(u => channel !== 'leaders' || isLeaderUser(u))   // gõ @ trong nhóm này chỉ gợi ý BOD và quản lý
     .slice(0, 6)
 
@@ -7805,6 +7990,7 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
       content,
       channel: isDm ? 'dm' : channel,
       proposal_id: isProposal ? proposalId : null,
+      room_id: isRoom ? roomId : null,
     })
     if (error) { console.error(error); return }
     setInput('')
@@ -7817,16 +8003,18 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
       : currentChannel === 'team' ? 'kênh team'
       : currentChannel === 'announcements' ? 'kênh thông báo'
       : currentChannel === 'leaders' ? 'nhóm Quản lý & BOD'
+      : currentChannel === 'room' ? `phòng ${currentRoom?.name ?? ''}`
       : 'kênh chung'
     const preview = content.length > 60 ? content.slice(0, 60) + '…' : content
     for (const m of mentioned) {
       if (m.user.id === currentUser.id || notifiedIds.has(m.user.id)) continue
       if (currentChannel === 'leaders' && !isLeaderUser(m.user)) continue   // người ngoài nhóm không thấy kênh này nên không báo
+      if (currentChannel === 'room' && !currentRoomMembers.includes(m.user.id)) continue   // người ngoài phòng không thấy nên không báo
       notifiedIds.add(m.user.id)
       await supabase.from('notifications').insert({
         message: `💬 ${currentUser.name} đã nhắc đến bạn ở ${channelLabel}: "${preview}"`,
         target_user_id: m.user.id,
-        link_channel: currentChannel,
+        link_channel: currentChannel === 'room' && roomId ? `room:${roomId}` : currentChannel,
         link_dm_user_id: currentChannel === 'dm' ? currentUser.id : null,
       })
     }
@@ -7881,8 +8069,8 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
     markSeen(`dm:${userId}`)
   }
 
-  const headerLabel = showMentions ? '🔔 Nhắc đến tôi' : isProposal ? `📜 ${currentProposal?.title ?? ''}` : isDm ? `@ ${dmPartner?.name ?? ''}` : CHANNELS.find(c => c.id === channel)?.label
-  const headerDesc = showMentions ? 'Tất cả tin nhắn có tag bạn' : isProposal ? `${currentProposal?.participants.length ?? 0} người tham gia` : isDm ? 'Nhắn tin riêng' : CHANNELS.find(c => c.id === channel)?.desc
+  const headerLabel = showMentions ? '🔔 Nhắc đến tôi' : isRoom ? `👥 ${currentRoom?.name ?? ''}` : isProposal ? `📜 ${currentProposal?.title ?? ''}` : isDm ? `@ ${dmPartner?.name ?? ''}` : CHANNELS.find(c => c.id === channel)?.label
+  const headerDesc = showMentions ? 'Tất cả tin nhắn có tag bạn' : isRoom ? `${currentRoomMembers.length} thành viên` : isProposal ? `${currentProposal?.participants.length ?? 0} người tham gia` : isDm ? 'Nhắn tin riêng' : CHANNELS.find(c => c.id === channel)?.desc
 
   const pinnedAnnouncements = (channel === 'announcements' && !isDm && !showMentions)
     ? [...messages]
@@ -7928,6 +8116,25 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
               {channelUnread(ch.id) && <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />}
             </div>
             <div className="text-[10px] opacity-60 hidden md:block">{ch.desc}</div>
+          </button>
+        ))}
+
+        <div className="flex items-center justify-between px-2 mt-4 mb-2">
+          <p className="text-[10px] uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
+            <span className="hidden md:inline">Phòng ({myRooms.length})</span><span className="md:hidden text-lg">👥</span>
+          </p>
+          {canCreateRoom && (
+            <button type="button" onClick={() => setShowCreateRoom(true)} title="Tạo phòng mới" className="text-sm font-bold px-1.5 rounded" style={{ color: '#8b5cf6' }}>＋</button>
+          )}
+        </div>
+        {myRooms.map(r => (
+          <button key={r.id} title={r.name}
+            onClick={() => { setChannel('room'); setRoomId(r.id); setDmUserId(null); setProposalId(null); setShowMentions(false); markSeen(`room:${r.id}`) }}
+            className="relative w-full text-left px-2 py-1.5 rounded-lg mb-0.5 transition-all"
+            style={{ background: isRoom && roomId === r.id && !showMentions ? 'var(--bg-card-alt)' : 'transparent', color: isRoom && roomId === r.id && !showMentions ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+            <div className="text-lg md:hidden text-center relative">👥{roomUnread(r.id) && <span className="absolute -top-0.5 right-1 w-2 h-2 rounded-full bg-red-500" />}</div>
+            <div className="text-sm hidden md:flex items-center gap-1.5 min-w-0"><span className="truncate">👥 {r.name}</span>{roomUnread(r.id) && <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />}</div>
+            <div className="text-[10px] opacity-60 hidden md:block pl-5">{(roomMembers[r.id] ?? []).length} thành viên</div>
           </button>
         ))}
 
@@ -7999,7 +8206,19 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
             {headerLabel}
           </span>
           <span className="text-xs" style={{ color: 'var(--text-muted)' }}>— {headerDesc}</span>
-          <span className="ml-auto text-xs" style={{ color: 'var(--text-muted)' }}>{filtered.length} tin nhắn</span>
+          {isRoom && currentRoom && (
+            <button type="button" onClick={() => setShowMembers(true)} className="ml-auto text-xs font-semibold px-2.5 py-1 rounded-lg"
+              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>👥 Thành viên ({currentRoomMembers.length})</button>
+          )}
+          <span className={`${isRoom ? '' : 'ml-auto '}text-xs`} style={{ color: 'var(--text-muted)' }}>{filtered.length} tin nhắn</span>
+          {showCreateRoom && (
+            <CreateRoomModal currentUser={currentUser} users={users} onClose={() => setShowCreateRoom(false)}
+              onCreated={id => { setShowCreateRoom(false); setChannel('room'); setRoomId(id); setDmUserId(null); setProposalId(null); setShowMentions(false); markSeen(`room:${id}`) }} />
+          )}
+          {showMembers && currentRoom && (
+            <RoomMembersModal room={currentRoom} memberIds={currentRoomMembers} currentUser={currentUser} users={users}
+              onClose={() => setShowMembers(false)} onGone={() => { setShowMembers(false); setChannel('general'); setRoomId(null) }} />
+          )}
         </div>
 
         {pinnedAnnouncements.length > 0 && (
@@ -8130,7 +8349,7 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
                     }
                     if (e.key === 'Escape') setMentionQuery(null)
                   }}
-                  placeholder={isDm ? `Nhắn riêng cho ${dmPartner?.name}... (gõ @ để tag, Enter để gửi)` : `Nhắn vào ${CHANNELS.find(c => c.id === channel)?.label}... (gõ @ để tag, Enter để gửi)`}
+                  placeholder={isRoom ? `Nhắn vào phòng ${currentRoom?.name ?? ''}... (gõ @ để tag, Enter để gửi)` : isDm ? `Nhắn riêng cho ${dmPartner?.name}... (gõ @ để tag, Enter để gửi)` : `Nhắn vào ${CHANNELS.find(c => c.id === channel)?.label}... (gõ @ để tag, Enter để gửi)`}
                   className="w-full px-4 py-2.5 rounded-xl text-sm outline-none placeholder-[color:var(--text-muted)]"
                   style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
               </div>
@@ -15527,7 +15746,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   const { level } = getExpProgress(currentUser.exp)
   const [showMentions, setShowMentions] = useState(false)
   const [lastSeenMention, setLastSeenMention] = useState(() => localStorage.getItem('lastSeenMention') || '')
-  const [socialTarget, setSocialTarget] = useState<{ channel: ChatChannel; dmUserId?: string; proposalId?: string } | null>(null)
+  const [socialTarget, setSocialTarget] = useState<{ channel: ChatChannel; dmUserId?: string; proposalId?: string; roomId?: string } | null>(null)
   const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null)
   const [editTaskId, setEditTaskId] = useState<string | null>(null)
   const [highlightProposalId, setHighlightProposalId] = useState<string | null>(null)
@@ -15576,6 +15795,10 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
       return
     }
     if (!n.linkChannel) return
+    if (n.linkChannel.startsWith('room:')) {
+      setView('social'); setShowMentions(false)
+      setSocialTarget({ channel: 'room', roomId: n.linkChannel.slice(5) }); return
+    }
     setView('social')
     setShowMentions(false)
     if (n.linkChannel === 'dm' && n.linkDmUserId) {
@@ -15844,7 +16067,7 @@ export default function App() {
 }
 
   function mapDbMessage(m: any): Message {
-    return { id: m.id, userId: m.user_id, toUserId: m.to_user_id ?? undefined, content: m.content, channel: m.channel, timestamp: m.created_at, proposalId: m.proposal_id ?? undefined }
+    return { id: m.id, userId: m.user_id, roomId: m.room_id ?? undefined, toUserId: m.to_user_id ?? undefined, content: m.content, channel: m.channel, timestamp: m.created_at, proposalId: m.proposal_id ?? undefined }
   }
   function mapDbTask(t: any): Task {
   return {
