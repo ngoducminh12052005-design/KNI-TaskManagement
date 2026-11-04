@@ -2545,11 +2545,46 @@ function exportWordFromScreen() {
   exportWordDoc(els, `KNI-${code ?? 'bieu-mau'}`)
 }
 
-// Nút "Xuất Word" nhỏ đặt trong thanh tiêu đề của các form
+// Xuất PDF: dựng lại đúng form bằng cùng bộ chuyển đổi như Word, rồi mở hộp thoại in của trình duyệt (chọn "Lưu dưới dạng PDF")
+function exportPdfDoc(els: HTMLElement[], fileName: string) {
+  const body = els.map(e => wordNode(e, true)).join('<p style="margin:0">&nbsp;</p>')
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${wordEsc(fileName)}</title>`
+    + `<style>@page{size:A4;margin:1.8cm 2cm}html,body{margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:11pt;color:#111827}table{border-collapse:collapse;width:100%}tr,td,th{page-break-inside:avoid}</style></head><body>${body}</body></html>`
+  const iframe = document.createElement('iframe')
+  iframe.style.cssText = 'position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0'
+  document.body.appendChild(iframe)
+  const doc = iframe.contentDocument
+  const win = iframe.contentWindow
+  if (!doc || !win) { iframe.remove(); alert('Không mở được bản in PDF.'); return }
+  doc.open(); doc.write(html); doc.close()
+  setTimeout(() => {
+    win.focus()
+    win.print()
+    setTimeout(() => iframe.remove(), 60000)
+  }, 400)
+}
+
+// Xuất PDF đúng form đang mở trên màn hình (giống Xuất Word)
+function exportPdfFromScreen() {
+  const marked = Array.from(document.querySelectorAll<HTMLElement>('[data-word-root]'))
+  const els = marked.length > 0
+    ? marked
+    : Array.from(document.querySelectorAll<HTMLElement>('div[class*="max-w-[860px]"][class*="shadow-xl"]')).slice(-1)
+  if (els.length === 0) { alert('Không tìm thấy nội dung để xuất PDF.'); return }
+  const text = els.map(e => e.textContent ?? '').join(' ')
+  const code = text.match(/(?:RTASK|PTASK|TASK)[A-Z0-9.\-]*\d/)?.[0]
+  exportPdfDoc(els, `KNI-${code ?? 'bieu-mau'}`)
+}
+
+// Nút "Xuất Word" và "Xuất PDF" nhỏ đặt trong thanh tiêu đề của các form
 function WordBtn() {
   return (
-    <button type="button" onClick={exportWordFromScreen} title="Tải form này về file Word"
-      className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#2563eb' }}>📄 Xuất Word</button>
+    <>
+      <button type="button" onClick={exportWordFromScreen} title="Tải form này về file Word"
+        className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#2563eb' }}>📄 Xuất Word</button>
+      <button type="button" onClick={exportPdfFromScreen} title="Lưu form này thành file PDF"
+        className="px-3 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#dc2626' }}>📕 Xuất PDF</button>
+    </>
   )
 }
 
