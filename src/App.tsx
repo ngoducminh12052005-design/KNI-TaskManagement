@@ -3858,7 +3858,7 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
   )
 }
 
-// ===== Xác nhận mật khẩu khi ký (BOD và quản lý) =====
+// ===== Xác nhận mật khẩu khi duyệt (BOD và quản lý) =====
 // Kiểm tra mật khẩu bằng một kết nối tạm riêng, KHÔNG đăng nhập lại và không làm đổi phiên đang dùng
 type PwReq = { label: string; email: string; resolve: (ok: boolean) => void }
 let pwHost: ((r: PwReq) => void) | null = null
@@ -3892,16 +3892,16 @@ function PasswordConfirmHost() {
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.55)' }}>
       <div className="w-full max-w-sm rounded-2xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
-        <p className="text-base font-bold mb-1" style={{ color: 'var(--text-primary)' }}>🔐 Xác nhận ký</p>
+        <p className="text-base font-bold mb-1" style={{ color: 'var(--text-primary)' }}>🔐 Xác nhận duyệt</p>
         <p className="text-sm mb-3 font-semibold" style={{ color: '#b45309' }}>{req.label}</p>
-        <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Nhập lại mật khẩu của bạn để xác nhận đúng là bạn đang ký.</p>
+        <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Nhập lại mật khẩu của bạn để xác nhận đúng là bạn đang duyệt.</p>
         <input type="password" autoFocus value={pw} onChange={e => setPw(e.target.value)} placeholder="Mật khẩu"
           onKeyDown={e => { if (e.key === 'Enter' && !busy) submit() }}
           className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
         {err && <p className="text-xs mt-2 font-semibold" style={{ color: '#dc2626' }}>{err}</p>}
         <div className="flex justify-end gap-2 mt-4">
           <button type="button" disabled={busy} onClick={() => finish(false)} className="px-3 py-2 rounded-lg text-sm font-semibold" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-primary)' }}>Hủy</button>
-          <button type="button" disabled={busy} onClick={submit} className="px-4 py-2 rounded-lg text-sm font-bold text-white" style={{ background: '#059669' }}>{busy ? 'Đang kiểm tra...' : '✅ Xác nhận & ký'}</button>
+          <button type="button" disabled={busy} onClick={submit} className="px-4 py-2 rounded-lg text-sm font-bold text-white" style={{ background: '#059669' }}>{busy ? 'Đang kiểm tra...' : '✅ Xác nhận & duyệt'}</button>
         </div>
       </div>
     </div>
@@ -4555,6 +4555,7 @@ async function requestPendingTask(task: Task, currentUser: User, users: User[]) 
   }
 }
 async function approvePendingTask(task: Task, currentUser: User) {
+  if (!(await confirmSign(currentUser, `Duyệt tạm dừng task [${task.taskCode ?? task.title}]`))) return
   const updates: Record<string, any> = { work_status: 'pending', pending_requested_by: null, pending_requested_at: null, pending_reason: null,
     ...withPendLog(task, { kind: 'approve', by: currentUser.id, at: new Date().toISOString(), note: task.pendingReason }) }
   if (task.processingStartedAt) {
@@ -4675,6 +4676,7 @@ const canApproveSelfTask = (task: Task, user: User, users: User[]) => {
 }
 
 async function approveSelfTask(task: Task, approver: User) {
+  if (!(await confirmSign(approver, `Duyệt cho làm task [${task.taskCode ?? task.title}]`))) return
   const nowIso = new Date().toISOString()
   const { error } = await supabase.from('tasks').update({
     creation_approval: 'approved',
@@ -6227,6 +6229,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
   const handleRejectPending = async (task: Task) => { await rejectPendingTask(task, currentUser) }
 
   const handleApproveCrossDept = async (task: Task) => {
+    if (!(await confirmSign(currentUser, `Duyệt nhận task [${task.taskCode ?? task.title}]`))) return
     await supabase.from('tasks').update({ cross_dept_pending: false }).eq('id', task.id)
   }
 
