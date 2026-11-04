@@ -599,7 +599,44 @@ function parseLinks(content: string): { start: number; end: number; url: string 
 }
 
 // Render nội dung tin nhắn: tô màu @tag (bấm để xem hồ sơ) và biến link thành đường dẫn bấm được
-function renderMessageContent(content: string, users: User[], onMentionClick?: (u: User) => void, isMe?: boolean) {
+// ----- Ảnh / file trong tin nhắn chat (lưu ở bucket proposal-files, đường dẫn đóng gói cuối nội dung) -----
+type ChatFile = { name: string; path: string; size: number; type: string }
+const CHAT_FILES_TAG = '\n[[files:'
+const packChatFiles = (text: string, files: ChatFile[]) => (files.length > 0 ? `${text}${CHAT_FILES_TAG}${JSON.stringify(files)}]]` : text)
+const splitChatFiles = (content: string): { text: string; files: ChatFile[] } => {
+  const i = content.lastIndexOf(CHAT_FILES_TAG)
+  if (i === -1 || !content.endsWith(']]')) return { text: content, files: [] }
+  try { return { text: content.slice(0, i), files: JSON.parse(content.slice(i + CHAT_FILES_TAG.length, -2)) as ChatFile[] } } catch { return { text: content, files: [] } }
+}
+function ChatFiles({ files }: { files: ChatFile[] }) {
+  const [urls, setUrls] = useState<Record<string, string>>({})
+  const key = files.map(f => f.path).join('|')
+  useEffect(() => {
+    let alive = true
+    files.filter(f => f.type.startsWith('image/')).forEach(async f => {
+      const { data } = await supabase.storage.from('proposal-files').createSignedUrl(f.path, 3600)
+      if (alive && data) setUrls(u => ({ ...u, [f.path]: data.signedUrl }))
+    })
+    return () => { alive = false }
+  }, [key])
+  return (
+    <div className="flex flex-col gap-1.5 mt-1.5">
+      {files.map(f => f.type.startsWith('image/')
+        ? (urls[f.path]
+            ? <img key={f.path} src={urls[f.path]} alt={f.name} title="Bấm để xem ảnh lớn" onClick={() => openProposalFile(f.path)}
+                className="rounded-lg max-w-full cursor-pointer" style={{ maxHeight: 260, objectFit: 'cover' }} />
+            : <div key={f.path} className="text-[11px] opacity-70">⏳ Đang tải ảnh…</div>)
+        : <button key={f.path} type="button" onClick={() => openProposalFile(f.path)} className="text-left text-xs underline break-all">📎 {f.name} ({fmtFileSize(f.size)})</button>)}
+    </div>
+  )
+}
+function renderMessageContent(raw: string, users: User[], onMentionClick?: (u: User) => void, isMe?: boolean) {
+  const { text, files } = splitChatFiles(raw)
+  const body = renderTextWithMentions(text, users, onMentionClick, isMe)
+  if (files.length === 0) return body
+  return <>{body}<ChatFiles files={files} /></>
+}
+function renderTextWithMentions(content: string, users: User[], onMentionClick?: (u: User) => void, isMe?: boolean) {
   type Token = { start: number; end: number; type: 'mention'; user: User } | { start: number; end: number; type: 'link'; url: string }
   const mentionTokens: Token[] = parseMentions(content, users).map(m => ({ ...m, type: 'mention' as const }))
   const linkTokens: Token[] = parseLinks(content).map(l => ({ ...l, type: 'link' as const }))
@@ -7817,7 +7854,7 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
   const [roomsLoaded, setRoomsLoaded] = useState(false)
   const [showCreateRoom, setShowCreateRoom] = useState(false)
   const [showMembers, setShowMembers] = useState(false)
-  const canCreateRoom = currentUser.role === 'manager' || !!currentUser.isDirector || !!currentUser.isBodAssistant
+  const canCreateRoom = true   // ai cũng được tạo phòng (nhân viên cũng được)
   const loadRooms = async () => {
     const [r, m] = await Promise.all([
       supabase.from('chat_rooms').select('*').order('created_at'),
@@ -7843,6 +7880,19 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
     if (roomsLoaded && channel === 'room' && roomId && !myRooms.some(r => r.id === roomId)) { setChannel('general'); setRoomId(null); setShowMembers(false) }
   }, [roomsLoaded, rooms, roomMembers])
   const [input, setInput] = useState('')
+  const [chatFiles, setChatFiles] = useState<File[]>([])
+  const [sending, setSending] = useState(false)
+  const chatFileRef = useRef<HTMLInputElement>(null)
+  const chatPreviewUrls = useMemo(() => chatFiles.map(f => (f.type.startsWith('image/') ? URL.createObjectURL(f) : '')), [chatFiles])
+  useEffect(() => () => { chatPreviewUrls.forEach(u => u && URL.revokeObjectURL(u)) }, [chatPreviewUrls])
+  const addChatFiles = (list: FileList | File[] | null) => {
+    if (!list) return
+    const arr = Array.from(list)
+    const limit = TASK_MAX_FILE_MB * 1024 * 1024
+    const ok = arr.filter(f => f.size <= limit)
+    if (ok.length < arr.length) alert(`File quá ${TASK_MAX_FILE_MB}MB nên bị bỏ qua.`)
+    setChatFiles(cur => [...cur, ...ok].slice(0, 10))
+  }
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
   const [profileUser, setProfileUser] = useState<User | null>(null)
   const [showBrowseDept, setShowBrowseDept] = useState(false)
@@ -7982,8 +8032,13 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
   }
 
   const send = async () => {
-    if (!input.trim()) return
-    const content = input.trim()
+    if ((!input.trim() && chatFiles.length === 0) || sending) return
+    setSending(true)
+    let content = input.trim()
+    if (chatFiles.length > 0) {
+      try { content = packChatFiles(content, await uploadTaskFiles(currentUser.id, chatFiles)) }
+      catch (err: any) { setSending(false); alert('Không gửi được ảnh / file: ' + (err?.message ?? 'lỗi tải lên')); return }
+    }
     const { error } = await supabase.from('messages').insert({
       user_id: currentUser.id,
       to_user_id: isDm ? dmUserId : null,
@@ -7992,11 +8047,14 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
       proposal_id: isProposal ? proposalId : null,
       room_id: isRoom ? roomId : null,
     })
+    setSending(false)
     if (error) { console.error(error); return }
     setInput('')
+    setChatFiles([])
     setMentionQuery(null)
 
-    const mentioned = parseMentions(content, users)
+    const plain = splitChatFiles(content).text
+    const mentioned = parseMentions(plain, users)
     const notifiedIds = new Set<string>()
     const currentChannel = isDm ? 'dm' : channel
     const channelLabel = currentChannel === 'dm' ? 'tin nhắn riêng'
@@ -8005,7 +8063,7 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
       : currentChannel === 'leaders' ? 'nhóm Quản lý & BOD'
       : currentChannel === 'room' ? `phòng ${currentRoom?.name ?? ''}`
       : 'kênh chung'
-    const preview = content.length > 60 ? content.slice(0, 60) + '…' : content
+    const preview = plain ? (plain.length > 60 ? plain.slice(0, 60) + '…' : plain) : '📷 ảnh / file'
     for (const m of mentioned) {
       if (m.user.id === currentUser.id || notifiedIds.has(m.user.id)) continue
       if (currentChannel === 'leaders' && !isLeaderUser(m.user)) continue   // người ngoài nhóm không thấy kênh này nên không báo
@@ -8324,7 +8382,24 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
           ) : canPost ? (
             <div className="flex gap-3 items-center">
               <CharAvatar user={currentUser} size={36} />
+              <button type="button" onClick={() => chatFileRef.current?.click()} title="Đính kèm ảnh / file (hoặc dán ảnh bằng Ctrl+V)"
+                className="flex-shrink-0 w-10 h-10 rounded-xl text-lg" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>📎</button>
+              <input ref={chatFileRef} type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt" className="hidden"
+                onChange={e => { addChatFiles(e.target.files); e.target.value = '' }} />
               <div className="relative flex-1 min-w-0">
+                {chatFiles.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {chatFiles.map((f, i) => (
+                      <div key={`${f.name}-${f.size}-${i}`} className="relative">
+                        {chatPreviewUrls[i]
+                          ? <img src={chatPreviewUrls[i]} alt={f.name} className="w-16 h-16 object-cover rounded-lg" style={{ border: '1px solid var(--border)' }} />
+                          : <div className="px-2 py-1 rounded-lg text-[11px] max-w-[140px] truncate" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>📎 {f.name}</div>}
+                        <button type="button" onClick={() => setChatFiles(chatFiles.filter((_, j) => j !== i))}
+                          className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full text-[10px] font-bold text-white" style={{ background: '#dc2626' }}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {mentionQuery !== null && mentionCandidates.length > 0 && (
                   <div className="absolute bottom-full left-0 mb-2 w-64 rounded-xl overflow-hidden z-20"
                     style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.25)' }}>
@@ -8338,6 +8413,7 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
                   </div>
                 )}
                 <input ref={inputRef} value={input} onChange={handleInputChange}
+                  onPaste={e => { const fs = Array.from(e.clipboardData.files); if (fs.length > 0) { e.preventDefault(); addChatFiles(fs) } }}
                   onKeyDown={e => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       if (mentionQuery !== null && mentionCandidates.length > 0) {
@@ -8353,7 +8429,7 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
                   className="w-full px-4 py-2.5 rounded-xl text-sm outline-none placeholder-[color:var(--text-muted)]"
                   style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
               </div>
-              <button onClick={send} disabled={!input.trim()}
+              <button onClick={send} disabled={(!input.trim() && chatFiles.length === 0) || sending}
                 className="flex-shrink-0 px-4 py-2.5 rounded-xl font-bold text-sm disabled:opacity-40 transition-all hover:scale-105"
                 style={{ background: 'linear-gradient(135deg,#7c3aed,#5b21b6)', color: '#fff' }}>
                 Gửi
