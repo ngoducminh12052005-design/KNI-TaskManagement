@@ -9,7 +9,7 @@ type Role = 'manager' | 'employee'
 type View = 'dashboard' | 'tasks' | 'projects' | 'directory' | 'useradmin' | 'leaderboard' | 'rewards' | 'social' | 'profile' | 'proposals' | 'bodlog'
 type TaskStatus = 'open' | 'in-progress' | 'submitted' | 'completed'
 type TaskPriority = 'low' | 'medium' | 'high'
-type ChatChannel = 'general' | 'team' | 'announcements' | 'dm' | 'proposal'
+type ChatChannel = 'general' | 'team' | 'announcements' | 'dm' | 'proposal' | 'leaders'
 
 interface AvatarConfig {
   type: 'custom' | 'photo'
@@ -656,7 +656,10 @@ function LevelBadge({ exp }: { exp: number }) {
 }
 
 // Kiểm tra 1 tin nhắn có nằm trong phạm vi user này được xem không (dùng để đếm mention chính xác)
+// Nhóm "Quản lý & BOD": chỉ BOD, trợ lý BOD và quản lý
+const isLeaderUser = (u: User) => u.role === 'manager' || !!u.isDirector || !!u.isBodAssistant
 function isMessageVisibleTo(m: Message, user: User, users: User[]): boolean {
+  if (m.channel === 'leaders') return isLeaderUser(user)
   if (m.channel === 'dm') return m.userId === user.id || m.toUserId === user.id
   if (m.channel === 'team') return users.find(u => u.id === m.userId)?.teamId === user.teamId
   return true
@@ -7739,7 +7742,7 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
     : channel === 'team'
       ? messages.filter(m => m.channel === 'team' &&
           users.find(u => u.id === m.userId)?.teamId === currentUser.teamId)
-      : messages.filter(m => m.channel === channel)
+      : channel === 'leaders' && !isLeaderUser(currentUser) ? [] : messages.filter(m => m.channel === channel)
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [filtered.length, channel, dmUserId, showMentions])
 
@@ -7766,6 +7769,7 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
   const mentionCandidates = mentionQuery === null ? [] : users
     .filter(u => u.id !== currentUser.id)
     .filter(u => u.name.toLowerCase().includes(mentionQuery.toLowerCase()))
+    .filter(u => channel !== 'leaders' || isLeaderUser(u))   // gõ @ trong nhóm này chỉ gợi ý BOD và quản lý
     .slice(0, 6)
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -7812,10 +7816,12 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
     const channelLabel = currentChannel === 'dm' ? 'tin nhắn riêng'
       : currentChannel === 'team' ? 'kênh team'
       : currentChannel === 'announcements' ? 'kênh thông báo'
+      : currentChannel === 'leaders' ? 'nhóm Quản lý & BOD'
       : 'kênh chung'
     const preview = content.length > 60 ? content.slice(0, 60) + '…' : content
     for (const m of mentioned) {
       if (m.user.id === currentUser.id || notifiedIds.has(m.user.id)) continue
+      if (currentChannel === 'leaders' && !isLeaderUser(m.user)) continue   // người ngoài nhóm không thấy kênh này nên không báo
       notifiedIds.add(m.user.id)
       await supabase.from('notifications').insert({
         message: `💬 ${currentUser.name} đã nhắc đến bạn ở ${channelLabel}: "${preview}"`,
@@ -7826,7 +7832,8 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
     }
   }
 
-  const canPost = isProposal || isDm || channel !== 'announcements' || currentUser.role === 'manager'
+  const canPost = (channel !== 'leaders' || isLeaderUser(currentUser))
+    && (isProposal || isDm || channel !== 'announcements' || currentUser.role === 'manager')
 
   const myTeam = TEAMS.find(t => t.id === currentUser.teamId)
 
@@ -7856,6 +7863,8 @@ function SocialView({ currentUser, users, messages, setMessages, showMentions, s
     { id: 'general', label: '# chung', desc: 'Tất cả', icon: '💬' },
     { id: 'team', label: myTeam ? `# ${myTeam.name}` : '# team', desc: myTeam ? `${myTeam.emoji} Nội bộ team` : 'Chưa có team', icon: '👥' },
     { id: 'announcements', label: '📣 thông báo', desc: 'Manager', icon: '📣' },
+    // Nhóm riêng của BOD + quản lý: nhân viên không thấy kênh này
+    ...(isLeaderUser(currentUser) ? [{ id: 'leaders' as ChatChannel, label: '🔒 quản lý & BOD', desc: 'Chỉ BOD + quản lý', icon: '🔒' }] : []),
   ]
 
   const openChannel = (id: ChatChannel) => {
