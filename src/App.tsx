@@ -12772,7 +12772,36 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
     const rest = steps.filter(s => s.id !== mine.id)
     let nextStep: StepRow | undefined
     let allDone = false
-    if ((p.approvalMode ?? 'seq') === 'par') {
+    // Tờ trình P3, P4: Trưởng bộ phận trước -> Kế toán trưởng + Giám đốc công ty duyệt CÙNG LÚC -> Ban Giám đốc duyệt SAU CÙNG (khi tất cả đã duyệt xong)
+    const roleOfStep = (st: StepRow) => signRoles[st.step_order - 1] ?? docRoleLabel(st.step_order - 1, steps.length)
+    const isBodStep = (st: StepRow) => /^Ban Giám đốc/i.test(roleOfStep(st))
+    if (p.kind === 'totrinh' && (p.approvalMode ?? 'seq') === 'seq') {
+      const bodSteps = steps.filter(isBodStep)
+      const middle = steps.filter(st => st.step_order > 1 && !isBodStep(st))
+      let toActivate: StepRow[] = []
+      if (mine.step_order === 1) {
+        toActivate = middle.filter(st => st.status === 'waiting')
+        if (toActivate.length === 0) toActivate = bodSteps.filter(st => st.status === 'waiting')
+      } else if (middle.some(st => st.id === mine.id)) {
+        if (middle.every(st => st.id === mine.id || st.status === 'approved')) toActivate = bodSteps.filter(st => st.status === 'waiting')
+      }
+      allDone = toActivate.length === 0 && rest.every(st => st.status === 'approved' || st.status === 'skipped')
+      if (toActivate.length > 0) {
+        await supabase.from('proposal_steps').update({ status: 'pending' }).in('id', toActivate.map(st => st.id))
+        await supabase.from('proposals').update({
+          recipient_id: toActivate[0].approver_id,
+          participants: Array.from(new Set([...p.participants, ...toActivate.map(st => st.approver_id)])),
+        }).eq('id', p.id)
+        for (const st of toActivate) {
+          if (st.approver_id === p.submittedBy) continue
+          await supabase.from('notifications').insert({
+            message: `📜 Tờ trình "${p.title}" của ${getUserById(p.submittedBy)?.name} đã qua ${currentUser.name}, đến lượt bạn duyệt`,
+            target_user_id: st.approver_id,
+            link_proposal_id: p.id,
+          })
+        }
+      }
+    } else if ((p.approvalMode ?? 'seq') === 'par') {
       allDone = rest.every(s => s.status === 'approved')
     } else {
       nextStep = rest.filter(s => s.status === 'waiting').sort((a, b) => a.step_order - b.step_order)[0]
