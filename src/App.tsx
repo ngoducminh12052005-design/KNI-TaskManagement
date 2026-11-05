@@ -2657,13 +2657,23 @@ async function rejectCrossDept(task: Task, currentUser: User) {
   const code = task.taskCode ?? task.title
   if (tr) {
     const { error } = await supabase.from('tasks').update({
-      cross_dept_pending: false, cross_dept_rejected: false, cross_dept_rejected_reason: null, cross_dept_rejected_by: null,
+      cross_dept_pending: !!tr.prevPending, cross_dept_rejected: false, cross_dept_rejected_reason: null, cross_dept_rejected_by: null,
       target_team_id: tr.prevTargetTeamId ?? null,
       assigned_to: Array.isArray(tr.prevAssigned) && tr.prevAssigned.length ? tr.prevAssigned : [tr.by],
       form_data: { ...(task.formData ?? {}), _meta: { ...meta, transfer: null, chain: Array.isArray(tr.prevChain) ? tr.prevChain : [],
         transfers: (Array.isArray(meta.transfers) ? meta.transfers : []).map((x: any) => x.at === tr.at ? { ...x, rejected: { by: currentUser.id, reason, at: new Date().toISOString() } } : x) } },
     }).eq('id', task.id)
     if (error) { alert('Không từ chối được: ' + error.message); return }
+    await supabase.from('task_edit_logs').insert({
+      task_id: task.id, user_id: currentUser.id,
+      changes: [{ label: 'Từ chối chuyển phòng ban', from: 'Chờ duyệt', to: `Bị từ chối bởi ${currentUser.name}${reason ? `. Lý do: ${reason}` : ''}. Task trả về người chuyển` }],
+    })
+    if (task.createdBy !== currentUser.id && task.createdBy !== tr.by) {
+      await supabase.from('notifications').insert({
+        message: `❌ ${currentUser.name} từ chối nhận task [${code}] được chuyển sang phòng mình${reason ? `. Lý do: ${reason}` : ''}`,
+        target_user_id: task.createdBy, link_task_id: task.id,
+      })
+    }
     await supabase.from('notifications').insert({
       message: `❌ ${currentUser.name} từ chối nhận task [${code}] bạn chuyển sang${reason ? `. Lý do: ${reason}` : ''}. Task đã trả về cho bạn.`,
       target_user_id: tr.by, link_task_id: task.id,
@@ -2696,6 +2706,7 @@ function CrossDeptApproveModal({ task, currentUser, users, onClose }: { task: Ta
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const nm = (ids: string[]) => ids.map(id => users.find(u => u.id === id)?.name ?? '—').join(', ') || '—'
+  const [showTransfer, setShowTransfer] = useState(false)
   const toggle = (id: string) => setPicked(p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]))
 
   const submit = async () => {
@@ -2707,17 +2718,22 @@ function CrossDeptApproveModal({ task, currentUser, users, onClose }: { task: Ta
       // SLA chỉ tính từ lúc quản lý phòng ban duyệt (BOD giao cũng vậy); nếu ngày bắt đầu ở tương lai thì tính từ ngày đó
       sla_start_at: task.slaLevel ? new Date(Math.max(Date.now(), startMs(task.startDate, taskStartTime(task)))).toISOString() : null,
       form_data: { ...(task.formData ?? {}), _meta: { ...taskMeta(task), crossApprovedBy: currentUser.id, crossApprovedAt: new Date().toISOString(), transfer: null,
+        transfers: (Array.isArray(taskMeta(task).transfers) ? taskMeta(task).transfers : []).map((x: any) => taskMeta(task).transfer && x.at === taskMeta(task).transfer.at ? { ...x, approved: { by: currentUser.id, at: new Date().toISOString() } } : x),
         chain: chainOf(task).includes(currentUser.id) ? chainOf(task) : [...chainOf(task), currentUser.id] } },
     }).eq('id', task.id)
     if (upErr) { setSaving(false); setError('Không duyệt được: ' + upErr.message); return }
 
-    const changes: TaskChange[] = [{ label: 'Duyệt giao chéo phòng ban', from: 'Chờ duyệt', to: `Đã duyệt bởi ${currentUser.name}` }]
+    const trf = taskMeta(task).transfer   // có giá trị nếu task này do quản lý phòng khác chuyển sang
+    const changes: TaskChange[] = [{ label: trf ? 'Duyệt chuyển phòng ban' : 'Duyệt giao chéo phòng ban', from: 'Chờ duyệt', to: `Đã duyệt bởi ${currentUser.name}` }]
     if ([...assignedTo].sort().join('|') !== [...task.assignedTo].sort().join('|')) {
       changes.push({ label: 'Người phụ trách', from: nm(task.assignedTo), to: nm(assignedTo) })
     }
     await supabase.from('task_edit_logs').insert({ task_id: task.id, user_id: currentUser.id, changes })
 
     const code = task.taskCode ?? task.title
+    if (trf && trf.by !== currentUser.id && trf.by !== task.createdBy) {
+      await supabase.from('notifications').insert({ message: `✅ ${currentUser.name} đã duyệt nhận task [${code}] bạn chuyển sang`, target_user_id: trf.by, link_task_id: task.id })
+    }
     if (task.createdBy !== currentUser.id) {
       await supabase.from('notifications').insert({
         message: `✅ ${currentUser.name} đã duyệt task [${code}] — ${mode === 'self' ? 'quản lý trực tiếp làm' : `phân công cho ${nm(assignedTo)}`}`,
@@ -2750,6 +2766,12 @@ function CrossDeptApproveModal({ task, currentUser, users, onClose }: { task: Ta
           </p>
         )}
 
+        {isBodAssigned(task, users) && !taskMeta(task).transfer && (
+          <button type="button" onClick={() => setShowTransfer(true)} className="w-full text-left p-3 rounded-lg mb-3 text-sm font-semibold" style={{ background: '#ede9fe', color: '#5b21b6' }}>
+            🔀 Chuyển sang phòng ban khác (phòng đó duyệt mới qua)
+          </button>
+        )}
+        {showTransfer && <DelegateTaskModal task={task} currentUser={currentUser} users={users} initialMode="transfer" onClose={() => setShowTransfer(false)} onDone={onClose} />}
         <label className="flex items-center gap-2 p-3 rounded-lg mb-2 cursor-pointer text-sm" style={field}>
           <input type="radio" checked={mode === 'self'} onChange={() => setMode('self')} /> 🙋 Tôi trực tiếp làm
         </label>
@@ -2780,11 +2802,12 @@ function CrossDeptApproveModal({ task, currentUser, users, onClose }: { task: Ta
 }
 
 // Quản lý được giao task: phân công cho nhân viên phòng mình, hoặc chuyển sang phòng ban khác (quản lý phòng đó phải duyệt)
-function DelegateTaskModal({ task, currentUser, users, onClose }: { task: Task; currentUser: User; users: User[]; onClose: () => void }) {
-  const allowTransfer = !task.targetTeamId   // task đã là giao chéo/chuyển sang thì chỉ được phân công, không chuyển tiếp
+function DelegateTaskModal({ task, currentUser, users, onClose, initialMode = 'assign', onDone }: { task: Task; currentUser: User; users: User[]; onClose: () => void; initialMode?: 'assign' | 'transfer'; onDone?: () => void }) {
+  // Task BOD giao: quản lý luôn được chuyển sang phòng ban khác (phòng kia duyệt mới qua). Task giao chéo thường thì chỉ được phân công.
+  const allowTransfer = !task.targetTeamId || isBodAssigned(task, users)
   const staff = users.filter(u => u.teamId === currentUser.teamId && u.role === 'employee' && u.isActive !== false)
   const otherTeams = TEAMS.filter(t => t.id !== currentUser.teamId)
-  const [mode, setMode] = useState<'assign' | 'transfer'>('assign')
+  const [mode, setMode] = useState<'assign' | 'transfer'>(initialMode)
   const [picked, setPicked] = useState<string[]>([])
   const [teamId, setTeamId] = useState('')
   const [reason, setReason] = useState('')
@@ -2823,7 +2846,7 @@ function DelegateTaskModal({ task, currentUser, users, onClose }: { task: Task; 
       const mgrs = users.filter(u => u.role === 'manager' && u.teamId === teamId)
       if (mgrs.length === 0) { setError('Phòng ban này chưa có quản lý để nhận task.'); return }
       const tr = { by: currentUser.id, fromTeamId: currentUser.teamId, toTeamId: teamId, reason: why, at,
-        prevTargetTeamId: task.targetTeamId ?? null, prevAssigned: task.assignedTo, prevChain: chainOf(task) }
+        prevTargetTeamId: task.targetTeamId ?? null, prevAssigned: task.assignedTo, prevChain: chainOf(task), prevPending: !!task.crossDeptPending }
       patch = {
         assigned_to: mgrs.map(u => u.id), project_manager: pm, target_team_id: teamId,
         cross_dept_pending: true, cross_dept_rejected: false, cross_dept_rejected_reason: null, cross_dept_rejected_by: null,
@@ -2852,7 +2875,7 @@ function DelegateTaskModal({ task, currentUser, users, onClose }: { task: Task; 
         target_user_id: task.createdBy, link_task_id: task.id,
       })
     }
-    setSaving(false); onClose()
+    setSaving(false); onClose(); onDone?.()
   }
 
   const field = { background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
@@ -2984,7 +3007,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
   const [showDelegate, setShowDelegate] = useState(false)
   const canDelegate = currentUser.role === 'manager' && !currentUser.isDirector
     && (isAssignee || (!!taskMeta(task).bodGate && relayIdOf(task) === currentUser.id))
-    && (task.status === 'open' || task.status === 'in-progress') && !task.crossDeptPending && !isTaskGated(task)
+    && (task.status === 'open' || task.status === 'in-progress') && !task.crossDeptPending && !task.crossDeptRejected && !isTaskGated(task)
   const canApproveCross = canApproveCrossTask(task, currentUser)
   // Nhân viên được giao: bấm "Bắt đầu" ngay trong chi tiết, bắt đầu rồi mới có nút Complete
   const isBeforeStart = !!task.startDate && task.startDate > localToday()
@@ -5284,7 +5307,14 @@ function buildTaskEvents(task: Task, users: User[], editLogs: TaskEditLog[], not
   add(task.approvedAt, `✅ ${nameOf(task.approvedBy)} duyệt & đóng task`, [task.approvedBy])
   editLogs.forEach(l => {
     if (l.changes.length === 0) return
-    events.push({ at: l.createdAt, text: `✏️ ${nameOf(l.userId)} đã chỉnh sửa task`, lines: l.changes.map(c => `${c.label}: ${c.from} → ${c.to}`), actors: [l.userId] })
+    const head = l.changes[0]?.label ?? ''
+    const title = head === 'Chuyển phòng ban' ? `🔀 ${nameOf(l.userId)} chuyển task sang phòng ban khác`
+      : head === 'Duyệt chuyển phòng ban' ? `✅ ${nameOf(l.userId)} duyệt nhận task được chuyển sang`
+      : head === 'Từ chối chuyển phòng ban' ? `❌ ${nameOf(l.userId)} từ chối nhận task được chuyển sang`
+      : head === 'Duyệt giao chéo phòng ban' ? `✅ ${nameOf(l.userId)} duyệt task giao chéo phòng ban`
+      : head === 'Từ chối giao chéo phòng ban' ? `❌ ${nameOf(l.userId)} từ chối task giao chéo phòng ban`
+      : `✏️ ${nameOf(l.userId)} đã chỉnh sửa task`
+    events.push({ at: l.createdAt, text: title, lines: l.changes.map(c => `${c.label}: ${c.from} → ${c.to}`), actors: [l.userId] })
   })
   // Work Note cũng là một dòng trong Lịch sử
   notes.forEach(n => events.push({ at: n.createdAt, text: `📝 ${nameOf(n.userId)} ghi Work Note: ${n.note}`, by: n.userId, actors: [n.userId], note: n.note }))
