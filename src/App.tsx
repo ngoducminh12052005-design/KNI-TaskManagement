@@ -10926,7 +10926,9 @@ function HopDongInfo({ f, set, ro }: { f: Record<string, any>; set: (patch: Reco
 }
 
 // Phần II: Ý kiến các bộ phận (đúng bảng của phiếu giấy)
-function HopDongOpinions({ rows, myNote, setMyNote }: { rows: HdRow[]; myNote: string; setMyNote: (v: string) => void }) {
+type HdPick = { values: string[]; onChange: (idx: number, id: string) => void; optionsFor: (idx: number) => { id: string; label: string; group: string; disabled: boolean }[] }
+
+function HopDongOpinions({ rows, myNote, setMyNote, pick }: { rows: HdRow[]; myNote: string; setMyNote: (v: string) => void; pick?: HdPick }) {
   const ink = { color: '#111827' }
   const th = 'border border-gray-500 px-1.5 py-1 text-xs font-bold text-center bg-gray-50'
   const td = 'border border-gray-500 px-2 py-1.5 text-xs align-top'
@@ -10964,7 +10966,21 @@ function HopDongOpinions({ rows, myNote, setMyNote }: { rows: HdRow[]; myNote: s
                 </td>
                 <td className={td}>
                   <p>Họ và tên/<i>Name</i>:</p>
-                  <p className="font-semibold">{r.name || '…………'}</p>
+                  {pick && i >= 1 ? (
+                    <select value={pick.values[i - 1] ?? ''} onChange={e => pick.onChange(i - 1, e.target.value)}
+                      className="w-full text-xs border border-gray-400 rounded px-1 py-1 bg-white font-semibold" style={ink}>
+                      <option value="">-- Chọn người duyệt --</option>
+                      {Array.from(new Set(pick.optionsFor(i - 1).map(o => o.group))).map(g => (
+                        <optgroup key={g} label={g}>
+                          {pick.optionsFor(i - 1).filter(o => o.group === g).map(o => (
+                            <option key={o.id} value={o.id} disabled={o.disabled}>{o.label}</option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                  ) : (
+                    <p className="font-semibold">{r.name || '…………'}</p>
+                  )}
                   <p className="mt-1">Chữ ký/<i>Signature</i>:</p>
                   <p className="font-semibold" style={{ color: r.signColor }}>{r.sign}</p>
                   <p className="mt-1">Ngày/<i>Date</i>: {r.date || '……/……/……'}</p>
@@ -10993,15 +11009,25 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
   const [codes, setCodes] = useState<string[]>([])
   const [codeInput, setCodeInput] = useState('')
   const [codeMsg, setCodeMsg] = useState('')
-  const [recipientId, setRecipientId] = useState('')
-  const [extraApprovers, setExtraApprovers] = useState<string[]>([])
+  const [approvers, setApprovers] = useState<string[]>(() => [myManagers.length === 1 ? myManagers[0].id : '', '', '', ''])
   const [approvalMode, setApprovalMode] = useState<'seq' | 'par'>('seq')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const ink = { color: '#111827' }
 
   const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? ''
-  const approverIds = [recipientId, ...extraApprovers.filter(id => id !== recipientId)].filter(Boolean)
+  const recipientId = approvers[0]
+  const approverIds = approvers
+  const setApprover = (idx: number, id: string) => setApprovers(prev => prev.map((x, k) => (k === idx ? id : x)))
+  const optionsFor = (idx: number) => {
+    const pool = idx === 0 && myManagers.length > 0 ? myManagers : users
+    return pool.filter(u => u.id !== currentUser.id).map(u => ({
+      id: u.id,
+      label: `${u.name}${u.role === 'manager' ? ' (Quản lý)' : ''}`,
+      group: idx === 0 && myManagers.length > 0 ? 'Quản lý phòng ban của bạn' : (TEAMS.find(t => t.id === u.teamId)?.name ?? 'Khác'),
+      disabled: approvers.some((x, k) => k !== idx && x === u.id),
+    }))
+  }
   const candidates = (proposals ?? []).filter(p => p.kind === 'totrinh' && p.code
     && (currentUser.isDirector || p.submittedBy === currentUser.id || p.participants.includes(currentUser.id)))
 
@@ -11036,10 +11062,8 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
     if (files.length === 0 && !driveUrl.trim()) { setError('Bắt buộc đính kèm hợp đồng (chọn file hoặc dán link Drive).'); return }
     if (codeInput.trim()) { setError('Bạn đã gõ mã tờ trình nhưng chưa bấm "＋ Gắn tờ trình".'); return }
     if (codes.length === 0) { setError('Bắt buộc đính kèm tờ trình (gắn mã tờ trình RTASK).'); return }
-    if (!recipientId) { setError('Vui lòng chọn Trưởng Bộ phận Chuyên môn (người duyệt đầu tiên).'); return }
-    if (approverIds.length < HD_ROLES.length) {
-      setError(`Phiếu hợp đồng cần đủ ${HD_ROLES.length} người duyệt: ${HD_ROLES.map(r => r[0]).join(' → ')}.`); return
-    }
+    const missing = approvers.findIndex(x => !x)
+    if (missing >= 0) { setError(`Vui lòng chọn người duyệt cho dòng ${missing + 2}: ${HD_ROLES[missing][0]}.`); return }
 
     setSaving(true); setError('')
     let uploaded: { name: string; path: string; size: number; type: string }[] = []
@@ -11150,33 +11174,11 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
             {codeMsg && <p className="text-[11px] mt-1 text-red-600">{codeMsg}</p>}
           </div>
 
-          <HopDongOpinions rows={rows} myNote="" setMyNote={() => {}} />
+          <HopDongOpinions rows={rows} myNote="" setMyNote={() => {}} pick={{ values: approvers, onChange: setApprover, optionsFor }} />
         </div>
 
         <div className="max-w-[860px] mx-auto mb-4 bg-white shadow-xl p-6 text-[13px] space-y-4" style={ink}>
           <p className="font-bold">Luồng phê duyệt</p>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">1. Trưởng Bộ phận Chuyên môn {myManagers.length > 0 ? '(quản lý phòng ban của bạn)' : ''} *</label>
-            <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
-              <option value="">-- Chọn người duyệt --</option>
-              {myManagers.length > 0
-                ? myManagers.map(u => <option key={u.id} value={u.id}>{u.name} — {u.department}</option>)
-                : TEAMS.map(t => {
-                  const members = users.filter(u => u.id !== currentUser.id && u.teamId === t.id)
-                  return members.length === 0 ? null : (
-                    <optgroup key={t.id} label={`${t.emoji} ${t.name}`}>
-                      {members.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
-                    </optgroup>
-                  )
-                })}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">
-              Người duyệt tiếp theo: chọn phòng ban rồi chọn lần lượt <b>Kế toán trưởng</b> (số 2), <b>Trưởng Bộ phận Pháp chế</b> (số 3), <b>Trưởng Bộ phận Kiểm soát nội bộ</b> (số 4). Duyệt theo thứ tự trong danh sách.
-            </label>
-            <ApproverPicker users={users} excludeIds={[currentUser.id, recipientId]} value={extraApprovers} onChange={setExtraApprovers} />
-          </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Luồng phê duyệt</label>
             <select value={approvalMode} onChange={e => setApprovalMode(e.target.value as 'seq' | 'par')} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
@@ -11309,8 +11311,6 @@ function ProposalHopDongView({ p, users, currentUserId, onClose, canAct, onAppro
     </div>
   )
 }
-
-
 
 function ProposalGroupPicker({ onPick, onBack, onClose }: { onPick: (g: string) => void; onBack: () => void; onClose: () => void }) {
   const opts: [string, string, string][] = [
