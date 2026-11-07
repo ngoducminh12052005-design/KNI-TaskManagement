@@ -11340,6 +11340,177 @@ function ProposalHopDongView({ p, users, currentUserId, onClose, canAct, onAppro
   )
 }
 
+// ---------- Trang chi tiết phiếu hợp đồng: cột trái ----------
+function HopDongDetailLeft({ p, users, currentUser, flow, canAct, onApprove, onReject, onRequestReview }: {
+  p: Proposal; users: User[]; currentUser: User
+  flow: { id: string; approverId: string; order: number; status: string; note?: string; decidedAt?: string }[]
+  canAct: boolean
+  onApprove?: (note?: string) => void | Promise<void>; onReject?: (note?: string) => void | Promise<void>; onRequestReview?: (note?: string) => void | Promise<void>
+}) {
+  const f: Record<string, any> = p.formData ?? {}
+  const paper = { background: '#ffffff', color: '#111827', border: '1px solid var(--border)', fontFamily: '"Times New Roman", Times, serif' }
+  const card = { background: 'var(--bg-panel)', border: '1px solid var(--border)' }
+  const head = { color: 'var(--text-primary)' }
+  const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? ''
+  const fmtDay = (d?: string) => (d ? new Date(d).toLocaleDateString('vi-VN') : '')
+  const canEditAttach = currentUser.id === p.submittedBy || !!currentUser.isDirector
+
+  // ----- Tờ trình đính kèm: gắn mã có sẵn hoặc tạo tờ trình mới -----
+  const [codes, setCodes] = useState<string[]>(Array.isArray(f.relatedCodes) ? f.relatedCodes : [])
+  useEffect(() => { setCodes(Array.isArray(p.formData?.relatedCodes) ? p.formData!.relatedCodes : []) }, [p.formData])
+  const [codeInput, setCodeInput] = useState('')
+  const [codeMsg, setCodeMsg] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [busyCode, setBusyCode] = useState(false)
+
+  const saveCodes = async (next: string[]) => {
+    const { data } = await supabase.from('proposals').select('form_data').eq('id', p.id).single()
+    const fd = { ...((data?.form_data as Record<string, any>) ?? {}), relatedCodes: next }
+    const { error } = await supabase.from('proposals').update({ form_data: fd }).eq('id', p.id)
+    if (error) { setCodeMsg('Không lưu được: ' + error.message); return false }
+    setCodes(next)
+    return true
+  }
+  const attachCode = async (raw: string) => {
+    const c = raw.trim().toUpperCase().replace(/^R-TASK/, 'RTASK')
+    if (!c) return
+    setCodeMsg('')
+    if (!/^RTASK\d{6}-\d{2,}$/.test(c)) { setCodeMsg('Mã tờ trình phải có dạng RTASKddmmyy-NN.'); return }
+    if (codes.includes(c)) { setCodeMsg('Tờ trình này đã được gắn rồi.'); return }
+    setBusyCode(true)
+    const { data } = await supabase.from('proposals').select('code, kind').eq('code', c).maybeSingle()
+    if (!data) { setBusyCode(false); setCodeMsg(`Không tìm thấy tờ trình ${c}.`); return }
+    if (data.kind !== 'totrinh') { setBusyCode(false); setCodeMsg(`${c} không phải tờ trình.`); return }
+    if (await saveCodes([...codes, c])) setCodeInput('')
+    setBusyCode(false)
+  }
+  const detach = async (c: string) => {
+    if (!window.confirm(`Gỡ tờ trình ${c} khỏi phiếu hợp đồng?`)) return
+    if (codes.length <= 1) { setCodeMsg('Phiếu hợp đồng bắt buộc có ít nhất 1 tờ trình, hãy gắn tờ trình khác trước rồi mới gỡ.'); return }
+    await saveCodes(codes.filter(x => x !== c))
+  }
+  const onNewDocCreated = async (id: string) => {
+    const { data } = await supabase.from('proposals').select('code').eq('id', id).single()
+    if (data?.code) await saveCodes([...codes, data.code])
+  }
+
+  // ----- Ý kiến các bộ phận (người đến lượt tự tick + ghi ý kiến ngay tại đây) -----
+  const [myNote, setMyNote] = useState('')
+  const [choice, setChoice] = useState<HdRow['tick']>('')
+  const [warn, setWarn] = useState('')
+  const [busy, setBusy] = useState(false)
+  const rows: HdRow[] = [
+    { vi: 'Người Xúc Tiến Hợp Đồng', en: 'Proponent', name: nameOf(p.submittedBy), tick: 'approve', opinion: '', sign: '✓ Đã gửi', signColor: '#059669', date: fmtDay(p.createdAt), mine: false },
+    ...HD_ROLES.map(([vi, en], i) => {
+      const s = flow.find(x => x.order === i + 1)
+      if (!s) return { vi, en, name: '', tick: '' as const, opinion: '', sign: '', signColor: '#6b7280', date: '', mine: false }
+      const SIGN: Record<string, [string, string]> = {
+        approved: ['✓ Đã duyệt', '#059669'], pending: ['Chờ duyệt', '#b45309'], waiting: ['Chưa đến lượt', '#6b7280'],
+        rejected: ['✕ Từ chối', '#dc2626'], revision: ['🔁 Yêu cầu xem xét lại', '#b45309'], skipped: ['Không cần duyệt', '#6b7280'],
+      }
+      const [signText, signColor] = SIGN[s.status] ?? [s.status, '#6b7280']
+      const isRemark = s.status === 'approved' && !!s.note?.startsWith(HD_REMARK_TAG)
+      const cleanNote = (s.note ?? '').replace(HD_REMARK_TAG, '').trim()
+      const tick: HdRow['tick'] = s.status === 'approved' ? (isRemark ? 'remarks' : 'approve') : s.status === 'rejected' ? 'disagree' : ''
+      const opinion = s.status === 'revision' ? `🔁 Yêu cầu xem xét lại${cleanNote ? `: ${cleanNote}` : ''}` : cleanNote
+      return { vi, en, name: nameOf(s.approverId), tick, opinion, sign: signText, signColor, date: fmtDay(s.decidedAt), mine: canAct && s.approverId === currentUser.id && s.status === 'pending' }
+    }),
+  ]
+  const run = async (fn: ((note?: string) => void | Promise<void>) | undefined, note: string) => {
+    if (!fn) return
+    setWarn(''); setBusy(true)
+    try { await fn(note) } finally { setBusy(false) }
+    setChoice(''); setMyNote('')
+  }
+  const confirm = () => {
+    if (!choice) { setWarn('Hãy tick một ô ở dòng của bạn: Chấp thuận / Chấp thuận có ý kiến lưu ý / Không chấp thuận.'); return }
+    if (choice !== 'approve' && !myNote.trim()) {
+      setWarn(choice === 'remarks'
+        ? 'Bạn chọn "Chấp thuận có ý kiến lưu ý" nên bắt buộc ghi ý kiến vào ô "Ý kiến cụ thể".'
+        : 'Bạn chọn "Không chấp thuận" nên bắt buộc ghi lý do vào ô "Ý kiến cụ thể".')
+      return
+    }
+    run(choice === 'disagree' ? onReject : onApprove, choice === 'remarks' ? `${HD_REMARK_TAG} ${myNote.trim()}` : myNote.trim())
+  }
+  const askReview = () => {
+    if (!myNote.trim()) { setWarn('Muốn yêu cầu xem xét lại, hãy ghi nội dung vào ô "Ý kiến cụ thể" ở dòng của bạn.'); return }
+    run(onRequestReview, myNote.trim())
+  }
+  const iAmUp = rows.some(r => r.mine)
+
+  return (
+    <>
+      {/* 1. Thông tin hợp đồng */}
+      <section className="rounded-xl p-4" style={paper}>
+        <HopDongInfo f={f} set={() => {}} ro />
+      </section>
+
+      {/* 2. Hợp đồng đính kèm */}
+      <section className="rounded-xl p-4" style={card}>
+        <h3 className="text-sm font-bold mb-1" style={head}>📎 Hợp đồng đính kèm</h3>
+        <ProposalAttachments p={p} users={users} />
+        {p.driveUrl && (
+          <div className="pt-2">
+            <a href={p.driveUrl} target="_blank" rel="noopener noreferrer" className="text-xs underline" style={{ color: '#3b82f6' }}>📁 Xem hợp đồng trên Drive</a>
+          </div>
+        )}
+        {(p.attachments ?? []).length === 0 && !p.driveUrl && <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Chưa có file đính kèm.</p>}
+      </section>
+
+      {/* 3. Tờ trình đính kèm */}
+      <section className="rounded-xl p-4" style={card}>
+        <h3 className="text-sm font-bold mb-2" style={head}>📜 Tờ trình đính kèm</h3>
+        {codes.length === 0 && <p className="text-xs mb-2" style={{ color: '#dc2626' }}>Chưa có tờ trình nào được gắn.</p>}
+        <div className="flex flex-wrap gap-2 mb-2">
+          {codes.map(c => (
+            <span key={c} className="text-xs px-2.5 py-1 rounded-full inline-flex items-center gap-1.5" style={{ background: '#ede9fe' }}>
+              <ProposalCodeLink code={c} />
+              {canEditAttach && <button type="button" onClick={() => detach(c)} className="text-red-500" title="Gỡ khỏi phiếu">✕</button>}
+            </span>
+          ))}
+        </div>
+        {canEditAttach && (
+          <>
+            <div className="flex flex-wrap gap-2">
+              <input value={codeInput} onChange={e => setCodeInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); attachCode(codeInput) } }}
+                placeholder="Dán mã tờ trình có sẵn (VD: RTASK201026-01)"
+                className="flex-1 min-w-[200px] px-2 py-1.5 rounded text-xs outline-none"
+                style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+              <button type="button" onClick={() => attachCode(codeInput)} disabled={!codeInput.trim() || busyCode}
+                className="px-3 py-1.5 rounded text-xs font-bold text-white disabled:opacity-40" style={{ background: '#7c3aed' }}>＋ Gắn tờ trình</button>
+              <button type="button" onClick={() => setCreating(true)}
+                className="px-3 py-1.5 rounded text-xs font-bold" style={{ background: '#05966922', color: '#059669', border: '1px solid #05966955' }}>📜 Tạo tờ trình mới</button>
+            </div>
+            {codeMsg && <p className="text-[11px] mt-1 text-red-600">{codeMsg}</p>}
+          </>
+        )}
+      </section>
+      {creating && (
+        <ProposalDocForm currentUser={currentUser} users={users} onCreated={onNewDocCreated} onClose={() => setCreating(false)} />
+      )}
+
+      {/* 4. Ý kiến các bộ phận */}
+      <section className="rounded-xl p-4" style={paper}>
+        <HopDongOpinions rows={rows} myNote={myNote} setMyNote={setMyNote} choice={choice} setChoice={setChoice} />
+        {iAmUp && (
+          <div className="mt-3 flex flex-wrap items-center justify-end gap-2" style={{ fontFamily: 'Inter, sans-serif' }}>
+            {warn && <span className="text-xs text-red-600 mr-auto">{warn}</span>}
+            <button type="button" disabled={busy} onClick={askReview}
+              className="px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-40" style={{ background: '#fef3c7', color: '#b45309' }}>🔁 Yêu cầu xem xét lại</button>
+            <button type="button" disabled={busy} onClick={confirm}
+              className="px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40" style={{ background: '#059669' }}>✓ Xác nhận</button>
+          </div>
+        )}
+      </section>
+
+      <ProposalCommentsSection p={p} users={users} currentUser={currentUser} />
+    </>
+  )
+}
+
+
+
 
 
 function ProposalGroupPicker({ onPick, onBack, onClose }: { onPick: (g: string) => void; onBack: () => void; onClose: () => void }) {
@@ -12114,6 +12285,76 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
 
   const card = { background: 'var(--bg-panel)', border: '1px solid var(--border)' }
   const canEdit = currentUser.id === p.submittedBy || flow.some(s => s.approverId === currentUser.id) || !!currentUser.isDirector
+
+    if (p.formData?.tpl === 'hopdong') {
+    return (
+      <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 md:left-[var(--sidebar-w)] z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
+        <div className="max-w-6xl mx-auto">
+          <button onClick={onClose} className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>← Danh sách phiếu hợp đồng</button>
+          <h2 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{p.code ? `${p.code}: ` : ''}{p.title}</h2>
+          <div className="flex flex-wrap items-center gap-2 mt-1 mb-4">
+            <Badge s={p.status === 'rejected' && p.rejectedReason?.startsWith('[REVIEW]') ? 'revision' : p.status} />
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Gửi bởi</span>
+            <Avatar id={p.submittedBy} />
+            <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{userOf(p.submittedBy)?.name}</span>
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>lúc {fmt(p.createdAt)}</span>
+            {onOpenDoc && (
+              <button type="button" onClick={onOpenDoc} className="ml-auto text-xs font-bold px-3 py-1.5 rounded-lg"
+                style={{ background: '#05966922', color: '#059669', border: '1px solid #05966955' }}>📄 Xem phiếu (bản in)</button>
+            )}
+          </div>
+          {p.status === 'rejected' && p.rejectedReason && (
+            <p className="text-xs mb-3 px-3 py-2 rounded-lg" style={p.rejectedReason.startsWith('[REVIEW]') ? { background: '#fef3c7', color: '#92400e' } : { background: '#fee2e2', color: '#b91c1c' }}>
+              {p.rejectedReason.startsWith('[REVIEW]') ? '🔁 Người duyệt yêu cầu xem xét lại: ' : 'Lý do từ chối: '}{p.rejectedReason.replace('[REVIEW]', '').trim()}
+            </p>
+          )}
+          <div className="grid md:grid-cols-3 gap-4">
+            <div className="md:col-span-2 space-y-4">
+              <HopDongDetailLeft p={p} users={users} currentUser={currentUser} flow={flow} canAct={canAct}
+                onApprove={onApprove} onReject={onReject} onRequestReview={onRequestReview} />
+            </div>
+            <div className="space-y-4">
+              <section className="rounded-xl p-4" style={card}>
+                <h3 className="text-sm font-bold mb-1" style={{ color: 'var(--text-primary)' }}>Luồng phê duyệt</h3>
+                <p className="text-[11px] mb-3" style={{ color: 'var(--text-muted)' }}>
+                  {p.approvalMode === 'par' ? 'Duyệt song song: Trưởng bộ phận duyệt trước, sau đó các người còn lại duyệt cùng lúc.' : 'Duyệt nối tiếp: lần lượt từng người.'}
+                </p>
+                <div className="space-y-3">
+                  {flow.map(s => (
+                    <div key={s.id} className="flex gap-2">
+                      <Avatar id={s.approverId} />
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{userOf(s.approverId)?.name}</p>
+                        <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{HD_ROLES[s.order - 1]?.[0] ?? userOf(s.approverId)?.department}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <Badge s={s.status} />
+                          {s.decidedAt && <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{fmt(s.decidedAt)}</span>}
+                        </div>
+                        {s.note && <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}><LinkifyCodes text={s.note.replace(HD_REMARK_TAG, '⚠️ Lưu ý:')} /></p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+              <section className="rounded-xl p-4" style={card}>
+                <h3 className="text-sm font-bold mb-3" style={{ color: 'var(--text-primary)' }}>Lịch sử</h3>
+                <div className="space-y-2">
+                  {events.map((e, i) => (
+                    <div key={i}>
+                      <p className="text-xs whitespace-pre-line" style={{ color: 'var(--text-primary)' }}>{e.text.replace(HD_REMARK_TAG, '⚠️ Lưu ý:')}</p>
+                      <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{fmt(e.at)}</p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+
 
   return (
     <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 md:left-[var(--sidebar-w)] z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
@@ -13639,20 +13880,23 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
               ? () => { setDetailProposal(null); setDocProposal(cur) }
               : undefined}
             canAct={isMyTurn(cur) && cur.status === 'pending'}
-            onApprove={async () => {
+                        onApprove={async (note?: string) => {
+              if (cur.formData?.tpl === 'hopdong') { await handleApprove(cur, note); return }
               if (!window.confirm(`Xác nhận DUYỆT "${cur.title}"?`)) return
               await handleApprove(cur)
             }}
-            onReject={async () => {
+            onReject={async (note?: string) => {
+              if (cur.formData?.tpl === 'hopdong') { await handleReject(cur, note); return }
               const reason = window.prompt('Lý do từ chối (người gửi sẽ thấy lý do này):')
               if (reason === null) return
               await declineProposal(cur, 'rejected', reason.trim())
             }}
-            onRequestReview={async () => {
-              const note = window.prompt('Nội dung cần xem xét lại (người gửi sẽ thấy):')
-              if (note === null) return
-              if (!note.trim()) { alert('Vui lòng ghi nội dung cần xem xét lại.'); return }
-              await declineProposal(cur, 'revision', note.trim())
+            onRequestReview={async (note?: string) => {
+              if (cur.formData?.tpl === 'hopdong') { await handleRequestReview(cur, note ?? ''); return }
+              const note2 = window.prompt('Nội dung cần xem xét lại (người gửi sẽ thấy):')
+              if (note2 === null) return
+              if (!note2.trim()) { alert('Vui lòng ghi nội dung cần xem xét lại.'); return }
+              await declineProposal(cur, 'revision', note2.trim())
             }}
             onClose={() => setDetailProposal(null)} />
         )
