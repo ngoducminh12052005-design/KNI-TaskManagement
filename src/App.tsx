@@ -10857,6 +10857,7 @@ function ProposalFormDocView({ p, users, currentUserId, onClose, canAct, onAppro
 }
 
 // ===== Phiếu phê duyệt hợp đồng (PPDHD 01/2023) =====
+const HD_REMARK_TAG = '[LUUY]'   // đánh dấu ô "Chấp thuận có ý kiến lưu ý" trong ghi chú của bước duyệt
 const HD_ROLES: [string, string][] = [
   ['Trưởng Bộ phận Chuyên môn', 'Head of Specialized Department'],
   ['Kế toán trưởng', 'Chief Accountant'],
@@ -10928,7 +10929,7 @@ function HopDongInfo({ f, set, ro }: { f: Record<string, any>; set: (patch: Reco
 // Phần II: Ý kiến các bộ phận (đúng bảng của phiếu giấy)
 type HdPick = { values: string[]; onChange: (idx: number, id: string) => void; optionsFor: (idx: number) => { id: string; label: string; group: string; disabled: boolean }[] }
 
-function HopDongOpinions({ rows, myNote, setMyNote, pick }: { rows: HdRow[]; myNote: string; setMyNote: (v: string) => void; pick?: HdPick }) {
+function HopDongOpinions({ rows, myNote, setMyNote, pick, choice = '', setChoice }: { rows: HdRow[]; myNote: string; setMyNote: (v: string) => void; pick?: HdPick; choice?: HdRow['tick']; setChoice?: (v: HdRow['tick']) => void }) {
   const ink = { color: '#111827' }
   const th = 'border border-gray-500 px-1.5 py-1 text-xs font-bold text-center bg-gray-50'
   const td = 'border border-gray-500 px-2 py-1.5 text-xs align-top'
@@ -10951,15 +10952,28 @@ function HopDongOpinions({ rows, myNote, setMyNote, pick }: { rows: HdRow[]; myN
               <tr key={i}>
                 <td className={td}><b>{i + 1}. {r.vi}</b><br /><i>{r.en}</i></td>
                 <td className={td}>
-                  <p>{box(r.tick === 'approve')} <u>Chấp thuận</u> <i>(Approve)</i></p>
-                  <p className="mt-1">{box(r.tick === 'remarks')} <u>Chấp thuận có ý kiến lưu ý</u> <i>(Approve with remarks)</i></p>
-                  <p className="mt-1">{box(r.tick === 'disagree')} <u>Không chấp thuận</u> <i>(Disapprove)</i></p>
+                  {r.mine && setChoice ? (
+                    (['approve', 'remarks', 'disagree'] as const).map(k => (
+                      <button key={k} type="button" onClick={() => setChoice(k)}
+                        className="block w-full text-left mt-1 first:mt-0 rounded px-1 hover:bg-amber-50" style={{ fontWeight: choice === k ? 700 : 400 }}>
+                        {box(choice === k)} <u>{k === 'approve' ? 'Chấp thuận' : k === 'remarks' ? 'Chấp thuận có ý kiến lưu ý' : 'Không chấp thuận'}</u>{' '}
+                        <i>({k === 'approve' ? 'Approve' : k === 'remarks' ? 'Approve with remarks' : 'Disapprove'})</i>
+                      </button>
+                    ))
+                  ) : (
+                    <>
+                      <p>{box(r.tick === 'approve')} <u>Chấp thuận</u> <i>(Approve)</i></p>
+                      <p className="mt-1">{box(r.tick === 'remarks')} <u>Chấp thuận có ý kiến lưu ý</u> <i>(Approve with remarks)</i></p>
+                      <p className="mt-1">{box(r.tick === 'disagree')} <u>Không chấp thuận</u> <i>(Disapprove)</i></p>
+                    </>
+                  )}
                 </td>
                 <td className={td}>
                   {r.mine ? (
                     <textarea value={myNote} onChange={e => setMyNote(e.target.value)} rows={5}
-                      placeholder="Ý kiến của bạn (nếu có ý kiến lưu ý hãy ghi vào đây rồi bấm Duyệt)"
-                      className="w-full text-xs border border-amber-300 rounded p-1.5 outline-none focus:border-amber-500 bg-amber-50" style={ink} />
+                      disabled={choice === ''}
+                      placeholder={choice === 'remarks' ? 'Bắt buộc ghi ý kiến lưu ý của bạn' : choice === 'disagree' ? 'Bắt buộc ghi lý do không chấp thuận' : choice === 'approve' ? 'Có thể ghi ý kiến (không bắt buộc)' : 'Hãy tick một ô ở cột bên cạnh trước'}
+                      className="w-full text-xs border border-amber-300 rounded p-1.5 outline-none focus:border-amber-500 bg-amber-50 disabled:opacity-50" style={ink} />
                   ) : (
                     <span className="whitespace-pre-wrap">{r.opinion}</span>
                   )}
@@ -11211,6 +11225,7 @@ function ProposalHopDongView({ p, users, currentUserId, onClose, canAct, onAppro
   const [steps, setSteps] = useState<{ id: string; approverId: string; order: number; status: string; decidedAt?: string; note?: string }[]>([])
   const [busy, setBusy] = useState(false)
   const [myNote, setMyNote] = useState('')
+  const [choice, setChoice] = useState<HdRow['tick']>('')
   const [warn, setWarn] = useState('')
   const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? ''
   const fmtDay = (d?: string) => (d ? new Date(d).toLocaleDateString('vi-VN') : '')
@@ -11237,8 +11252,10 @@ function ProposalHopDongView({ p, users, currentUserId, onClose, canAct, onAppro
       const s = steps.find(x => x.order === i + 1)
       if (!s) return { vi, en, name: '', tick: '' as const, opinion: '', sign: '', signColor: '#6b7280', date: '', mine: false }
       const [signText, signColor] = SIGN[s.status] ?? [s.status, '#6b7280']
-      const tick: HdRow['tick'] = s.status === 'approved' ? (s.note ? 'remarks' : 'approve') : s.status === 'rejected' ? 'disagree' : ''
-      const opinion = s.status === 'revision' ? `🔁 Yêu cầu xem xét lại${s.note ? `: ${s.note}` : ''}` : (s.note ?? '')
+      const isRemark = s.status === 'approved' && !!s.note?.startsWith(HD_REMARK_TAG)
+      const cleanNote = (s.note ?? '').replace(HD_REMARK_TAG, '').trim()
+      const tick: HdRow['tick'] = s.status === 'approved' ? (isRemark ? 'remarks' : 'approve') : s.status === 'rejected' ? 'disagree' : ''
+      const opinion = s.status === 'revision' ? `🔁 Yêu cầu xem xét lại${cleanNote ? `: ${cleanNote}` : ''}` : cleanNote
       return {
         vi, en, name: nameOf(s.approverId), tick, opinion, sign: signText, signColor,
         date: fmtDay(s.decidedAt), mine: canAct && s.approverId === currentUserId && s.status === 'pending',
@@ -11246,11 +11263,24 @@ function ProposalHopDongView({ p, users, currentUserId, onClose, canAct, onAppro
     }),
   ]
 
-  const act = async (fn: (note: string) => Promise<void>, needNote = false) => {
-    if (needNote && !myNote.trim()) { setWarn('Hãy ghi ý kiến của bạn vào ô "Ý kiến cụ thể" ở dòng của bạn.'); return }
+  const run = async (fn: (note: string) => Promise<void>, note: string) => {
     setWarn(''); setBusy(true)
-    try { await fn(myNote.trim()) } finally { setBusy(false) }
+    try { await fn(note) } finally { setBusy(false) }
     onClose()
+  }
+  const confirm = () => {
+    if (!choice) { setWarn('Hãy tick một ô ở dòng của bạn: Chấp thuận / Chấp thuận có ý kiến lưu ý / Không chấp thuận.'); return }
+    if (choice !== 'approve' && !myNote.trim()) {
+      setWarn(choice === 'remarks'
+        ? 'Bạn chọn "Chấp thuận có ý kiến lưu ý" nên bắt buộc ghi ý kiến vào ô "Ý kiến cụ thể".'
+        : 'Bạn chọn "Không chấp thuận" nên bắt buộc ghi lý do vào ô "Ý kiến cụ thể".')
+      return
+    }
+    run(choice === 'disagree' ? onReject : onApprove, choice === 'remarks' ? `${HD_REMARK_TAG} ${myNote.trim()}` : myNote.trim())
+  }
+  const askReview = () => {
+    if (!myNote.trim()) { setWarn('Muốn yêu cầu xem xét lại, hãy ghi nội dung vào ô "Ý kiến cụ thể" ở dòng của bạn.'); return }
+    run(onRequestReview, myNote.trim())
   }
 
   return (
@@ -11286,7 +11316,7 @@ function ProposalHopDongView({ p, users, currentUserId, onClose, canAct, onAppro
             </p>
           </div>
 
-          <HopDongOpinions rows={rows} myNote={myNote} setMyNote={setMyNote} />
+          <HopDongOpinions rows={rows} myNote={myNote} setMyNote={setMyNote} choice={choice} setChoice={setChoice} />
 
           {p.status === 'rejected' && p.rejectedReason && !isReview && (
             <p className="mt-6 text-xs text-red-600">Lý do từ chối: {p.rejectedReason}</p>
@@ -11299,18 +11329,18 @@ function ProposalHopDongView({ p, users, currentUserId, onClose, canAct, onAppro
         <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600">Đóng</button>
         {canAct && (
           <>
-            <button type="button" disabled={busy} onClick={() => act(async n => { await onReject(n) })}
-              className="px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-40" style={{ background: '#fee2e2', color: '#dc2626' }}>Từ chối</button>
-            <button type="button" disabled={busy} onClick={() => act(onRequestReview, true)}
+            <button type="button" disabled={busy} onClick={askReview}
               className="px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-40" style={{ background: '#fef3c7', color: '#b45309' }}>🔁 Yêu cầu xem xét lại</button>
-            <button type="button" disabled={busy} onClick={() => act(onApprove)}
-              className="px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40" style={{ background: '#059669' }}>✓ Duyệt</button>
+            <button type="button" disabled={busy} onClick={confirm}
+              className="px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40" style={{ background: '#059669' }}>✓ Xác nhận</button>
           </>
         )}
       </div>
     </div>
   )
 }
+
+
 
 function ProposalGroupPicker({ onPick, onBack, onClose }: { onPick: (g: string) => void; onBack: () => void; onClose: () => void }) {
   const opts: [string, string, string][] = [
