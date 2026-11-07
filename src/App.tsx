@@ -6,7 +6,7 @@ import * as XLSX from 'xlsx'
 // ==================== TYPES ====================
 
 type Role = 'manager' | 'employee'
-type View = 'dashboard' | 'tasks' | 'projects' | 'directory' | 'useradmin' | 'leaderboard' | 'rewards' | 'social' | 'profile' | 'proposals' | 'bodlog'
+type View = 'dashboard' | 'tasks' | 'projects' | 'directory' | 'useradmin' | 'leaderboard' | 'rewards' | 'social' | 'profile' | 'proposals' | 'contracts' | 'bodlog'
 type TaskStatus = 'open' | 'in-progress' | 'submitted' | 'completed'
 type TaskPriority = 'low' | 'medium' | 'high'
 type ChatChannel = 'general' | 'team' | 'announcements' | 'dm' | 'proposal' | 'leaders' | 'room'
@@ -10856,6 +10856,462 @@ function ProposalFormDocView({ p, users, currentUserId, onClose, canAct, onAppro
   )
 }
 
+// ===== Phiếu phê duyệt hợp đồng (PPDHD 01/2023) =====
+const HD_ROLES: [string, string][] = [
+  ['Trưởng Bộ phận Chuyên môn', 'Head of Specialized Department'],
+  ['Kế toán trưởng', 'Chief Accountant'],
+  ['Trưởng Bộ phận Pháp chế', 'Head of Legal Department'],
+  ['Trưởng Bộ phận Kiểm soát nội bộ', 'Head of Internal Control Department'],
+]
+
+type HdRow = {
+  vi: string; en: string; name: string
+  tick: '' | 'approve' | 'remarks' | 'disagree'
+  opinion: string; sign: string; signColor: string; date: string; mine: boolean
+}
+
+function HopDongHeader({ code }: { code?: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 mb-5">
+      <img src={companyLogo} alt="KNI" className="h-12 object-contain shrink-0" />
+      <div className="text-center flex-1">
+        <p className="font-bold text-base">PHIẾU PHÊ DUYỆT HỢP ĐỒNG</p>
+        <p className="font-bold italic">CONTRACT APPROVAL FORM</p>
+        <p className="text-[11px] text-gray-500 mt-1">Số/No: <span className="font-mono">{code ?? 'RTASK… (tự sinh khi gửi)'}</span></p>
+      </div>
+      <div className="text-[11px] text-right shrink-0">
+        <p>Ký hiệu: PPDHD 01/2023</p>
+        <p>Lần sửa đổi: Ban hành lần đầu</p>
+      </div>
+    </div>
+  )
+}
+
+// Phần I: Thông tin hợp đồng (dùng cho cả form nhập và bản xem)
+function HopDongInfo({ f, set, ro }: { f: Record<string, any>; set: (patch: Record<string, any>) => void; ro: boolean }) {
+  const ink = { color: '#111827' }
+  const td = 'border border-gray-500 px-2 py-1.5 align-top'
+  const rows: [string, string, string, 'text' | 'area'][] = [
+    ['partner', 'Tên đối tác', 'Name of partner', 'text'],
+    ['company', 'Pháp nhân ký kết hợp đồng', 'Signing company', 'text'],
+    ['contractNo', 'Số hợp đồng và ngày hợp đồng', 'Contract no. and date', 'text'],
+    ['purpose', 'Mục đích hợp đồng', 'Purpose of contract', 'area'],
+    ['value', 'Giá trị hợp đồng', 'Contract value', 'text'],
+    ['note', 'Thông tin lưu ý khác', 'Other remarkable information', 'area'],
+  ]
+  return (
+    <>
+      <p className="font-bold mb-1">I. THÔNG TIN HỢP ĐỒNG:</p>
+      <table className="w-full border-collapse text-[13px]">
+        <tbody>
+          {rows.map(([k, vi, en, kind]) => (
+            <tr key={k}>
+              <td className={td} style={{ width: '34%' }}><b>{vi}</b><br /><i>{en}</i></td>
+              <td className={td} style={{ width: 16 }}>:</td>
+              <td className={td}>
+                {ro
+                  ? <span className="whitespace-pre-wrap block">{f[k] || ''}</span>
+                  : kind === 'area'
+                    ? <textarea value={f[k] ?? ''} onChange={e => set({ [k]: e.target.value })} rows={3}
+                        className="w-full bg-transparent outline-none resize-none border-b border-dashed border-gray-300 focus:border-blue-500" style={ink} />
+                    : <input value={f[k] ?? ''} onChange={e => set({ [k]: e.target.value })}
+                        className="w-full bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500" style={ink} />}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  )
+}
+
+// Phần II: Ý kiến các bộ phận (đúng bảng của phiếu giấy)
+function HopDongOpinions({ rows, myNote, setMyNote }: { rows: HdRow[]; myNote: string; setMyNote: (v: string) => void }) {
+  const ink = { color: '#111827' }
+  const th = 'border border-gray-500 px-1.5 py-1 text-xs font-bold text-center bg-gray-50'
+  const td = 'border border-gray-500 px-2 py-1.5 text-xs align-top'
+  const box = (on: boolean) => (on ? '☑' : '☐')
+  return (
+    <>
+      <p className="font-bold mt-6 mb-1">II. Ý KIẾN CÁC BỘ PHẬN:</p>
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse" style={{ minWidth: 640 }}>
+          <thead>
+            <tr>
+              <th className={th} style={{ width: 130 }}>Bộ phận</th>
+              <th className={th} style={{ width: 190 }}>Ý kiến chấp thuận</th>
+              <th className={th}>Ý kiến cụ thể</th>
+              <th className={th} style={{ width: 170 }}>Ký tên</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i}>
+                <td className={td}><b>{i + 1}. {r.vi}</b><br /><i>{r.en}</i></td>
+                <td className={td}>
+                  <p>{box(r.tick === 'approve')} <u>Chấp thuận</u> <i>(Approve)</i></p>
+                  <p className="mt-1">{box(r.tick === 'remarks')} <u>Chấp thuận có ý kiến lưu ý</u> <i>(Approve with remarks)</i></p>
+                  <p className="mt-1">{box(r.tick === 'disagree')} <u>Không chấp thuận</u> <i>(Disapprove)</i></p>
+                </td>
+                <td className={td}>
+                  {r.mine ? (
+                    <textarea value={myNote} onChange={e => setMyNote(e.target.value)} rows={5}
+                      placeholder="Ý kiến của bạn (nếu có ý kiến lưu ý hãy ghi vào đây rồi bấm Duyệt)"
+                      className="w-full text-xs border border-amber-300 rounded p-1.5 outline-none focus:border-amber-500 bg-amber-50" style={ink} />
+                  ) : (
+                    <span className="whitespace-pre-wrap">{r.opinion}</span>
+                  )}
+                </td>
+                <td className={td}>
+                  <p>Họ và tên/<i>Name</i>:</p>
+                  <p className="font-semibold">{r.name || '…………'}</p>
+                  <p className="mt-1">Chữ ký/<i>Signature</i>:</p>
+                  <p className="font-semibold" style={{ color: r.signColor }}>{r.sign}</p>
+                  <p className="mt-1">Ngày/<i>Date</i>: {r.date || '……/……/……'}</p>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )
+}
+
+// ---------- Form tạo phiếu phê duyệt hợp đồng ----------
+function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated }: {
+  currentUser: User; users: User[]; proposals?: Proposal[]; onClose: () => void; onCreated?: (id: string) => void
+}) {
+  const now = new Date()
+  const dateText = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`
+  const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)
+
+  const [f, setF] = useState<Record<string, any>>({ partner: '', company: '', contractNo: '', purpose: '', value: '', note: '' })
+  const set = (patch: Record<string, any>) => setF(prev => ({ ...prev, ...patch }))
+  const [files, setFiles] = useState<File[]>([])
+  const [driveUrl, setDriveUrl] = useState('')
+  const [codes, setCodes] = useState<string[]>([])
+  const [codeInput, setCodeInput] = useState('')
+  const [codeMsg, setCodeMsg] = useState('')
+  const [recipientId, setRecipientId] = useState('')
+  const [extraApprovers, setExtraApprovers] = useState<string[]>([])
+  const [approvalMode, setApprovalMode] = useState<'seq' | 'par'>('seq')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const ink = { color: '#111827' }
+
+  const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? ''
+  const approverIds = [recipientId, ...extraApprovers.filter(id => id !== recipientId)].filter(Boolean)
+  const candidates = (proposals ?? []).filter(p => p.kind === 'totrinh' && p.code
+    && (currentUser.isDirector || p.submittedBy === currentUser.id || p.participants.includes(currentUser.id)))
+
+  const pickFiles = (e: { target: HTMLInputElement }) => {
+    const picked = Array.from(e.target.files ?? [])
+    const tooBig = picked.find(x => x.size > MAX_FILE_MB * 1024 * 1024)
+    if (tooBig) { setError(`File "${tooBig.name}" lớn hơn ${MAX_FILE_MB}MB. Hãy dùng link Drive cho file lớn.`); e.target.value = ''; return }
+    if (files.length + picked.length > MAX_FILES) { setError(`Tối đa ${MAX_FILES} file.`); e.target.value = ''; return }
+    setError('')
+    setFiles(prev => [...prev, ...picked])
+    e.target.value = ''
+  }
+
+  const addCode = async () => {
+    const c = codeInput.trim().toUpperCase().replace(/^R-TASK/, 'RTASK')
+    if (!c) return
+    setCodeMsg('')
+    if (!/^RTASK\d{6}-\d{2,}$/.test(c)) { setCodeMsg('Mã tờ trình phải có dạng RTASKddmmyy-NN.'); return }
+    if (codes.includes(c)) { setCodeMsg('Tờ trình này đã được gắn rồi.'); return }
+    const { data } = await supabase.from('proposals').select('code, kind').eq('code', c).maybeSingle()
+    if (!data) { setCodeMsg(`Không tìm thấy tờ trình ${c}.`); return }
+    if (data.kind !== 'totrinh') { setCodeMsg(`${c} không phải tờ trình.`); return }
+    setCodes(prev => [...prev, c])
+    setCodeInput('')
+  }
+
+  const submit = async () => {
+    if (!String(f.partner).trim()) { setError('Vui lòng nhập tên đối tác.'); return }
+    if (!String(f.company).trim()) { setError('Vui lòng nhập pháp nhân ký kết hợp đồng.'); return }
+    if (!String(f.contractNo).trim()) { setError('Vui lòng nhập số hợp đồng và ngày hợp đồng.'); return }
+    if (!String(f.purpose).trim()) { setError('Vui lòng nhập mục đích hợp đồng.'); return }
+    if (files.length === 0 && !driveUrl.trim()) { setError('Bắt buộc đính kèm hợp đồng (chọn file hoặc dán link Drive).'); return }
+    if (codeInput.trim()) { setError('Bạn đã gõ mã tờ trình nhưng chưa bấm "＋ Gắn tờ trình".'); return }
+    if (codes.length === 0) { setError('Bắt buộc đính kèm tờ trình (gắn mã tờ trình RTASK).'); return }
+    if (!recipientId) { setError('Vui lòng chọn Trưởng Bộ phận Chuyên môn (người duyệt đầu tiên).'); return }
+    if (approverIds.length < HD_ROLES.length) {
+      setError(`Phiếu hợp đồng cần đủ ${HD_ROLES.length} người duyệt: ${HD_ROLES.map(r => r[0]).join(' → ')}.`); return
+    }
+
+    setSaving(true); setError('')
+    let uploaded: { name: string; path: string; size: number; type: string }[] = []
+    try { uploaded = await uploadProposalFiles(currentUser.id, files) }
+    catch (err: any) { setSaving(false); setError('Tải file thất bại: ' + (err?.message ?? '')); return }
+
+    const dept = currentUser.department ?? ''
+    const purposeShort = String(f.purpose).trim().split('\n')[0]
+    const title = `Hợp đồng: ${String(f.partner).trim()} — ${purposeShort}`.slice(0, 200)
+    const brief = String(f.purpose).trim().slice(0, 200)
+    const formData = {
+      tpl: 'hopdong', dept, dateText, relatedCodes: codes,
+      partner: String(f.partner).trim(), company: String(f.company).trim(), contractNo: String(f.contractNo).trim(),
+      purpose: String(f.purpose).trim(), value: String(f.value).trim(), note: String(f.note).trim(),
+    }
+
+    let data: any = null
+    let insertError: any = null
+    for (let i = 0; i < 3; i++) {
+      const res = await supabase.from('proposals').insert({
+        title, description: brief, drive_url: driveUrl.trim(),
+        submitted_by: currentUser.id, recipient_id: recipientId, status: 'pending',
+        participants: Array.from(new Set([currentUser.id, ...approverIds])),
+        code: await generateProposalCode(currentUser.id),
+        group_name: 'Hợp đồng', department: dept, company: null,
+        brief, approval_mode: approvalMode, attachments: uploaded, items: [],
+        kind: 'dexuat', form_data: formData,
+      }).select('id').single()
+      data = res.data; insertError = res.error
+      if (!insertError && data?.id) {
+        await supabase.from('proposal_steps').insert(approverIds.map((id, k) => ({
+          proposal_id: data.id, approver_id: id, step_order: k + 1,
+          status: k === 0 ? 'pending' : 'waiting',
+        })))
+      }
+      if (!insertError || insertError.code !== '23505') break
+    }
+    setSaving(false)
+    if (insertError) { setError(insertError.message); return }
+    if (data?.id) onCreated?.(data.id)
+
+    if (recipientId !== currentUser.id) {
+      await supabase.from('notifications').insert({
+        message: `📑 ${currentUser.name} vừa gửi phiếu phê duyệt hợp đồng "${title.slice(0, 80)}" cho bạn`,
+        target_user_id: recipientId,
+        link_proposal_id: data?.id,
+      })
+    }
+    onClose()
+  }
+
+  const rows: HdRow[] = [
+    { vi: 'Người Xúc Tiến Hợp Đồng', en: 'Proponent', name: currentUser.name, tick: 'approve', opinion: '', sign: '✓ Đã gửi', signColor: '#059669', date: dateText, mine: false },
+    ...HD_ROLES.map(([vi, en], i) => ({
+      vi, en, name: approverIds[i] ? nameOf(approverIds[i]) : '', tick: '' as const, opinion: '', sign: '', signColor: '#6b7280', date: '', mine: false,
+    })),
+  ]
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
+      <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
+        <span className="text-sm font-bold text-gray-800">📑 Tạo phiếu phê duyệt hợp đồng (RTASK)</span>
+        <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-[860px] mx-auto my-4 bg-white shadow-xl p-6 sm:p-10 text-[13px] leading-relaxed" style={{ ...ink, fontFamily: '"Times New Roman", Times, serif' }}>
+          <HopDongHeader />
+          <HopDongInfo f={f} set={set} ro={false} />
+
+          <div className="mt-4 rounded p-3" style={{ background: '#fffbeb', border: '1px solid #fcd34d' }}>
+            <p className="font-bold text-xs mb-1">📎 1. Hợp đồng đính kèm <span className="text-red-600">(bắt buộc)</span></p>
+            <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={pickFiles} className="text-xs" />
+            {files.length > 0 && (
+              <ul className="mt-1 space-y-0.5">
+                {files.map((x, i) => (
+                  <li key={i} className="flex items-center justify-between text-xs">
+                    <span className="truncate">☐ {x.name} ({(x.size / 1024 / 1024).toFixed(1)}MB)</span>
+                    <button type="button" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} className="text-red-500 px-1">✕</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <input value={driveUrl} onChange={e => setDriveUrl(e.target.value)} placeholder="Hoặc dán link Google Drive (file lớn)"
+              className="w-full bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500 py-0.5 mt-2 text-xs" style={ink} />
+
+            <p className="font-bold text-xs mt-4 mb-1">📜 2. Tờ trình đính kèm <span className="text-red-600">(bắt buộc)</span></p>
+            {codes.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-1.5">
+                {codes.map(c => (
+                  <span key={c} className="text-xs font-mono px-2 py-0.5 rounded-full" style={{ background: '#ede9fe', color: '#5b21b6' }}>
+                    {c} <button type="button" onClick={() => setCodes(prev => prev.filter(x => x !== c))} className="text-red-500 ml-1">✕</button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-1.5">
+              <input list="hd-proposal-codes" value={codeInput} onChange={e => setCodeInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCode() } }}
+                placeholder="Chọn hoặc dán mã tờ trình (VD: RTASK201026-01)"
+                className="flex-1 min-w-0 px-2 py-1.5 rounded text-xs outline-none border border-gray-300 bg-white" style={ink} />
+              <datalist id="hd-proposal-codes">
+                {candidates.map(p => <option key={p.id} value={p.code}>{p.title}</option>)}
+              </datalist>
+              <button type="button" onClick={addCode} disabled={!codeInput.trim()}
+                className="px-3 py-1.5 rounded text-xs font-bold text-white disabled:opacity-40 shrink-0" style={{ background: '#7c3aed' }}>＋ Gắn tờ trình</button>
+            </div>
+            {codeMsg && <p className="text-[11px] mt-1 text-red-600">{codeMsg}</p>}
+          </div>
+
+          <HopDongOpinions rows={rows} myNote="" setMyNote={() => {}} />
+        </div>
+
+        <div className="max-w-[860px] mx-auto mb-4 bg-white shadow-xl p-6 text-[13px] space-y-4" style={ink}>
+          <p className="font-bold">Luồng phê duyệt</p>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">1. Trưởng Bộ phận Chuyên môn {myManagers.length > 0 ? '(quản lý phòng ban của bạn)' : ''} *</label>
+            <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
+              <option value="">-- Chọn người duyệt --</option>
+              {myManagers.length > 0
+                ? myManagers.map(u => <option key={u.id} value={u.id}>{u.name} — {u.department}</option>)
+                : TEAMS.map(t => {
+                  const members = users.filter(u => u.id !== currentUser.id && u.teamId === t.id)
+                  return members.length === 0 ? null : (
+                    <optgroup key={t.id} label={`${t.emoji} ${t.name}`}>
+                      {members.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+                    </optgroup>
+                  )
+                })}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">
+              Người duyệt tiếp theo: chọn phòng ban rồi chọn lần lượt <b>Kế toán trưởng</b> (số 2), <b>Trưởng Bộ phận Pháp chế</b> (số 3), <b>Trưởng Bộ phận Kiểm soát nội bộ</b> (số 4). Duyệt theo thứ tự trong danh sách.
+            </label>
+            <ApproverPicker users={users} excludeIds={[currentUser.id, recipientId]} value={extraApprovers} onChange={setExtraApprovers} />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Luồng phê duyệt</label>
+            <select value={approvalMode} onChange={e => setApprovalMode(e.target.value as 'seq' | 'par')} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
+              <option value="seq">Nối tiếp (lần lượt)</option>
+              <option value="par">Song song (Trưởng bộ phận trước, rồi cùng lúc)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div className="shrink-0 px-4 py-3 flex items-center justify-end gap-3" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
+        {error && <span className="text-xs text-red-600 mr-auto">{error}</span>}
+        <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600">Hủy</button>
+        <button type="button" onClick={submit} disabled={saving}
+          className="px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40"
+          style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
+          {saving ? 'Đang gửi...' : 'Gửi phê duyệt'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------- Bản xem / duyệt phiếu phê duyệt hợp đồng ----------
+function ProposalHopDongView({ p, users, currentUserId, onClose, canAct, onApprove, onReject, onRequestReview }: {
+  p: Proposal; users: User[]; currentUserId: string; onClose: () => void; canAct: boolean
+  onApprove: (note: string) => Promise<void>; onReject: (note: string) => Promise<void>; onRequestReview: (note: string) => Promise<void>
+}) {
+  const f: Record<string, any> = p.formData ?? {}
+  const [steps, setSteps] = useState<{ id: string; approverId: string; order: number; status: string; decidedAt?: string; note?: string }[]>([])
+  const [busy, setBusy] = useState(false)
+  const [myNote, setMyNote] = useState('')
+  const [warn, setWarn] = useState('')
+  const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? ''
+  const fmtDay = (d?: string) => (d ? new Date(d).toLocaleDateString('vi-VN') : '')
+  const ink = { color: '#111827' }
+
+  useEffect(() => {
+    let alive = true
+    supabase.from('proposal_steps').select('*').eq('proposal_id', p.id).order('step_order').then(({ data }: any) => {
+      if (!alive) return
+      setSteps((data ?? []).map((s: any) => ({ id: s.id, approverId: s.approver_id, order: s.step_order, status: s.status, decidedAt: s.decided_at ?? undefined, note: s.note ?? undefined })))
+    })
+    return () => { alive = false }
+  }, [p])
+
+  const isReview = p.status === 'rejected' && !!p.rejectedReason?.startsWith('[REVIEW]')
+  const SIGN: Record<string, [string, string]> = {
+    approved: ['✓ Đã duyệt', '#059669'], pending: ['Chờ duyệt', '#b45309'], waiting: ['Chưa đến lượt', '#6b7280'],
+    rejected: ['✕ Từ chối', '#dc2626'], revision: ['🔁 Yêu cầu xem xét lại', '#b45309'], skipped: ['Không cần duyệt', '#6b7280'],
+  }
+
+  const rows: HdRow[] = [
+    { vi: 'Người Xúc Tiến Hợp Đồng', en: 'Proponent', name: nameOf(p.submittedBy), tick: 'approve', opinion: '', sign: '✓ Đã gửi', signColor: '#059669', date: fmtDay(p.createdAt), mine: false },
+    ...HD_ROLES.map(([vi, en], i) => {
+      const s = steps.find(x => x.order === i + 1)
+      if (!s) return { vi, en, name: '', tick: '' as const, opinion: '', sign: '', signColor: '#6b7280', date: '', mine: false }
+      const [signText, signColor] = SIGN[s.status] ?? [s.status, '#6b7280']
+      const tick: HdRow['tick'] = s.status === 'approved' ? (s.note ? 'remarks' : 'approve') : s.status === 'rejected' ? 'disagree' : ''
+      const opinion = s.status === 'revision' ? `🔁 Yêu cầu xem xét lại${s.note ? `: ${s.note}` : ''}` : (s.note ?? '')
+      return {
+        vi, en, name: nameOf(s.approverId), tick, opinion, sign: signText, signColor,
+        date: fmtDay(s.decidedAt), mine: canAct && s.approverId === currentUserId && s.status === 'pending',
+      }
+    }),
+  ]
+
+  const act = async (fn: (note: string) => Promise<void>, needNote = false) => {
+    if (needNote && !myNote.trim()) { setWarn('Hãy ghi ý kiến của bạn vào ô "Ý kiến cụ thể" ở dòng của bạn.'); return }
+    setWarn(''); setBusy(true)
+    try { await fn(myNote.trim()) } finally { setBusy(false) }
+    onClose()
+  }
+
+  return (
+    <div className="fixed right-0 left-0 md:left-[var(--sidebar-w)] top-16 bottom-14 md:bottom-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
+      <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
+        <span className="text-sm font-bold text-gray-800">📑 Phiếu phê duyệt hợp đồng {p.code ?? ''}</span>
+        <div className="flex items-center gap-2"><WordBtn /><button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button></div>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {isReview && (
+          <div className="max-w-[860px] mx-auto mt-4 rounded-lg px-4 py-3 text-sm" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d' }}>
+            🔁 <b>Người duyệt yêu cầu xem xét lại:</b> {(p.rejectedReason ?? '').replace('[REVIEW]', '').trim()}
+          </div>
+        )}
+        <div className="max-w-[860px] mx-auto my-4 bg-white shadow-xl p-6 sm:p-10 text-[13px] leading-relaxed" style={{ ...ink, fontFamily: '"Times New Roman", Times, serif' }}>
+          <HopDongHeader code={p.code} />
+          <HopDongInfo f={f} set={() => {}} ro />
+
+          <div className="mt-4">
+            <p className="font-bold text-xs mb-1">Hợp đồng đính kèm:</p>
+            <div className="flex flex-col gap-1 items-start">
+              {(p.attachments ?? []).map(a => (
+                <button key={a.path} type="button" onClick={() => openProposalFile(a.path)} className="text-xs underline text-blue-600">📎 {a.name}</button>
+              ))}
+              {p.driveUrl && <a href={p.driveUrl} target="_blank" rel="noopener noreferrer" className="text-xs underline text-blue-600">📁 Xem hợp đồng trên Drive</a>}
+              {(p.attachments ?? []).length === 0 && !p.driveUrl && <span className="text-xs text-gray-500">—</span>}
+            </div>
+            <p className="font-bold text-xs mt-3 mb-1">Tờ trình đính kèm:</p>
+            <p className="text-xs">
+              {Array.isArray(f.relatedCodes) && f.relatedCodes.length > 0
+                ? f.relatedCodes.map((c: string, i: number) => <span key={c}>{i > 0 && ', '}<ProposalCodeLink code={c} /></span>)
+                : '—'}
+            </p>
+          </div>
+
+          <HopDongOpinions rows={rows} myNote={myNote} setMyNote={setMyNote} />
+
+          {p.status === 'rejected' && p.rejectedReason && !isReview && (
+            <p className="mt-6 text-xs text-red-600">Lý do từ chối: {p.rejectedReason}</p>
+          )}
+        </div>
+      </div>
+
+      <div className="shrink-0 px-4 py-3 flex items-center justify-end gap-3" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
+        {warn && <span className="text-xs text-red-600 mr-auto">{warn}</span>}
+        <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600">Đóng</button>
+        {canAct && (
+          <>
+            <button type="button" disabled={busy} onClick={() => act(async n => { await onReject(n) })}
+              className="px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-40" style={{ background: '#fee2e2', color: '#dc2626' }}>Từ chối</button>
+            <button type="button" disabled={busy} onClick={() => act(onRequestReview, true)}
+              className="px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-40" style={{ background: '#fef3c7', color: '#b45309' }}>🔁 Yêu cầu xem xét lại</button>
+            <button type="button" disabled={busy} onClick={() => act(onApprove)}
+              className="px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40" style={{ background: '#059669' }}>✓ Duyệt</button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+
+
 function ProposalGroupPicker({ onPick, onBack, onClose }: { onPick: (g: string) => void; onBack: () => void; onClose: () => void }) {
   const opts: [string, string, string][] = [
     ['Mua sắm', '🛒', 'Đề xuất mua sắm thiết bị, vật tư, dịch vụ'],
@@ -12568,12 +13024,12 @@ function ProposalListTable({ proposals, users, currentUser, isMyTurn, onOpen }: 
   )
 }
 
-function ProposalsView({ currentUser, users, proposals, proposalApprovals, proposalRevisions, onJoinDiscussion, highlightProposalId, clearHighlightProposalId, openProposalId, clearOpenProposalId }: {
+function ProposalsView({ currentUser, users, proposals, proposalApprovals, proposalRevisions, onJoinDiscussion, highlightProposalId, clearHighlightProposalId, openProposalId, clearOpenProposalId, contractsMode = false }: {
   currentUser: User; users: User[]; proposals: Proposal[]; proposalApprovals: ProposalApproval[]
   proposalRevisions: ProposalRevision[]
   onJoinDiscussion: (p: Proposal) => void
   highlightProposalId?: string | null; clearHighlightProposalId?: () => void
-  openProposalId?: string | null; clearOpenProposalId?: () => void
+  openProposalId?: string | null; clearOpenProposalId?: () => void; contractsMode?: boolean
 }) {
     // Vừa tạo xong tờ trình / đề xuất: mở thẳng trang chi tiết của nó
   const [openNewId, setOpenNewId] = useState<string | null>(null)
@@ -12681,9 +13137,11 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
     return () => clearTimeout(t)
   }, [highlightProposalId])
 
-  const receivedAll = proposals.filter(p => isMyTurn(p))
-  const sentAll = proposals.filter(p => p.submittedBy === currentUser.id)
+  const inMode = (p: Proposal) => (p.formData?.tpl === 'hopdong') === contractsMode
+  const receivedAll = proposals.filter(p => inMode(p) && isMyTurn(p))
+  const sentAll = proposals.filter(p => inMode(p) && p.submittedBy === currentUser.id)
     const processedAll = proposals.filter(p =>
+    inMode(p) &&
     !isMyTurn(p) &&
     p.submittedBy !== currentUser.id &&
     proposalApprovals.some(a => a.proposalId === p.id && a.approverId === currentUser.id)
@@ -12876,7 +13334,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   
   const tabList = (list: Proposal[]) =>
     list
-      .filter(p => (listTab === 'totrinh' ? p.kind === 'totrinh' : p.kind !== 'totrinh'))
+      .filter(p => contractsMode || (listTab === 'totrinh' ? p.kind === 'totrinh' : p.kind !== 'totrinh'))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const received = tabList(receivedAll)
   const sent = tabList(sentAll)
@@ -13047,18 +13505,18 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
       <div className="p-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>📜 Tờ trình & Đề xuất</h2>
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{countTotrinh} tờ trình · {countDexuat} đề xuất</p>
+          <h2 className="text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>{contractsMode ? '📑 Phê duyệt hợp đồng' : '📜 Tờ trình & Đề xuất'}</h2>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{contractsMode ? `${countDexuat} phiếu hợp đồng` : `${countTotrinh} tờ trình · ${countDexuat} đề xuất`}</p>
         </div>
-        <button onClick={() => setShowModal(true)}
+        <button onClick={() => { if (contractsMode) { setCreateKind('dexuat'); setCreateGroup('Hợp đồng') } setShowModal(true) }}
           className="px-4 py-2.5 rounded-xl font-bold text-white text-sm"
           style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', boxShadow: '0 0 20px #7c3aed40' }}>
-          + Tạo mới
+            {contractsMode ? '+ Tạo phiếu hợp đồng' : '+ Tạo mới'}
         </button>
       </div>
 
             <div className="flex gap-2 mb-5">
-        {([['totrinh', '📜 Tờ trình', countTotrinh, needTotrinh], ['dexuat', '📝 Đề xuất', countDexuat, needDexuat]] as const).map(([key, label, count, need]) => (
+        {!contractsMode && ([['totrinh', '📜 Tờ trình', countTotrinh, needTotrinh], ['dexuat', '📝 Đề xuất', countDexuat, needDexuat]] as const).map(([key, label, count, need]) => (
           <button key={key} type="button" onClick={() => setListTab(key)}
             className="px-4 py-2 rounded-xl text-sm font-bold"
             style={{
@@ -13081,14 +13539,14 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
       </div>
       {viewMode === 'tracker' ? (
         <ProposalTracker
-          proposals={currentUser.isDirector ? proposals : relevant}
-          users={users} approvals={proposalApprovals} kindTab={listTab}
+          proposals={currentUser.isDirector ? proposals.filter(inMode) : relevant}
+          users={users} approvals={proposalApprovals} kindTab={contractsMode ? 'dexuat' : listTab}
           isMyTurn={isMyTurn} onOpenDetail={setDetailProposal} onOpenDoc={setDocProposal} />
       ) : (<>
       <div className="relative mb-3">
         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm" style={{ color: 'var(--text-muted)' }}>🔍</span>
         <input value={search} onChange={e => setSearch(e.target.value)}
-          placeholder={`Tìm ${listTab === 'totrinh' ? 'tờ trình' : 'đề xuất'} theo mã, tên hoặc mô tả...`}
+          placeholder={contractsMode ? 'Tìm phiếu hợp đồng theo mã, đối tác hoặc mô tả...' : `Tìm ${listTab === 'totrinh' ? 'tờ trình' : 'đề xuất'} theo mã, tên hoặc mô tả...`}
           className="w-full pl-9 pr-9 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
           style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
         {search && (
@@ -13122,8 +13580,12 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
           <ProposalFormDocForm tpl={FORM_TPL_BY_GROUP[createGroup]} currentUser={currentUser} users={users} onCreated={setOpenNewId}
           onClose={() => { setShowModal(false); setCreateKind(null); setCreateGroup(null) }} />
       )}
-      {showModal && createKind === 'dexuat' && createGroup && createGroup !== 'Đề nghị thanh toán' && !FORM_TPL_BY_GROUP[createGroup] && (
+      {showModal && createKind === 'dexuat' && createGroup && createGroup !== 'Đề nghị thanh toán' && createGroup !== 'Hợp đồng' && !FORM_TPL_BY_GROUP[createGroup] && (
           <ProposalModal kind="dexuat" initialGroup={createGroup === 'Khác' ? '' : createGroup} currentUser={currentUser} users={users} onCreated={setOpenNewId}
+          onClose={() => { setShowModal(false); setCreateKind(null); setCreateGroup(null) }} />
+      )}
+      {showModal && createKind === 'dexuat' && createGroup === 'Hợp đồng' && (
+          <ProposalHopDongForm currentUser={currentUser} users={users} proposals={proposals} onCreated={setOpenNewId}
           onClose={() => { setShowModal(false); setCreateKind(null); setCreateGroup(null) }} />
       )}
       {showModal && createKind === 'dexuat' && createGroup === 'Đề nghị thanh toán' && (
@@ -13174,7 +13636,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
           onReject: async (note: string) => { await handleReject(cur, note) },
           onRequestReview: async (note: string) => { await handleRequestReview(cur, note) },
         }
-        return cur.kind === 'dntt' ? <ProposalDnttView {...common} /> : isFormDoc(cur) ? <ProposalFormDocView {...common} /> : <ProposalDocView {...common} onEdit={cur.kind === 'totrinh' ? () => { setDocProposal(null); setEditingDoc(cur) } : undefined} />
+        return cur.kind === 'dntt' ? <ProposalDnttView {...common} /> : isFormDoc(cur) ? (cur.formData?.tpl === 'hopdong' ? <ProposalHopDongView {...common} /> : <ProposalFormDocView {...common} />) : <ProposalDocView {...common} onEdit={cur.kind === 'totrinh' ? () => { setDocProposal(null); setEditingDoc(cur) } : undefined} />
       })()}
       {editingDoc && (
         <ProposalDocForm currentUser={currentUser} users={users} editing={editingDoc} onClose={() => { const id = editingDoc.id; setEditingDoc(null); setOpenNewId(id) }} />
@@ -15982,6 +16444,7 @@ const NAV = [
   { id: 'projects', label: 'Dự án', icon: '🗂️' },
   { id: 'directory', label: 'Danh bạ', icon: '📇' },
   { id: 'proposals', label: 'Tờ trình', icon: '📜' },
+  { id: 'contracts', label: 'Phê duyệt hợp đồng', icon: '📑' },
   { id: 'leaderboard', label: 'Xếp hạng', icon: '🏆' },
   { id: 'rewards', label: 'Quà', icon: '🎁' },
   { id: 'social', label: 'Social', icon: '💬' },
@@ -15990,7 +16453,7 @@ const NAV = [
 
 const NAV_GROUPS: { title: string; ids: string[] }[] = [
   { title: 'Tổng quan', ids: ['dashboard'] },
-  { title: 'Công việc', ids: ['tasks', 'projects', 'proposals', 'directory'] },
+  { title: 'Công việc', ids: ['tasks', 'projects', 'proposals', 'contracts', 'directory'] },
   { title: 'Cộng đồng', ids: ['leaderboard', 'rewards', 'social'] },
   { title: 'Hệ thống', ids: ['bodlog', 'useradmin', 'profile'] },
 ]
@@ -16190,6 +16653,9 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
       }
     }
     if (n.linkProposalId) {
+      if (proposals.find(x => x.id === n.linkProposalId)?.formData?.tpl === 'hopdong') {
+        setView('contracts'); setOpenProposalId(n.linkProposalId); return
+      }
       setView('proposals')
       setHighlightProposalId(n.linkProposalId)
       return
@@ -16265,6 +16731,9 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
           proposals={proposals} />
       )
       case 'profile': return <ProfileView currentUser={currentUser} setCurrentUser={setCurrentUser} tasks={tasks} />
+      case 'contracts': return <ProposalsView contractsMode currentUser={currentUser} users={users} proposals={proposals} proposalApprovals={proposalApprovals} proposalRevisions={proposalRevisions} onJoinDiscussion={handleJoinProposal}
+          highlightProposalId={highlightProposalId} clearHighlightProposalId={() => setHighlightProposalId(null)}
+          openProposalId={openProposalId} clearOpenProposalId={() => setOpenProposalId(null)} />
       case 'proposals': return <ProposalsView currentUser={currentUser} users={users} proposals={proposals} proposalApprovals={proposalApprovals} proposalRevisions={proposalRevisions} onJoinDiscussion={handleJoinProposal}
           highlightProposalId={highlightProposalId} clearHighlightProposalId={() => setHighlightProposalId(null)}
           openProposalId={openProposalId} clearOpenProposalId={() => setOpenProposalId(null)} />
