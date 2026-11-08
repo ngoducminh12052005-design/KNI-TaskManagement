@@ -13974,7 +13974,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
               ? () => { setDetailProposal(null); if (cur.formData?.tpl === 'hopdong') setEditingContract(cur); else if (cur.kind === 'totrinh') setEditingDoc(cur); else setEditingProposal(cur) }
               : undefined}
             onOpenDoc={(cur.kind === 'totrinh' || cur.kind === 'dntt' || isFormDoc(cur))
-              ? () => { setDetailProposal(null); setDocProposal(cur) }
+              ? () => { if (cur.formData?.tpl === 'hopdong') setBackTo({ p: cur, mode: 'detail' }); setDetailProposal(null); setDocProposal(cur) }
               : undefined}
             canAct={isMyTurn(cur) && cur.status === 'pending'}
                         onApprove={async (note?: string) => {
