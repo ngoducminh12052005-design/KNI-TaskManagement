@@ -2369,14 +2369,6 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
               <input type="checkbox" checked={form.isTeamProject} onChange={e => patchForm({ isTeamProject: e.target.checked })} />
               <span>👥 Đây là dự án nhóm (Teamwork) — PM luôn nhận EXP dù chỉ giao cho 1 người.</span>
             </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={form.driveFolderCreated} onChange={e => patchForm({ driveFolderCreated: e.target.checked })} />
-              <span>📁 Tôi đã tạo sẵn folder Drive cho task này</span>
-            </label>
-            {form.driveFolderCreated && (
-              <input value={form.driveFolderName} onChange={e => patchForm({ driveFolderName: e.target.value })}
-                placeholder="Tên folder (VD: Nộp task - Nguyễn Văn A)" className={`${line} text-xs`} style={ink} />
-            )}
           </div>
         )}
         {!assigning && <div className="mb-4" />}
@@ -4248,8 +4240,8 @@ function CollaborationRequestModal({ currentUser, users, onClose }: {
   const [targetTeamId, setTargetTeamId] = useState('')
   const [targetManagerId, setTargetManagerId] = useState('')
   const [expReward, setExpReward] = useState(80)
-  const [driveFolderCreated, setDriveFolderCreated] = useState(false)
-  const [driveFolderName, setDriveFolderName] = useState('')
+  const [driveFolderCreated] = useState(false)
+  const [driveFolderName] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -4332,25 +4324,6 @@ function CollaborationRequestModal({ currentUser, users, onClose }: {
             <input type="number" value={expReward} onChange={e => setExpReward(parseInt(e.target.value) || 0)}
               className="w-full px-3 py-2.5 rounded-lg text-amber-500 text-sm outline-none font-bold"
               style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }} />
-          </div>
-
-          <div className="p-3 rounded-lg" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
-            <label className="flex items-center gap-2.5 mb-2 cursor-pointer select-none">
-              <input type="checkbox" checked={driveFolderCreated}
-                onChange={e => setDriveFolderCreated(e.target.checked)}
-                className="w-4 h-4 rounded accent-violet-500" />
-              <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>📁 Tôi đã tạo sẵn folder Drive cho công việc này</span>
-            </label>
-            {driveFolderCreated ? (
-              <input value={driveFolderName} onChange={e => setDriveFolderName(e.target.value)}
-                placeholder="Tên folder (VD: Phối hợp - Chiến dịch Q4)"
-                className="w-full px-3 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
-                style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
-            ) : (
-              <p className="text-[10px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-                💡 Nếu không tick, nhân viên được phân công sẽ tự tạo folder trong Drive của bạn và tự đặt tên khi nộp.
-              </p>
-            )}
           </div>
 
           <div>
