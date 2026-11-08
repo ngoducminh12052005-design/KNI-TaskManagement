@@ -10856,6 +10856,7 @@ function ProposalFormDocView({ p, users, currentUserId, onClose, canAct, onAppro
   )
 }
 
+
 // ===== Phiếu phê duyệt hợp đồng (PPDHD 01/2023) =====
 const HD_REMARK_TAG = '[LUUY]'   // đánh dấu ô "Chấp thuận có ý kiến lưu ý" trong ghi chú của bước duyệt
 const HD_ROLES: [string, string][] = [
@@ -11009,18 +11010,22 @@ function HopDongOpinions({ rows, myNote, setMyNote, pick, choice = '', setChoice
 }
 
 // ---------- Form tạo phiếu phê duyệt hợp đồng ----------
-function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated }: {
-  currentUser: User; users: User[]; proposals?: Proposal[]; onClose: () => void; onCreated?: (id: string) => void
+function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated, editing }: {
+  currentUser: User; users: User[]; proposals?: Proposal[]; onClose: () => void; onCreated?: (id: string) => void; editing?: Proposal | null
 }) {
   const now = new Date()
   const dateText = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`
   const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)
 
-  const [f, setF] = useState<Record<string, any>>({ partner: '', company: '', contractNo: '', purpose: '', value: '', note: '' })
+  const efd: Record<string, any> = editing?.formData ?? {}
+  const [f, setF] = useState<Record<string, any>>({
+    partner: efd.partner ?? '', company: efd.company ?? '', contractNo: efd.contractNo ?? '',
+    purpose: efd.purpose ?? '', value: efd.value ?? '', note: efd.note ?? '',
+  })
   const set = (patch: Record<string, any>) => setF(prev => ({ ...prev, ...patch }))
   const [files, setFiles] = useState<File[]>([])
-  const [driveUrl, setDriveUrl] = useState('')
-  const [codes, setCodes] = useState<string[]>([])
+  const [driveUrl, setDriveUrl] = useState(editing?.driveUrl ?? '')
+  const [codes, setCodes] = useState<string[]>(Array.isArray(efd.relatedCodes) ? efd.relatedCodes : [])
   const [codeInput, setCodeInput] = useState('')
   const [codeMsg, setCodeMsg] = useState('')
   const [approvers, setApprovers] = useState<string[]>(() => [myManagers.length === 1 ? myManagers[0].id : '', '', '', ''])
@@ -11028,6 +11033,19 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const ink = { color: '#111827' }
+
+  // Sửa & gửi lại: nạp lại 4 người duyệt của lần trước
+  useEffect(() => {
+    if (!editing) return
+    let alive = true
+    supabase.from('proposal_steps').select('approver_id, status, step_order').eq('proposal_id', editing.id).order('step_order').then(({ data }: any) => {
+      if (!alive) return
+      const ids = (data ?? []).filter((x: any) => x.status !== 'skipped').map((x: any) => x.approver_id as string)
+      setApprovers([0, 1, 2, 3].map(i => ids[i] ?? ''))
+    })
+    setApprovalMode(editing.approvalMode === 'par' ? 'par' : 'seq')
+    return () => { alive = false }
+  }, [editing?.id])
 
   const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? ''
   const recipientId = approvers[0]
@@ -11073,7 +11091,7 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
     if (!String(f.company).trim()) { setError('Vui lòng nhập pháp nhân ký kết hợp đồng.'); return }
     if (!String(f.contractNo).trim()) { setError('Vui lòng nhập số hợp đồng và ngày hợp đồng.'); return }
     if (!String(f.purpose).trim()) { setError('Vui lòng nhập mục đích hợp đồng.'); return }
-    if (files.length === 0 && !driveUrl.trim()) { setError('Bắt buộc đính kèm hợp đồng (chọn file hoặc dán link Drive).'); return }
+    if (files.length === 0 && !driveUrl.trim() && (editing?.attachments ?? []).length === 0) { setError('Bắt buộc đính kèm hợp đồng (chọn file hoặc dán link Drive).'); return }
     if (codeInput.trim()) { setError('Bạn đã gõ mã tờ trình nhưng chưa bấm "＋ Gắn tờ trình".'); return }
     if (codes.length === 0) { setError('Bắt buộc đính kèm tờ trình (gắn mã tờ trình RTASK).'); return }
     const missing = approvers.findIndex(x => !x)
@@ -11092,6 +11110,68 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
       tpl: 'hopdong', dept, dateText, relatedCodes: codes,
       partner: String(f.partner).trim(), company: String(f.company).trim(), contractNo: String(f.contractNo).trim(),
       purpose: String(f.purpose).trim(), value: String(f.value).trim(), note: String(f.note).trim(),
+    }
+
+    if (editing) {
+      // ===== SỬA & GỬI LẠI: duyệt lại từ người đầu tiên, ghi lịch sử sửa gì / bổ sung gì =====
+      const FIELDS: [string, string][] = [
+        ['partner', 'Tên đối tác'], ['company', 'Pháp nhân ký kết hợp đồng'], ['contractNo', 'Số hợp đồng và ngày hợp đồng'],
+        ['purpose', 'Mục đích hợp đồng'], ['value', 'Giá trị hợp đồng'], ['note', 'Thông tin lưu ý khác'],
+      ]
+      const cut = (v: any) => { const t = String(v ?? '').replace(/\s+/g, ' ').trim(); return t ? (t.length > 80 ? t.slice(0, 80) + '…' : t) : '(trống)' }
+      const editedLines: string[] = []
+      const addedLines: string[] = []
+      for (const [k, label] of FIELDS) {
+        if (String(efd[k] ?? '').trim() !== String(f[k] ?? '').trim()) editedLines.push(`• ${label}: ${cut(efd[k])} → ${cut(f[k])}`)
+      }
+      const oldCodes: string[] = Array.isArray(efd.relatedCodes) ? efd.relatedCodes : []
+      const gained = codes.filter(c => !oldCodes.includes(c))
+      const lost = oldCodes.filter(c => !codes.includes(c))
+      if (gained.length) addedLines.push(`• Gắn thêm tờ trình: ${gained.join(', ')}`)
+      if (lost.length) editedLines.push(`• Gỡ tờ trình: ${lost.join(', ')}`)
+      if (uploaded.length) addedLines.push(`• Bổ sung file hợp đồng: ${uploaded.map(x => x.name).join(', ')}`)
+      const oldDrive = (editing.driveUrl ?? '').trim()
+      if (driveUrl.trim() !== oldDrive) (oldDrive ? editedLines : addedLines).push(`• Link Drive hợp đồng: ${driveUrl.trim() || '(bỏ link)'}`)
+
+      const { data: oldSteps } = await supabase.from('proposal_steps').select('approver_id, status, step_order').eq('proposal_id', editing.id).order('step_order')
+      const oldIds = (oldSteps ?? []).filter((x: any) => x.status !== 'skipped').map((x: any) => x.approver_id as string)
+      HD_ROLES.forEach((r, i) => {
+        if ((oldIds[i] ?? '') !== (approvers[i] ?? '')) editedLines.push(`• ${r[0]}: ${nameOf(oldIds[i] ?? '') || '(trống)'} → ${nameOf(approvers[i])}`)
+      })
+      if ((editing.approvalMode === 'par' ? 'par' : 'seq') !== approvalMode) editedLines.push(`• Luồng duyệt: ${approvalMode === 'par' ? 'song song' : 'nối tiếp'}`)
+
+      const round = Math.max(0, ...(editing.attachments ?? []).map(a => a.round ?? 0)) + 1
+      const { error: upErr } = await supabase.from('proposals').update({
+        title, description: brief, brief, drive_url: driveUrl.trim(), department: dept,
+        recipient_id: recipientId, status: 'pending', rejected_reason: null,
+        participants: Array.from(new Set([currentUser.id, ...approverIds])),
+        approval_mode: approvalMode,
+        attachments: [...(editing.attachments ?? []), ...uploaded.map(x => ({ ...x, round }))],
+        form_data: { ...formData, dateText: efd.dateText ?? dateText },
+      }).eq('id', editing.id)
+      if (upErr) { setSaving(false); setError(upErr.message); return }
+
+      // Làm lại các bước duyệt từ người đầu tiên (lịch sử duyệt cũ vẫn giữ trong proposal_approvals)
+      await supabase.from('proposal_steps').delete().eq('proposal_id', editing.id)
+      await supabase.from('proposal_steps').insert(approverIds.map((id, k) => ({
+        proposal_id: editing.id, approver_id: id, step_order: k + 1, status: k === 0 ? 'pending' : 'waiting',
+      })))
+
+      await supabase.from('proposal_revisions').insert({
+        proposal_id: editing.id, edited_by: currentUser.id,
+        added_note: addedLines.join('\n') || null,
+        edited_note: editedLines.join('\n') || (addedLines.length ? null : 'Gửi lại, không thay đổi nội dung'),
+      })
+      if (recipientId !== currentUser.id) {
+        await supabase.from('notifications').insert({
+          message: `📑 ${currentUser.name} đã chỉnh sửa và gửi lại phiếu hợp đồng "${title.slice(0, 80)}" cho bạn`,
+          target_user_id: recipientId, link_proposal_id: editing.id,
+        })
+      }
+      setSaving(false)
+      onCreated?.(editing.id)
+      onClose()
+      return
     }
 
     let data: any = null
@@ -11139,17 +11219,20 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
   return (
     <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
       <div className="shrink-0 flex items-center justify-between px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #d1d5db' }}>
-        <span className="text-sm font-bold text-gray-800">📑 Tạo phiếu phê duyệt hợp đồng (RTASK)</span>
+        <span className="text-sm font-bold text-gray-800">{editing ? `✏️ Chỉnh sửa & gửi lại phiếu hợp đồng ${editing.code ?? ''}` : '📑 Tạo phiếu phê duyệt hợp đồng (RTASK)'}</span>
         <button type="button" onClick={onClose} className="text-gray-500 text-lg px-2">✕</button>
       </div>
 
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-[860px] mx-auto my-4 bg-white shadow-xl p-6 sm:p-10 text-[13px] leading-relaxed" style={{ ...ink, fontFamily: '"Times New Roman", Times, serif' }}>
-          <HopDongHeader />
+          <HopDongHeader code={editing?.code} />
           <HopDongInfo f={f} set={set} ro={false} />
 
           <div className="mt-4 rounded p-3" style={{ background: '#fffbeb', border: '1px solid #fcd34d' }}>
             <p className="font-bold text-xs mb-1">📎 1. Hợp đồng đính kèm <span className="text-red-600">(bắt buộc)</span></p>
+            {editing && (editing.attachments ?? []).length > 0 && (
+              <p className="text-[11px] mb-1 text-gray-600">Đã đính kèm trước đó (giữ nguyên): {(editing.attachments ?? []).map(a => a.name).join(', ')}. Chọn thêm file bên dưới nếu cần bổ sung.</p>
+            )}
             <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={pickFiles} className="text-xs" />
             {files.length > 0 && (
               <ul className="mt-1 space-y-0.5">
@@ -11209,7 +11292,7 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
         <button type="button" onClick={submit} disabled={saving}
           className="px-5 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40"
           style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)' }}>
-          {saving ? 'Đang gửi...' : 'Gửi phê duyệt'}
+          {saving ? 'Đang gửi...' : editing ? 'Gửi lại để duyệt' : 'Gửi phê duyệt'}
         </button>
       </div>
     </div>
@@ -11508,7 +11591,6 @@ function HopDongDetailLeft({ p, users, currentUser, flow, canAct, onApprove, onR
     </>
   )
 }
-
 
 
 
@@ -12286,7 +12368,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
   const card = { background: 'var(--bg-panel)', border: '1px solid var(--border)' }
   const canEdit = currentUser.id === p.submittedBy || flow.some(s => s.approverId === currentUser.id) || !!currentUser.isDirector
 
-    if (p.formData?.tpl === 'hopdong') {
+      if (p.formData?.tpl === 'hopdong') {
     return (
       <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 md:left-[var(--sidebar-w)] z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
         <div className="max-w-6xl mx-auto">
@@ -12298,10 +12380,15 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
             <Avatar id={p.submittedBy} />
             <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{userOf(p.submittedBy)?.name}</span>
             <span className="text-xs" style={{ color: 'var(--text-muted)' }}>lúc {fmt(p.createdAt)}</span>
-            {onOpenDoc && (
-              <button type="button" onClick={onOpenDoc} className="ml-auto text-xs font-bold px-3 py-1.5 rounded-lg"
-                style={{ background: '#05966922', color: '#059669', border: '1px solid #05966955' }}>📄 Xem phiếu (bản in)</button>
-            )}
+            <div className="ml-auto flex flex-wrap gap-2">
+              {onEdit && (
+                <button type="button" onClick={onEdit} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: '#d97706' }}>✏️ Chỉnh sửa & gửi lại</button>
+              )}
+              {onOpenDoc && (
+                <button type="button" onClick={onOpenDoc} className="text-xs font-bold px-3 py-1.5 rounded-lg"
+                  style={{ background: '#05966922', color: '#059669', border: '1px solid #05966955' }}>📄 Xem phiếu (bản in)</button>
+              )}
+            </div>
           </div>
           {p.status === 'rejected' && p.rejectedReason && (
             <p className="text-xs mb-3 px-3 py-2 rounded-lg" style={p.rejectedReason.startsWith('[REVIEW]') ? { background: '#fef3c7', color: '#92400e' } : { background: '#fee2e2', color: '#b91c1c' }}>
@@ -12353,8 +12440,6 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
       </div>
     )
   }
-
-
 
   return (
     <div className="fixed inset-x-0 top-16 bottom-14 md:bottom-0 md:left-[var(--sidebar-w)] z-50 overflow-y-auto p-4" style={{ background: 'var(--bg-app)' }}>
@@ -13316,8 +13401,18 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   const [forwardingProposal, setForwardingProposal] = useState<Proposal | null>(null)
   const [editingProposal, setEditingProposal] = useState<Proposal | null>(null)
   const [editingDoc, setEditingDoc] = useState<Proposal | null>(null)
+  const [editingContract, setEditingContract] = useState<Proposal | null>(null)
   const [detailProposal, setDetailProposal] = useState<Proposal | null>(null)
   const [docProposal, setDocProposal] = useState<Proposal | null>(null)
+  // Mở một tờ trình từ link RTASK trong trang khác: nhớ trang đang xem để đóng xong thì quay lại đúng trang đó
+  const [backTo, setBackTo] = useState<{ p: Proposal; mode: 'detail' | 'doc' } | null>(null)
+  const goBack = () => {
+    if (!backTo) return
+    const b = backTo
+    setBackTo(null)
+    if (b.mode === 'doc') { setDetailProposal(null); setDocProposal(b.p) } else { setDocProposal(null); setDetailProposal(b.p) }
+  }
+  useEffect(() => { if (!detailProposal && !docProposal) setBackTo(null) }, [detailProposal, docProposal])
   const [createKind, setCreateKind] = useState<'dexuat' | 'totrinh' | null>(null)
   const [createGroup, setCreateGroup] = useState<string | null>(null)
   const [listTab, setListTab] = useState<'totrinh' | 'dexuat'>('totrinh')
@@ -13376,6 +13471,8 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   const code = raw.trim().toUpperCase()
   const target = proposals.find(x => (x.code ?? '').toUpperCase() === code)
   if (!target) { alert(`Không tìm thấy tờ trình ${code}, hoặc bạn không có quyền xem.`); return }
+  if (detailProposal && detailProposal.id !== target.id) setBackTo({ p: detailProposal, mode: 'detail' })
+  else if (docProposal && docProposal.id !== target.id) setBackTo({ p: docProposal, mode: 'doc' })
   if (target.kind === 'totrinh' || target.kind === 'dntt' || isFormDoc(target)) { setDetailProposal(null); setDocProposal(target) }
   else { setDocProposal(null); setDetailProposal(target) }
   }
@@ -13874,7 +13971,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
             proposal={cur}
             users={users} currentUser={currentUser} approvals={proposalApprovals} revisions={proposalRevisions}
             onEdit={(cur.submittedBy === currentUser.id && cur.status === 'rejected')
-              ? () => { setDetailProposal(null); if (cur.kind === 'totrinh') setEditingDoc(cur); else setEditingProposal(cur) }
+              ? () => { setDetailProposal(null); if (cur.formData?.tpl === 'hopdong') setEditingContract(cur); else if (cur.kind === 'totrinh') setEditingDoc(cur); else setEditingProposal(cur) }
               : undefined}
             onOpenDoc={(cur.kind === 'totrinh' || cur.kind === 'dntt' || isFormDoc(cur))
               ? () => { setDetailProposal(null); setDocProposal(cur) }
@@ -13898,13 +13995,13 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
               if (!note2.trim()) { alert('Vui lòng ghi nội dung cần xem xét lại.'); return }
               await declineProposal(cur, 'revision', note2.trim())
             }}
-            onClose={() => setDetailProposal(null)} />
+            onClose={() => { setDetailProposal(null); goBack() }} />
         )
       })()}
       {docProposal && (() => {
         const cur = proposals.find(x => x.id === docProposal.id) ?? docProposal
         const common = {
-          p: cur, users, currentUserId: currentUser.id, onClose: () => setDocProposal(null),
+          p: cur, users, currentUserId: currentUser.id, onClose: () => { setDocProposal(null); goBack() },
           canAct: isMyTurn(cur) && cur.status === 'pending',
           onApprove: async (note: string) => { await handleApprove(cur, note) },
           onReject: async (note: string) => { await handleReject(cur, note) },
@@ -13914,6 +14011,10 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
       })()}
       {editingDoc && (
         <ProposalDocForm currentUser={currentUser} users={users} editing={editingDoc} onClose={() => { const id = editingDoc.id; setEditingDoc(null); setOpenNewId(id) }} />
+      )}
+      {editingContract && (
+        <ProposalHopDongForm currentUser={currentUser} users={users} proposals={proposals} editing={editingContract}
+          onCreated={setOpenNewId} onClose={() => setEditingContract(null)} />
       )}
       {editingProposal && (
         <ProposalModal currentUser={currentUser} users={users} editingProposal={editingProposal} onClose={() => { const id = editingProposal.id; setEditingProposal(null); setOpenNewId(id) }} />
