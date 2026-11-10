@@ -9212,7 +9212,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
   const pickFiles = (e: { target: HTMLInputElement }) => {
     const picked = Array.from(e.target.files ?? [])
     const tooBig = picked.find(f => f.size > MAX_FILE_MB * 1024 * 1024)
-    if (tooBig) { setError(`File "${tooBig.name}" lớn hơn ${MAX_FILE_MB}MB. Hãy dùng link Drive cho file lớn.`); e.target.value = ''; return }
+    if (tooBig) { setError(`File "${tooBig.name}" lớn hơn ${MAX_FILE_MB}MB. Hãy nén hoặc chia nhỏ file rồi chọn lại.`); e.target.value = ''; return }
     if (files.length + picked.length > MAX_FILES) { setError(`Tối đa ${MAX_FILES} file.`); e.target.value = ''; return }
     setError('')
     setFiles(prev => [...prev, ...picked])
@@ -9818,7 +9818,7 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated }: { currentU
   const pickFiles = (e: { target: HTMLInputElement }) => {
     const picked = Array.from(e.target.files ?? [])
     const tooBig = picked.find(f => f.size > MAX_FILE_MB * 1024 * 1024)
-    if (tooBig) { setError(`File "${tooBig.name}" lớn hơn ${MAX_FILE_MB}MB. Hãy dùng link Drive cho file lớn.`); e.target.value = ''; return }
+    if (tooBig) { setError(`File "${tooBig.name}" lớn hơn ${MAX_FILE_MB}MB. Hãy nén hoặc chia nhỏ file rồi chọn lại.`); e.target.value = ''; return }
     if (files.length + picked.length > MAX_FILES) { setError(`Tối đa ${MAX_FILES} file.`); e.target.value = ''; return }
     setError('')
     setFiles(prev => [...prev, ...picked])
@@ -10476,7 +10476,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
   const pickFiles = (e: { target: HTMLInputElement }) => {
     const picked = Array.from(e.target.files ?? [])
     const tooBig = picked.find(x => x.size > MAX_FILE_MB * 1024 * 1024)
-    if (tooBig) { setError(`File "${tooBig.name}" lớn hơn ${MAX_FILE_MB}MB. Hãy dùng link Drive cho file lớn.`); e.target.value = ''; return }
+    if (tooBig) { setError(`File "${tooBig.name}" lớn hơn ${MAX_FILE_MB}MB. Hãy nén hoặc chia nhỏ file rồi chọn lại.`); e.target.value = ''; return }
     if (files.length + picked.length > MAX_FILES) { setError(`Tối đa ${MAX_FILES} file.`); e.target.value = ''; return }
     setError('')
     setFiles(prev => [...prev, ...picked])
@@ -10611,8 +10611,6 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
                 ))}
               </ul>
             )}
-            <input value={driveUrl} onChange={e => setDriveUrl(e.target.value)} placeholder="Hoặc dán link Google Drive (file lớn)"
-              className="w-full bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500 py-0.5 mt-2 text-xs" style={ink} />
           </div>
 
           <p className="mt-8 mb-1 font-bold text-center">XÁC NHẬN & PHÊ DUYỆT</p>
@@ -11037,7 +11035,7 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
   const pickFiles = (e: { target: HTMLInputElement }) => {
     const picked = Array.from(e.target.files ?? [])
     const tooBig = picked.find(x => x.size > MAX_FILE_MB * 1024 * 1024)
-    if (tooBig) { setError(`File "${tooBig.name}" lớn hơn ${MAX_FILE_MB}MB. Hãy dùng link Drive cho file lớn.`); e.target.value = ''; return }
+    if (tooBig) { setError(`File "${tooBig.name}" lớn hơn ${MAX_FILE_MB}MB. Hãy nén hoặc chia nhỏ file rồi chọn lại.`); e.target.value = ''; return }
     if (files.length + picked.length > MAX_FILES) { setError(`Tối đa ${MAX_FILES} file.`); e.target.value = ''; return }
     setError('')
     setFiles(prev => [...prev, ...picked])
@@ -11062,7 +11060,7 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
     if (!String(f.company).trim()) { setError('Vui lòng nhập pháp nhân ký kết hợp đồng.'); return }
     if (!String(f.contractNo).trim()) { setError('Vui lòng nhập số hợp đồng và ngày hợp đồng.'); return }
     if (!String(f.purpose).trim()) { setError('Vui lòng nhập mục đích hợp đồng.'); return }
-    if (files.length === 0 && !driveUrl.trim() && (editing?.attachments ?? []).length === 0) { setError('Bắt buộc đính kèm hợp đồng (chọn file hoặc dán link Drive).'); return }
+    if (files.length === 0 && !driveUrl.trim() && (editing?.attachments ?? []).length === 0) { setError('Bắt buộc đính kèm hợp đồng (chọn file).'); return }
     if (codeInput.trim()) { setError('Bạn đã gõ mã tờ trình nhưng chưa bấm "＋ Gắn tờ trình".'); return }
     if (codes.length === 0) { setError('Bắt buộc đính kèm tờ trình (gắn mã tờ trình RTASK).'); return }
     const missing = approvers.findIndex(x => !x)
@@ -12807,7 +12805,7 @@ function ProposalModal({ currentUser, users, editingProposal, onClose, onCreated
                 onChange={e => {
                   const picked = Array.from(e.target.files ?? [])
                   const tooBig = picked.find(f => f.size > MAX_FILE_MB * 1024 * 1024)
-                  if (tooBig) { setError(`File "${tooBig.name}" lớn hơn ${MAX_FILE_MB}MB. Hãy dùng link Drive cho file lớn.`); e.target.value = ''; return }
+                  if (tooBig) { setError(`File "${tooBig.name}" lớn hơn ${MAX_FILE_MB}MB. Hãy nén hoặc chia nhỏ file rồi chọn lại.`); e.target.value = ''; return }
                   if (files.length + picked.length > MAX_FILES) { setError(`Tối đa ${MAX_FILES} file.`); e.target.value = ''; return }
                   setError('')
                   setFiles(prev => [...prev, ...picked])
