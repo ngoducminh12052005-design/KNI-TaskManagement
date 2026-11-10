@@ -9449,8 +9449,6 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
             ))}
           </ul>
         )}
-        <input value={driveUrl} onChange={e => setDriveUrl(e.target.value)} placeholder="Hoặc dán link Google Drive (file lớn)" className={`${line} mt-2 text-xs`} style={ink} />
-
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-8 text-center">
           <div>
             <p className="font-bold">Người lập tờ trình</p>
