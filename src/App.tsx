@@ -2511,10 +2511,6 @@ const hoursMs = (SLA_LEVELS as any)[form.slaLevel].hours * 3600000
         <textarea value={doc.thongTinKhac} onChange={e => setDoc({ thongTinKhac: e.target.value })} rows={3}
           placeholder="Nhà cung cấp, chi phí, điều khoản thanh toán, thời gian giao hàng, ghi chú bổ sung ..." className={`${line} resize-none mb-4`} style={ink} />
 
-        <p className="font-bold mb-1">YÊU CẦU THỰC HIỆN</p>
-        <textarea value={doc.yeuCau} onChange={e => setDoc({ yeuCau: e.target.value })} rows={4}
-          placeholder={'1. Cập nhật Work Note khi có tiến độ mới.\n2. Báo quản lý khi phát sinh vướng mắc.\nKính đề nghị các bên phối hợp thực hiện./.'} className={`${line} resize-none mb-4`} style={ink} />
-
         <div className="grid grid-cols-3 gap-4 mt-8 text-center">
           <div>
             <p className="font-bold">Người giao task</p><p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
