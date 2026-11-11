@@ -834,74 +834,95 @@ const SLA_LEVELS: Record<string, { label: string; hours: number; color: string }
   P5: { label: 'P5 · 1 tuần', hours: 168, color: '#64748b' },
 }
 
-// ===== SLA dừng chạy vào ngày nghỉ (Chủ nhật luôn nghỉ; Thứ 7 thì tuỳ công ty) và ngày lễ =====
-// Thêm ngày nghỉ lễ chung của công ty vào đây, định dạng 'YYYY-MM-DD' (giờ Việt Nam).
+// ===== SLA chỉ tính trong giờ hành chính 8:00–17:00 (Thứ 2 → Thứ 6) =====
+// Genki (Genki House/Genki Farm) có thêm sáng Thứ 7 (8:00–12:00); các công ty còn lại nghỉ Thứ 7 + Chủ nhật hoàn toàn.
+// Thêm ngày nghỉ lễ chung của công ty vào đây, định dạng 'YYYY-MM-DD' (giờ Việt Nam) — ngày lễ thì cả tuần vẫn nghỉ như Chủ nhật.
 const SLA_HOLIDAYS = new Set<string>([
   // '2026-01-01', '2026-04-30', '2026-05-01', '2026-09-02',
 ])
-// Công ty nào vẫn làm việc Thứ 7 (SLA tính cả Thứ 7) — các công ty còn lại (KNI, First Steps, ACVN, Les Sens Phú Quốc...) nghỉ Thứ 7 + Chủ nhật.
-// Nếu công ty nào khác cũng làm Thứ 7, thêm từ khoá (không dấu, chữ thường) vào đây.
+// Công ty nào có thêm sáng Thứ 7 (8:00–12:00) — các công ty còn lại nghỉ hẳn Thứ 7. Thêm từ khoá (không dấu, chữ thường) nếu có công ty khác cũng làm Thứ 7.
 const SLA_SAT_WORKING_KEYWORDS = ['genki']
 const worksOnSaturday = (company?: string) => SLA_SAT_WORKING_KEYWORDS.some(k => (company ?? '').toLowerCase().includes(k))
 const VN_OFFSET_MS = 7 * 3600000
 const vnDateKey = (ms: number) => new Date(ms + VN_OFFSET_MS).toISOString().slice(0, 10)
-const isSlaOffDay = (ms: number, company?: string): boolean => {
-  const day = new Date(ms + VN_OFFSET_MS).getUTCDay()
-  if (day === 0) return true                               // Chủ nhật: công ty nào cũng nghỉ
-  if (day === 6 && !worksOnSaturday(company)) return true   // Thứ 7: công ty không làm Thứ 7 thì nghỉ
-  return SLA_HOLIDAYS.has(vnDateKey(ms))
-}
-function slaOffDaysMs(fromMs: number, toMs: number, company?: string): number {
-  if (toMs <= fromMs) return 0
-  const dayStart = new Date(fromMs + VN_OFFSET_MS); dayStart.setUTCHours(0, 0, 0, 0)
-  let cursor = dayStart.getTime() - VN_OFFSET_MS
-  let pause = 0
-  while (cursor < toMs) {
-    const next = cursor + 86400000
-    if (isSlaOffDay(cursor, company)) pause += Math.max(0, Math.min(next, toMs) - Math.max(cursor, fromMs))
-    cursor = next
-  }
-  return pause
-}
-function addSlaSkipOffDays(startMs: number, durationMs: number, company?: string): number {
-  let deadline = startMs + durationMs
-  for (let i = 0; i < 20; i++) {
-    const extra = slaOffDaysMs(startMs, deadline, company)
-    const next = startMs + durationMs + extra
-    if (next === deadline) break
-    deadline = next
-  }
-  return deadline
-}
-
-// Điểm bắt đầu tính SLA: nếu rơi vào ngày nghỉ thì dời sang ngày làm việc kế tiếp.
-// keepTime = true (người giao đã chọn giờ bắt đầu): giữ nguyên giờ đó (Thứ 7 09:15 → Thứ 2 09:15).
-// keepTime = false (không chọn giờ, tính ngay khi giao): bắt đầu từ 00:00 của ngày làm việc kế tiếp.
-function slaStartAfterOffDays(ms: number, company?: string, keepTime = false): number {
-  if (!isSlaOffDay(ms, company)) return ms
-  let cursor = ms
-  for (let i = 0; i < 400 && isSlaOffDay(cursor, company); i++) cursor += 86400000
-  if (keepTime) return cursor
-  const d = new Date(cursor + VN_OFFSET_MS); d.setUTCHours(0, 0, 0, 0)
+const vnMidnightMs = (ms: number): number => {
+  const d = new Date(ms + VN_OFFSET_MS); d.setUTCHours(0, 0, 0, 0)
   return d.getTime() - VN_OFFSET_MS
 }
+// Khung giờ làm việc (tính SLA) của 1 ngày cụ thể, theo công ty. null = ngày đó nghỉ hẳn, không tính SLA.
+function slaWorkWindow(dayMidnightMs: number, company?: string): { start: number; end: number } | null {
+  if (SLA_HOLIDAYS.has(vnDateKey(dayMidnightMs))) return null   // ngày lễ: nghỉ cả ngày
+  const dow = new Date(dayMidnightMs + VN_OFFSET_MS).getUTCDay()
+  if (dow === 0) return null                                   // Chủ nhật: nghỉ, công ty nào cũng vậy
+  if (dow === 6) {
+    if (!worksOnSaturday(company)) return null                 // Thứ 7: công ty không làm Thứ 7 thì nghỉ hẳn
+    return { start: dayMidnightMs + 8 * 3600000, end: dayMidnightMs + 12 * 3600000 }   // Genki: Thứ 7 làm tới 12g trưa
+  }
+  return { start: dayMidnightMs + 8 * 3600000, end: dayMidnightMs + 17 * 3600000 }     // Thứ 2 → Thứ 6: 8g00 → 17g00
+}
+// Một mốc thời gian có đang nằm NGOÀI giờ làm việc (ngày nghỉ hoặc ngoài khung 8g-17g) không
+const isSlaOffDay = (ms: number, company?: string): boolean => {
+  const win = slaWorkWindow(vnMidnightMs(ms), company)
+  return !win || ms < win.start || ms >= win.end
+}
+// Tìm mốc làm việc gần nhất kể từ ms: nếu ms đang trong giờ làm thì giữ nguyên ms, ngoài giờ thì dời tới giờ làm việc kế tiếp (có thể là hôm sau)
+function nextSlaWorkStart(ms: number, company?: string): number {
+  let dayMid = vnMidnightMs(ms)
+  let cur = ms
+  for (let i = 0; i < 400; i++) {
+    const win = slaWorkWindow(dayMid, company)
+    if (win) {
+      if (cur <= win.start) return win.start
+      if (cur < win.end) return cur
+    }
+    dayMid += 86400000
+    cur = dayMid
+  }
+  return cur
+}
+// Cộng thêm thời lượng (ms) vào mốc bắt đầu, chỉ tính trong giờ làm việc — ngoài giờ/ngày nghỉ thì tự dừng và tính tiếp vào giờ làm kế tiếp
+function addSlaSkipOffDays(startMs: number, durationMs: number, company?: string): number {
+  let cur = nextSlaWorkStart(startMs, company)
+  let remaining = durationMs
+  let dayMid = vnMidnightMs(cur)
+  for (let i = 0; i < 400 && remaining > 0; i++) {
+    const win = slaWorkWindow(dayMid, company)
+    if (win) {
+      const from = Math.max(cur, win.start)
+      if (from < win.end) {
+        const avail = win.end - from
+        if (remaining <= avail) { cur = from + remaining; remaining = 0; break }
+        remaining -= avail
+      }
+    }
+    dayMid += 86400000
+    cur = dayMid
+  }
+  return cur
+}
 
-// Ghi chú khi ngày bắt đầu task rơi vào ngày nghỉ (SLA không tính) — hiển thị cho cả người giao lẫn người làm
+// Điểm bắt đầu tính SLA: nếu giao ngoài giờ làm việc (ngày nghỉ hoặc ngoài 8g-17g) thì dời tới giờ làm việc kế tiếp; trong giờ làm thì giữ nguyên mốc giao.
+function slaStartAfterOffDays(ms: number, company?: string, keepTime = false): number {
+  void keepTime   // không còn phân biệt keepTime nữa: trong giờ làm luôn giữ nguyên giờ giao, ngoài giờ luôn dời tới đầu khung giờ làm kế tiếp
+  return nextSlaWorkStart(ms, company)
+}
+
+// Ghi chú khi thời điểm bắt đầu task nằm ngoài giờ làm việc — hiển thị cho cả người giao lẫn người làm
 const SLA_WEEKDAY_VI = ['Chủ nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7']
 function slaOffDayNote(startDate?: string, company?: string, startTime?: string): string {
   if (!startDate) return ''
-  const ms = new Date(`${startDate}T00:00:00+07:00`).getTime()
-  if (Number.isNaN(ms) || !isSlaOffDay(ms, company)) return ''
-  const day = new Date(ms + VN_OFFSET_MS).getUTCDay()
-  const label = day === 0 ? 'Chủ nhật' : day === 6 ? 'Thứ 7' : 'ngày nghỉ lễ'
-  const dateStr = new Date(startDate).toLocaleDateString('vi-VN')
-  const satHint = day === 6 ? ' (riêng Genki vẫn làm Thứ 7 nên không áp dụng cho Genki)' : ''
-  // Tìm ngày làm việc kế tiếp để báo rõ cho người giao / người làm, tránh hiểu lầm là Chủ nhật
-  let cursor = ms
-  while (isSlaOffDay(cursor, company)) cursor += 86400000
-  const nextDate = new Date(cursor + VN_OFFSET_MS)
-  const nextLabel = `${SLA_WEEKDAY_VI[nextDate.getUTCDay()]} (${new Date(cursor).toLocaleDateString('vi-VN')})`
-  return `📌 Ngày bắt đầu ${dateStr} rơi vào ${label}${satHint} — ngày này không tính vào SLA, SLA sẽ bắt đầu tính từ ${nextLabel}${startTime ? ` lúc ${startTime}` : ''}.`
+  const ms = new Date(`${startDate}T${startTime || '00:00'}:00+07:00`).getTime()
+  if (Number.isNaN(ms)) return ''
+  const next = nextSlaWorkStart(ms, company)
+  if (next === ms) return ''   // đã trong giờ làm việc, không cần ghi chú
+  const d = new Date(next + VN_OFFSET_MS)
+  const hh = String(d.getUTCHours()).padStart(2, '0')
+  const mm = String(d.getUTCMinutes()).padStart(2, '0')
+  const nextLabel = `${SLA_WEEKDAY_VI[d.getUTCDay()]} (${new Date(next).toLocaleDateString('vi-VN')}) lúc ${hh}:${mm}`
+  const windowHint = worksOnSaturday(company)
+    ? 'giờ làm việc: Thứ 2–Thứ 6 8:00–17:00, riêng Thứ 7 8:00–12:00'
+    : 'giờ làm việc: Thứ 2–Thứ 6 8:00–17:00 (nghỉ Thứ 7, Chủ nhật)'
+  return `📌 Thời điểm bắt đầu nằm ngoài ${windowHint} — SLA sẽ bắt đầu tính từ ${nextLabel}.`
 }
 
 const WORK_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
