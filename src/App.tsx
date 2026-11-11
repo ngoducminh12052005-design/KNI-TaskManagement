@@ -2,6 +2,18 @@ import { useState, useRef, useEffect, useMemo, createContext, useContext } from 
 import { supabase } from './supabaseClient'
 import { createClient } from '@supabase/supabase-js'
 import companyLogo from './assets/company-logo.png'
+
+// ===== Thông báo trình duyệt (Desktop + điện thoại), hoạt động khi app đang mở kể cả tab ở nền =====
+function requestBrowserNotifyPermission() {
+  try { if (typeof Notification !== 'undefined' && Notification.permission === 'default') Notification.requestPermission() } catch {}
+}
+function showBrowserNotification(message: string) {
+  try {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
+    const n = new Notification('KNI Task Management', { body: message, icon: companyLogo, tag: 'kni-notif-' + Date.now() })
+    n.onclick = () => { window.focus(); n.close() }
+  } catch {}
+}
 import * as XLSX from 'xlsx'
 // ==================== TYPES ====================
 
@@ -16996,9 +17008,14 @@ function NotificationBell({ notifications, onNotificationClick }: {
           style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.25)' }}>
           <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
             <span className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>Thông báo</span>
-            {notifications.length > 0 && (
-              <button onClick={deleteAll} className="text-[10px] hover:underline" style={{ color: '#dc2626' }}>Xoá tất cả</button>
-            )}
+            <div className="flex items-center gap-2">
+              {typeof Notification !== 'undefined' && Notification.permission !== 'granted' && (
+                <button onClick={() => { try { Notification.requestPermission() } catch {} }} className="text-[10px] hover:underline" style={{ color: '#2563eb' }}>🔔 Bật thông báo</button>
+              )}
+              {notifications.length > 0 && (
+                <button onClick={deleteAll} className="text-[10px] hover:underline" style={{ color: '#dc2626' }}>Xoá tất cả</button>
+              )}
+            </div>
           </div>
           {notifications.length === 0 ? (
             <p className="text-sm text-center py-6" style={{ color: 'var(--text-muted)' }}>Chưa có thông báo nào</p>
@@ -17530,6 +17547,7 @@ function mapDbCollaboration(c: any): Collaboration {
 
 useEffect(() => {
   if (!session) return
+  requestBrowserNotifyPermission()
 
   const isForCurrentUser = (n: any) =>
     !n.target_user_id || n.target_user_id === session.user.id
@@ -17559,6 +17577,7 @@ useEffect(() => {
         linkTaskId: n.link_task_id ?? undefined,
         linkProposalId: n.link_proposal_id ?? undefined,
       }, ...prev])
+      showBrowserNotification(n.message)
     })
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'notifications' }, payload => {
       setNotifications(prev => prev.filter(n => n.id !== payload.old.id))
