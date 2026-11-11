@@ -873,6 +873,17 @@ function addSlaSkipOffDays(startMs: number, durationMs: number, company?: string
   }
   return deadline
 }
+// Ghi chú khi ngày bắt đầu task rơi vào ngày nghỉ (SLA không tính) — hiển thị cho cả người giao lẫn người làm
+function slaOffDayNote(startDate?: string, company?: string): string {
+  if (!startDate) return ''
+  const ms = new Date(`${startDate}T00:00:00+07:00`).getTime()
+  if (Number.isNaN(ms) || !isSlaOffDay(ms, company)) return ''
+  const day = new Date(ms + VN_OFFSET_MS).getUTCDay()
+  const label = day === 0 ? 'Chủ nhật' : day === 6 ? 'Thứ 7' : 'ngày nghỉ lễ'
+  const dateStr = new Date(startDate).toLocaleDateString('vi-VN')
+  const satHint = day === 6 ? ' (riêng Genki vẫn làm Thứ 7 nên không áp dụng cho Genki)' : ''
+  return `📌 Ngày bắt đầu ${dateStr} rơi vào ${label}${satHint} — ngày này không tính vào SLA, hạn sẽ tự lùi sang ngày làm việc kế tiếp.`
+}
 
 const WORK_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   received: { label: '📥 Đã nhận', color: '#6b7280' },
@@ -2373,6 +2384,9 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
                     </p>
                   )
                 })()}
+                {slaOffDayNote(form.startDate, form.company) && (
+                  <p className="text-[10px] mt-1" style={{ color: '#2563eb' }}>{slaOffDayNote(form.startDate, form.company)}</p>
+                )}
               </td>
               <td className={`${td} font-bold bg-gray-50`} style={{ width: '22%' }}>Hạn hoàn thành</td>
               <td className={td}><input type="date" value={form.dueDate} min={form.startDate || undefined} onChange={e => patchForm({ dueDate: e.target.value }, { dueDate: e.target.value })} className={cell} style={ink} /></td>
@@ -3282,6 +3296,9 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
               {info('Hạn hoàn thành', fmtD(task.dueDate))}
               {info('Mức độ SLA', task.slaLevel ? SLA_LEVELS[task.slaLevel].label : 'Không áp dụng SLA')}
               {task.slaLevel && info('Hạn SLA', getSlaDeadline(task) ? fmtClockVN(getSlaDeadline(task)!.toISOString()) : slaIdleText(task))}
+              {task.slaLevel && slaOffDayNote(task.startDate, task.company) && (
+                <p className="text-xs mt-1" style={{ color: '#2563eb' }}>{slaOffDayNote(task.startDate, task.company)}</p>
+              )}
               {info('EXP thưởng', `+${task.expReward}`)}
             </section>
 
