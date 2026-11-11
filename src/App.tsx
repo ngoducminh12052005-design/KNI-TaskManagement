@@ -9197,6 +9197,7 @@ function useDeptMemberIds(teamId: string): string[] {
   return ids
 }
 // Chọn người ký theo 2 bước: chọn phòng ban trước, rồi mới hiện người trong phòng đó
+
 function DeptUserSelect({ users, excludeId, value, onChange }: {
   users: User[]; excludeId: string; value: string; onChange: (id: string) => void
 }) {
@@ -9205,22 +9206,22 @@ function DeptUserSelect({ users, excludeId, value, onChange }: {
   const members = users
     .filter(u => u.id !== excludeId && (u.teamId === teamId || deptIds.includes(u.id)))
     .sort((a, b) => (b.role === 'manager' ? 1 : 0) - (a.role === 'manager' ? 1 : 0))
-  const cls = 'w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white disabled:bg-gray-100'
+  const cls = 'w-full h-10 border border-gray-300 rounded-lg px-2 text-xs bg-white disabled:bg-gray-100 outline-none focus:ring-2 focus:ring-blue-200'
+
   return (
-    <div className="mt-4 space-y-1.5">
+    <div className="w-full flex flex-col gap-2">
       <select value={teamId} onChange={e => { setTeamId(e.target.value); onChange('') }} className={cls} style={{ color: '#111827' }}>
         <option value="">-- Chọn phòng ban --</option>
         {TEAMS.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
       </select>
-      {teamId && (
-        <select value={value} onChange={e => onChange(e.target.value)} className={cls} style={{ color: '#111827' }}>
-          <option value="">-- Chọn người ký --</option>
-          {members.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
-        </select>
-      )}
+      <select value={value} onChange={e => onChange(e.target.value)} disabled={!teamId} className={cls} style={{ color: '#111827' }}>
+        <option value="">{teamId ? '-- Chọn người ký --' : '-- Chọn phòng ban trước --'}</option>
+        {members.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+      </select>
     </div>
   )
 }
+
 // So sánh nội dung tờ trình cũ/mới -> chuỗi ghi vào lịch sử (ghi mọi thay đổi, kể cả sửa ở phần sau của đoạn văn dài)
 function docDiff(
   oldP: { title: string; company?: string; driveUrl?: string; formData?: Record<string, any> },
@@ -9603,7 +9604,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
             ))}
           </ul>
         )}
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-8 text-center">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-8 text-center items-stretch">
           <div>
             <p className="font-bold">Người lập tờ trình</p>
             <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
@@ -9613,7 +9614,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
           <div>
             <p className="font-bold">Trưởng bộ phận</p>
             <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
-            <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className={sel} style={ink}>
+            <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className={`${sel} w-full h-10 mt-2`} style={ink}>
               <option value="">-- Chọn người ký --</option>
               {(myManagers.length > 0 ? myManagers : users.filter(u => u.id !== currentUser.id)).map(u => (
                 <option key={u.id} value={u.id}>{u.name}</option>
@@ -9628,9 +9629,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
           </div>
           <div>
             <p className="font-bold">Giám đốc công ty</p>
-            <input list="gd-companies" value={gdCompany} onChange={e => setGdCompany(e.target.value)}
-              placeholder="Chọn tên công ty"
-              className="mt-1 w-full border-b border-dashed border-gray-300 bg-transparent outline-none text-center text-xs" style={ink} />
+            <input list="gd-companies" value={gdCompany} onChange={e => setGdCompany(e.target.value)} placeholder="Chọn tên công ty" className="mt-1 w-full h-10 border border-gray-300 rounded-lg px-2 bg-transparent outline-none text-center text-xs" style={ink} />
             <datalist id="gd-companies">
               {COMPANIES.map(c => <option key={c} value={c} />)}
             </datalist>
@@ -9640,7 +9639,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
           <div>
             <p className="font-bold">Ban Giám đốc Tập đoàn</p>
             <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
-            <div className="mt-6 space-y-1">
+            <div className="mt-2 space-y-2">
               {bgdIds.map(id => (
                 <div key={id} className="flex items-center justify-between gap-1 text-xs text-gray-700">
                   <span className="truncate">{nameOf(id)}</span>
