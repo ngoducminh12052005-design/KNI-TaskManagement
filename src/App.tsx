@@ -874,6 +874,7 @@ function addSlaSkipOffDays(startMs: number, durationMs: number, company?: string
   return deadline
 }
 // Ghi chú khi ngày bắt đầu task rơi vào ngày nghỉ (SLA không tính) — hiển thị cho cả người giao lẫn người làm
+const SLA_WEEKDAY_VI = ['Chủ nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7']
 function slaOffDayNote(startDate?: string, company?: string): string {
   if (!startDate) return ''
   const ms = new Date(`${startDate}T00:00:00+07:00`).getTime()
@@ -882,7 +883,12 @@ function slaOffDayNote(startDate?: string, company?: string): string {
   const label = day === 0 ? 'Chủ nhật' : day === 6 ? 'Thứ 7' : 'ngày nghỉ lễ'
   const dateStr = new Date(startDate).toLocaleDateString('vi-VN')
   const satHint = day === 6 ? ' (riêng Genki vẫn làm Thứ 7 nên không áp dụng cho Genki)' : ''
-  return `📌 Ngày bắt đầu ${dateStr} rơi vào ${label}${satHint} — ngày này không tính vào SLA, hạn sẽ tự lùi sang ngày làm việc kế tiếp.`
+  // Tìm ngày làm việc kế tiếp để báo rõ cho người giao / người làm, tránh hiểu lầm là Chủ nhật
+  let cursor = ms
+  while (isSlaOffDay(cursor, company)) cursor += 86400000
+  const nextDate = new Date(cursor + VN_OFFSET_MS)
+  const nextLabel = `${SLA_WEEKDAY_VI[nextDate.getUTCDay()]} (${new Date(cursor).toLocaleDateString('vi-VN')})`
+  return `📌 Ngày bắt đầu ${dateStr} rơi vào ${label}${satHint} — ngày này không tính vào SLA, SLA sẽ bắt đầu tính từ ${nextLabel}.`
 }
 
 const WORK_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
