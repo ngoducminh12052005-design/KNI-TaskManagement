@@ -2171,12 +2171,12 @@ function DocPeoplePicker({ options, value, onChange, empty = 'Chưa chọn' }: {
           </span>
         ))}
       </div>
-      <div className="flex gap-2">
-        <select value={teamId} onChange={e => { setTeamId(e.target.value); setQ('') }} className="flex-1 rounded px-2 py-1 text-xs outline-none" style={box}>
+      <div className="flex flex-wrap gap-2">
+        <select value={teamId} onChange={e => { setTeamId(e.target.value); setQ('') }} className="flex-1 min-w-0 rounded px-2 py-1 text-xs outline-none" style={box}>
           <option value="">-- Chọn phòng ban --</option>
           {TEAMS.filter(t => options.some(u => u.teamId === t.id)).map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
         </select>
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="hoặc gõ tên để tìm" className="flex-1 rounded px-2 py-1 text-xs outline-none" style={box} />
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="hoặc gõ tên để tìm" className="flex-1 min-w-0 rounded px-2 py-1 text-xs outline-none" style={box} />
       </div>
       {(teamId || query) && (
         <div className="flex flex-wrap gap-1.5">
@@ -2256,6 +2256,23 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
       <button type="button" onClick={() => set([...list, ''])} className="text-xs text-blue-600">+ Thêm dòng</button>
     </div>
   )
+  const descRef = useRef<HTMLTextAreaElement>(null)
+  const handleDescPaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const file = Array.from(e.clipboardData.items).find(it => it.type.startsWith('image/'))?.getAsFile()
+    if (!file) return
+    e.preventDefault()
+    const ta = descRef.current
+    const start = ta?.selectionStart ?? form.description.length
+    const end = ta?.selectionEnd ?? form.description.length
+    const placeholder = '\n[📎 đang tải ảnh...]\n'
+    setForm((f: any) => ({ ...f, description: f.description.slice(0, start) + placeholder + f.description.slice(end) }))
+    try {
+      const [up] = await uploadTaskFiles(currentUser.id, [file])
+      setForm((f: any) => ({ ...f, description: f.description.replace(placeholder, `\n[[img:${up.path}]]\n`) }))
+    } catch {
+      setForm((f: any) => ({ ...f, description: f.description.replace(placeholder, '\n[⚠️ Dán ảnh thất bại]\n') }))
+    }
+  }
   const updateRow = (i: number, patch: Partial<TaskDocRow>) => setDoc({ rows: doc.rows.map((r, j) => (j === i ? { ...r, ...patch } : r)) })
   const updateCost = (i: number, patch: Partial<TaskCostRow>) => setDoc({ costRows: (doc.costRows ?? []).map((r, j) => (j === i ? { ...r, ...patch } : r)) })
   const costTotal = (doc.costRows ?? []).reduce((s, r) => s + taskCostAmount(r), 0)
@@ -2360,8 +2377,8 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
           <div className="mt-1 italic">{renderList(doc.canCu, v => setDoc({ canCu: v }), '•', 'Căn cứ Tờ trình / kế hoạch / yêu cầu của Ban Giám đốc ...')}</div>
         </div>
 
-        <p className="font-bold mb-1">NỘI DUNG CÔNG VIỆC</p>
-        <textarea value={form.description} onChange={e => setForm((f: any) => ({ ...f, description: e.target.value }))} rows={8}
+        <p className="font-bold mb-1">NỘI DUNG CÔNG VIỆC <span className="font-normal text-gray-400">(dán ảnh được, Ctrl+V)</span></p>
+        <textarea ref={descRef} value={form.description} onChange={e => setForm((f: any) => ({ ...f, description: e.target.value }))} onPaste={handleDescPaste} rows={8}
           placeholder={'Mô tả yêu cầu và mục tiêu cụ thể của task.\nVD: 1. Về máy tính xách tay & phần mềm bản quyền: ...\n2. Về thiết bị in ấn / copy / scan: ...'}
           className={`${line} resize-none mb-4`} style={ink} />
 
@@ -2498,37 +2515,47 @@ const hoursMs = (SLA_LEVELS as any)[form.slaLevel].hours * 3600000
         <textarea value={doc.yeuCau} onChange={e => setDoc({ yeuCau: e.target.value })} rows={4}
           placeholder={'1. Cập nhật Work Note khi có tiến độ mới.\n2. Báo quản lý khi phát sinh vướng mắc.\nKính đề nghị các bên phối hợp thực hiện./.'} className={`${line} resize-none mb-4`} style={ink} />
 
-        <div className="grid grid-cols-3 gap-4 mt-8 text-center">
-          <div>
-            <p className="font-bold">Người giao task</p><p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
-            <p className="mt-10 text-xs text-gray-500">{editingTask ? nameOf(editingTask.createdBy) || currentUser.name : currentUser.name}</p>
-          </div>
-          <div>
-            <p className="font-bold">Người nhận task</p><p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
-            <p className="mt-10 text-xs text-gray-500">{assigning ? (form.assignedTo.map(nameOf).join(', ') || '—') : currentUser.name}</p>
-          </div>
-          <div>
-            <p className="font-bold">Quản lý (PM)</p><p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
-            <div className="mt-4 flex flex-wrap justify-center gap-1.5">
-              {teamManagers.map(m => {
-                const on = form.projectManager.includes(m.id)
-                return (
-                  <button key={m.id} type="button" onClick={() => togglePm(m.id)} className="text-xs px-2.5 py-1 rounded-full"
-                    style={{ background: on ? '#ede9fe' : '#ffffff', color: on ? '#5b21b6' : '#6b7280', border: `1px solid ${on ? '#a78bfa' : '#d1d5db'}` }}>
-                    {on ? '✓ ' : '＋ '}{m.name}
-                  </button>
-                )
-              })}
-            </div>
-            {otherManagers.length > 0 && (
-              <div className="mt-2 text-left">
-                <p className="text-[11px] text-gray-500 mb-1 text-center">Quản lý phòng khác</p>
-                <DocPeoplePicker options={otherManagers} value={form.projectManager.filter((id: string) => otherManagers.some(u => u.id === id))}
-                  onChange={v => patchForm({ projectManager: [...form.projectManager.filter((id: string) => !otherManagers.some(u => u.id === id)), ...v] })} empty="Chưa chọn" />
-              </div>
-            )}
-            <p className="mt-2 text-xs text-gray-500">{form.projectManager.map(nameOf).join(', ') || '—'}</p>
-          </div>
+        <div className="overflow-x-auto mt-8">
+          <table className="w-full border-collapse text-center" style={{ minWidth: 600 }}>
+            <thead>
+              <tr>
+                <th className={th}>Người giao task<br /><span className="font-normal">(Ký, ghi rõ họ tên)</span></th>
+                <th className={th}>Người nhận task<br /><span className="font-normal">(Ký, ghi rõ họ tên)</span></th>
+                <th className={th}>Quản lý (PM)<br /><span className="font-normal">(Ký, ghi rõ họ tên)</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className={`${td} align-top`} style={{ height: 90 }}>
+                  <p className="text-xs text-gray-500">{editingTask ? nameOf(editingTask.createdBy) || currentUser.name : currentUser.name}</p>
+                </td>
+                <td className={`${td} align-top`}>
+                  <p className="text-xs text-gray-500">{assigning ? (form.assignedTo.map(nameOf).join(', ') || '—') : currentUser.name}</p>
+                </td>
+                <td className={`${td} align-top text-left`}>
+                  <div className="flex flex-wrap justify-center gap-1.5 mb-2">
+                    {teamManagers.map(m => {
+                      const on = form.projectManager.includes(m.id)
+                      return (
+                        <button key={m.id} type="button" onClick={() => togglePm(m.id)} className="text-xs px-2.5 py-1 rounded-full"
+                          style={{ background: on ? '#ede9fe' : '#ffffff', color: on ? '#5b21b6' : '#6b7280', border: `1px solid ${on ? '#a78bfa' : '#d1d5db'}` }}>
+                          {on ? '✓ ' : '＋ '}{m.name}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {otherManagers.length > 0 && (
+                    <div className="mt-2">
+                      <p className="text-[11px] text-gray-500 mb-1 text-center">Quản lý phòng khác</p>
+                      <DocPeoplePicker options={otherManagers} value={form.projectManager.filter((id: string) => otherManagers.some(u => u.id === id))}
+                        onChange={v => patchForm({ projectManager: [...form.projectManager.filter((id: string) => !otherManagers.some(u => u.id === id)), ...v] })} empty="Chưa chọn" />
+                    </div>
+                  )}
+                  <p className="mt-2 text-xs text-gray-500 text-center">{form.projectManager.map(nameOf).join(', ') || '—'}</p>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -3584,7 +3611,7 @@ function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, canSen
             <div className="mb-3"><b>Căn cứ:</b><ul className="italic mt-1 space-y-1">{f.canCu.map((c: string, i: number) => <li key={i}>• {c}</li>)}</ul></div>
           )}
 
-          {task.description && <>{heading('NỘI DUNG CÔNG VIỆC')}{para(task.description)}</>}
+          {task.description && <>{heading('NỘI DUNG CÔNG VIỆC')}{renderTaskDescription(task.description)}</>}
 
           {rows.length > 0 && (
             <>
@@ -3841,6 +3868,27 @@ const TASK_MAX_FILE_MB = 25
 
 function fmtFileSize(n: number) {
   return n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`
+}
+
+// Hiện ảnh đã dán vào "Nội dung công việc" — tự tạo lại link xem (vì bucket riêng tư) mỗi lần mở trang
+function TaskDescImage({ path }: { path: string }) {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    supabase.storage.from('proposal-files').createSignedUrl(path, 3600).then(({ data }) => { if (alive) setUrl(data?.signedUrl ?? null) })
+    return () => { alive = false }
+  }, [path])
+  if (!url) return <div className="my-2 text-xs" style={{ color: 'var(--text-muted)' }}>(đang tải ảnh...)</div>
+  return <img src={url} className="max-w-full rounded-lg my-2 border" style={{ borderColor: 'var(--border)' }} />
+}
+// Mô tả task có thể chứa token [[img:path]] (ảnh dán vào) xen giữa các đoạn văn bản thường
+function renderTaskDescription(text?: string) {
+  if (!text) return null
+  return text.split(/(\[\[img:[^\]]+\]\])/g).map((part, i) => {
+    const m = part.match(/^\[\[img:([^\]]+)\]\]$/)
+    if (m) return <TaskDescImage key={i} path={m[1]} />
+    return part.trim() ? <p key={i} className="whitespace-pre-wrap mb-4">{part.trim()}</p> : null
+  })
 }
 
 // Tải nhiều file song song (4 file một lượt) để nộp nhanh khi có nhiều ảnh
