@@ -2515,47 +2515,37 @@ const hoursMs = (SLA_LEVELS as any)[form.slaLevel].hours * 3600000
         <textarea value={doc.yeuCau} onChange={e => setDoc({ yeuCau: e.target.value })} rows={4}
           placeholder={'1. Cập nhật Work Note khi có tiến độ mới.\n2. Báo quản lý khi phát sinh vướng mắc.\nKính đề nghị các bên phối hợp thực hiện./.'} className={`${line} resize-none mb-4`} style={ink} />
 
-        <div className="overflow-x-auto mt-8">
-          <table className="w-full border-collapse text-center" style={{ minWidth: 600 }}>
-            <thead>
-              <tr>
-                <th className={th}>Người giao task<br /><span className="font-normal">(Ký, ghi rõ họ tên)</span></th>
-                <th className={th}>Người nhận task<br /><span className="font-normal">(Ký, ghi rõ họ tên)</span></th>
-                <th className={th}>Quản lý (PM)<br /><span className="font-normal">(Ký, ghi rõ họ tên)</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className={`${td} align-top`} style={{ height: 90 }}>
-                  <p className="text-xs text-gray-500">{editingTask ? nameOf(editingTask.createdBy) || currentUser.name : currentUser.name}</p>
-                </td>
-                <td className={`${td} align-top`}>
-                  <p className="text-xs text-gray-500">{assigning ? (form.assignedTo.map(nameOf).join(', ') || '—') : currentUser.name}</p>
-                </td>
-                <td className={`${td} align-top text-left`}>
-                  <div className="flex flex-wrap justify-center gap-1.5 mb-2">
-                    {teamManagers.map(m => {
-                      const on = form.projectManager.includes(m.id)
-                      return (
-                        <button key={m.id} type="button" onClick={() => togglePm(m.id)} className="text-xs px-2.5 py-1 rounded-full"
-                          style={{ background: on ? '#ede9fe' : '#ffffff', color: on ? '#5b21b6' : '#6b7280', border: `1px solid ${on ? '#a78bfa' : '#d1d5db'}` }}>
-                          {on ? '✓ ' : '＋ '}{m.name}
-                        </button>
-                      )
-                    })}
-                  </div>
-                  {otherManagers.length > 0 && (
-                    <div className="mt-2">
-                      <p className="text-[11px] text-gray-500 mb-1 text-center">Quản lý phòng khác</p>
-                      <DocPeoplePicker options={otherManagers} value={form.projectManager.filter((id: string) => otherManagers.some(u => u.id === id))}
-                        onChange={v => patchForm({ projectManager: [...form.projectManager.filter((id: string) => !otherManagers.some(u => u.id === id)), ...v] })} empty="Chưa chọn" />
-                    </div>
-                  )}
-                  <p className="mt-2 text-xs text-gray-500 text-center">{form.projectManager.map(nameOf).join(', ') || '—'}</p>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+        <div className="grid grid-cols-3 gap-4 mt-8 text-center">
+          <div>
+            <p className="font-bold">Người giao task</p><p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+            <p className="mt-10 text-xs text-gray-500">{editingTask ? nameOf(editingTask.createdBy) || currentUser.name : currentUser.name}</p>
+          </div>
+          <div>
+            <p className="font-bold">Người nhận task</p><p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+            <p className="mt-10 text-xs text-gray-500">{assigning ? (form.assignedTo.map(nameOf).join(', ') || '—') : currentUser.name}</p>
+          </div>
+          <div>
+            <p className="font-bold">Quản lý (PM)</p><p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+            <div className="mt-4 flex flex-wrap justify-center gap-1.5">
+              {teamManagers.map(m => {
+                const on = form.projectManager.includes(m.id)
+                return (
+                  <button key={m.id} type="button" onClick={() => togglePm(m.id)} className="text-xs px-2.5 py-1 rounded-full"
+                    style={{ background: on ? '#ede9fe' : '#ffffff', color: on ? '#5b21b6' : '#6b7280', border: `1px solid ${on ? '#a78bfa' : '#d1d5db'}` }}>
+                    {on ? '✓ ' : '＋ '}{m.name}
+                  </button>
+                )
+              })}
+            </div>
+            {otherManagers.length > 0 && (
+              <div className="mt-2 text-left">
+                <p className="text-[11px] text-gray-500 mb-1 text-center">Quản lý phòng khác</p>
+                <DocPeoplePicker options={otherManagers} value={form.projectManager.filter((id: string) => otherManagers.some(u => u.id === id))}
+                  onChange={v => patchForm({ projectManager: [...form.projectManager.filter((id: string) => !otherManagers.some(u => u.id === id)), ...v] })} empty="Chưa chọn" />
+              </div>
+            )}
+            <p className="mt-2 text-xs text-gray-500">{form.projectManager.map(nameOf).join(', ') || '—'}</p>
+          </div>
         </div>
       </div>
 
