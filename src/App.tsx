@@ -834,6 +834,46 @@ const SLA_LEVELS: Record<string, { label: string; hours: number; color: string }
   P5: { label: 'P5 · 1 tuần', hours: 168, color: '#64748b' },
 }
 
+// ===== SLA dừng chạy vào ngày nghỉ (Chủ nhật luôn nghỉ; Thứ 7 thì tuỳ công ty) và ngày lễ =====
+// Thêm ngày nghỉ lễ chung của công ty vào đây, định dạng 'YYYY-MM-DD' (giờ Việt Nam).
+const SLA_HOLIDAYS = new Set<string>([
+  // '2026-01-01', '2026-04-30', '2026-05-01', '2026-09-02',
+])
+// Công ty nào vẫn làm việc Thứ 7 (SLA tính cả Thứ 7) — các công ty còn lại (KNI, First Steps, ACVN, Les Sens Phú Quốc...) nghỉ Thứ 7 + Chủ nhật.
+// Nếu công ty nào khác cũng làm Thứ 7, thêm từ khoá (không dấu, chữ thường) vào đây.
+const SLA_SAT_WORKING_KEYWORDS = ['genki']
+const worksOnSaturday = (company?: string) => SLA_SAT_WORKING_KEYWORDS.some(k => (company ?? '').toLowerCase().includes(k))
+const VN_OFFSET_MS = 7 * 3600000
+const vnDateKey = (ms: number) => new Date(ms + VN_OFFSET_MS).toISOString().slice(0, 10)
+const isSlaOffDay = (ms: number, company?: string): boolean => {
+  const day = new Date(ms + VN_OFFSET_MS).getUTCDay()
+  if (day === 0) return true                               // Chủ nhật: công ty nào cũng nghỉ
+  if (day === 6 && !worksOnSaturday(company)) return true   // Thứ 7: công ty không làm Thứ 7 thì nghỉ
+  return SLA_HOLIDAYS.has(vnDateKey(ms))
+}
+function slaOffDaysMs(fromMs: number, toMs: number, company?: string): number {
+  if (toMs <= fromMs) return 0
+  const dayStart = new Date(fromMs + VN_OFFSET_MS); dayStart.setUTCHours(0, 0, 0, 0)
+  let cursor = dayStart.getTime() - VN_OFFSET_MS
+  let pause = 0
+  while (cursor < toMs) {
+    const next = cursor + 86400000
+    if (isSlaOffDay(cursor, company)) pause += Math.max(0, Math.min(next, toMs) - Math.max(cursor, fromMs))
+    cursor = next
+  }
+  return pause
+}
+function addSlaSkipOffDays(startMs: number, durationMs: number, company?: string): number {
+  let deadline = startMs + durationMs
+  for (let i = 0; i < 20; i++) {
+    const extra = slaOffDaysMs(startMs, deadline, company)
+    const next = startMs + durationMs + extra
+    if (next === deadline) break
+    deadline = next
+  }
+  return deadline
+}
+
 const WORK_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   received: { label: '📥 Đã nhận', color: '#6b7280' },
   processing: { label: '⚙️ Đang xử lý', color: '#2563eb' },
@@ -923,7 +963,7 @@ function getSlaDeadline(task: Task): Date | null {
     pausedMs += Math.max(0, now - pauseAt)
   }
 
-  return new Date(start.getTime() + slaMs + pausedMs)
+  return new Date(addSlaSkipOffDays(start.getTime(), slaMs + pausedMs, task.company))
 }
 
 
@@ -954,7 +994,7 @@ const fmtClockVN = (iso?: string) => (iso ? new Date(iso).toLocaleString('vi-VN'
 // Lúc nhân viên bấm Bắt đầu, đã trễ hạn SLA bao nhiêu giây (0 nếu chưa trễ hoặc không có SLA)
 function getSlaStartLateSeconds(task: Task): number {
   if (!task.slaLevel || !task.slaStartAt || !task.startedAt) return 0
-  const due = new Date(task.slaStartAt).getTime() + SLA_LEVELS[task.slaLevel].hours * 3600000
+  const due = addSlaSkipOffDays(new Date(task.slaStartAt).getTime(), SLA_LEVELS[task.slaLevel].hours * 3600000, task.company)
   return Math.max(0, Math.floor((new Date(task.startedAt).getTime() - due) / 1000))
 }
 // Lúc nộp kết quả (Complete), đã trễ hạn SLA bao nhiêu giây
