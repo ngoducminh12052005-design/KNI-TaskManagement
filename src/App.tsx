@@ -14,6 +14,14 @@ function showBrowserNotification(message: string) {
     n.onclick = () => { window.focus(); n.close() }
   } catch {}
 }
+// Hiện số đỏ (badge) trên icon/shortcut của app khi đã cài như 1 ứng dụng (PWA) — Windows/macOS/Android (Chrome, Edge). Không hỗ trợ iOS Safari.
+function updateAppBadge(count: number) {
+  try {
+    const nav = navigator as any
+    if (count > 0 && nav.setAppBadge) nav.setAppBadge(count)
+    else if (nav.clearAppBadge) nav.clearAppBadge()
+  } catch {}
+}
 import * as XLSX from 'xlsx'
 // ==================== TYPES ====================
 
@@ -16973,6 +16981,7 @@ function NotificationBell({ notifications, onNotificationClick }: {
   const [open, setOpen] = useState(false)
   const [lastSeen, setLastSeen] = useState(() => localStorage.getItem('lastSeenNotif') || '')
   const unread = notifications.filter(n => n.createdAt > lastSeen).length
+  useEffect(() => { updateAppBadge(unread) }, [unread])
 
   const toggle = () => {
     setOpen(o => !o)
