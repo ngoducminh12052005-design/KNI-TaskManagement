@@ -9265,6 +9265,23 @@ function docDiff(
   return { added: added.join('\n'), edited: edited.join('\n') }
 }
 function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, projectId }: { currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void; editing?: Proposal | null; projectId?: string }) {
+  const noiDungRef = useRef<HTMLTextAreaElement>(null)
+  const handleNoiDungPaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const file = Array.from(e.clipboardData.items).find(it => it.type.startsWith('image/'))?.getAsFile()
+    if (!file) return
+    e.preventDefault()
+    const ta = noiDungRef.current
+    const start = ta?.selectionStart ?? noiDung.length
+    const end = ta?.selectionEnd ?? noiDung.length
+    const placeholder = '\n[📎 đang tải ảnh...]\n'
+    setNoiDung((v: string) => v.slice(0, start) + placeholder + v.slice(end))
+    try {
+      const [up] = await uploadTaskFiles(currentUser.id, [file])
+      setNoiDung((v: string) => v.replace(placeholder, `\n[[img:${up.path}]]\n`))
+    } catch {
+      setNoiDung((v: string) => v.replace(placeholder, '\n[⚠️ Dán ảnh thất bại]\n'))
+    }
+  }
   const now = new Date()
   const dateText = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()}`
   const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)   // gồm cả chính người tạo nếu là quản lý (có thể tự là Trưởng bộ phận)
@@ -9535,8 +9552,8 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
           placeholder="Phòng ... kính trình Ban Giám đốc xem xét và phê duyệt ... với các nội dung chi tiết như sau:"
           className={`${area} mb-4`} style={ink} />
 
-        <p className="font-bold mb-1">NỘI DUNG</p>
-        <textarea value={noiDung} onChange={e => setNoiDung(e.target.value)} rows={10}
+        <p className="font-bold mb-1">NỘI DUNG <span className="font-normal text-gray-400">(dán ảnh được, Ctrl+V)</span></p>
+        <textarea ref={noiDungRef} value={noiDung} onChange={e => setNoiDung(e.target.value)} onPaste={handleNoiDungPaste} rows={10}
           placeholder={'I. NỘI DUNG ĐIỀU CHỈNH & TỐI ƯU CHI PHÍ\n1. Về Máy tính xách tay & Phần mềm bản quyền: ...\n2. Về Thiết bị In ấn / Copy / Scan: ...'}
           className={`${area} mb-4`} style={ink} />
 
@@ -9604,15 +9621,19 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
           </ul>
         )}
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-8 text-center">
-          <div>
-            <p className="font-bold">Người lập tờ trình</p>
-            <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
-            <p className="mt-10 text-xs text-gray-500">{currentUser.name}</p>
+          <div className="flex flex-col">
+            <div style={{ minHeight: 74 }}>
+              <p className="font-bold">Người lập tờ trình</p>
+              <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+            </div>
+            <p className="mt-2 text-xs text-gray-500">{currentUser.name}</p>
           </div>
 
-          <div>
-            <p className="font-bold">Trưởng bộ phận</p>
-            <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+          <div className="flex flex-col">
+            <div style={{ minHeight: 74 }}>
+              <p className="font-bold">Trưởng bộ phận</p>
+              <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+            </div>
             <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className={sel} style={ink}>
               <option value="">-- Chọn người ký --</option>
               {(myManagers.length > 0 ? myManagers : users.filter(u => u.id !== currentUser.id)).map(u => (
@@ -9621,26 +9642,32 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
             </select>
           </div>
 
-          <div>
-            <p className="font-bold">Kế toán trưởng</p>
-            <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+          <div className="flex flex-col">
+            <div style={{ minHeight: 74 }}>
+              <p className="font-bold">Kế toán trưởng</p>
+              <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+            </div>
             <DeptUserSelect users={users} excludeId={currentUser.id} value={kttId} onChange={setKttId} />
           </div>
-          <div>
-            <p className="font-bold">Giám đốc công ty</p>
-            <input list="gd-companies" value={gdCompany} onChange={e => setGdCompany(e.target.value)}
-              placeholder="Chọn tên công ty"
-              className="mt-1 w-full border-b border-dashed border-gray-300 bg-transparent outline-none text-center text-xs" style={ink} />
-            <datalist id="gd-companies">
-              {COMPANIES.map(c => <option key={c} value={c} />)}
-            </datalist>
-            <p className="font-bold text-xs mt-1">(Ký, ghi rõ họ tên)</p>
+          <div className="flex flex-col">
+            <div style={{ minHeight: 74 }}>
+              <p className="font-bold">Giám đốc công ty</p>
+              <input list="gd-companies" value={gdCompany} onChange={e => setGdCompany(e.target.value)}
+                placeholder="Chọn tên công ty"
+                className="mt-1 w-full border-b border-dashed border-gray-300 bg-transparent outline-none text-center text-xs" style={ink} />
+              <datalist id="gd-companies">
+                {COMPANIES.map(c => <option key={c} value={c} />)}
+              </datalist>
+              <p className="font-bold text-xs mt-1">(Ký, ghi rõ họ tên)</p>
+            </div>
             <DeptUserSelect users={users} excludeId={currentUser.id} value={gdId} onChange={setGdId} />
           </div>
-          <div>
-            <p className="font-bold">Ban Giám đốc Tập đoàn</p>
-            <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
-            <div className="mt-6 space-y-1">
+          <div className="flex flex-col">
+            <div style={{ minHeight: 74 }}>
+              <p className="font-bold">Ban Giám đốc Tập đoàn</p>
+              <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+            </div>
+            <div className="space-y-1">
               {bgdIds.map(id => (
                 <div key={id} className="flex items-center justify-between gap-1 text-xs text-gray-700">
                   <span className="truncate">{nameOf(id)}</span>
@@ -9790,7 +9817,7 @@ function ProposalDocView({ p, users, currentUserId, onClose, canAct, onApprove, 
         )}
 
         {para(f.intro)}
-        {f.noiDung && <>{heading('NỘI DUNG')}{para(f.noiDung)}</>}
+        {f.noiDung && <>{heading('NỘI DUNG')}{renderTaskDescription(f.noiDung)}</>}
 
         {rows.length > 0 && (
           <>
