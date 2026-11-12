@@ -23,6 +23,32 @@ function updateAppBadge(count: number) {
   } catch {}
 }
 import * as XLSX from 'xlsx'
+// ===== Nút Back của trình duyệt: đóng cửa sổ / chi tiết đang mở thay vì thoát khỏi web =====
+const openOverlays = new Set<string>()
+function useBackToClose(onClose?: () => void) {
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+  useEffect(() => {
+    const id = Math.random().toString(36).slice(2)
+    const cur = window.history.state
+    const next = { ...(cur || {}), overlay: id }
+    // Nếu bước lịch sử hiện tại là của 1 cửa sổ đã đóng thì dùng lại, không tạo thêm bước thừa
+    if (cur?.overlay && !openOverlays.has(cur.overlay)) window.history.replaceState(next, '')
+    else window.history.pushState(next, '')
+    openOverlays.add(id)
+    let closedByBack = false
+    const onPop = () => {
+      if (window.history.state?.overlay !== id) { closedByBack = true; closeRef.current?.() }
+    }
+    window.addEventListener('popstate', onPop)
+    return () => {
+      window.removeEventListener('popstate', onPop)
+      openOverlays.delete(id)
+      // Đóng bằng nút trên màn hình (không phải Back) thì bỏ bước lịch sử đã thêm
+      if (!closedByBack) setTimeout(() => { if (window.history.state?.overlay === id) window.history.back() }, 0)
+    }
+  }, [])
+}
 // ==================== TYPES ====================
 
 type Role = 'manager' | 'employee'
@@ -2200,6 +2226,7 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
   editingTask: Task | null; currentUser: User; users: User[]; employees: User[]; teamUsers: User[]
   onSave: () => void; onClose: () => void
 }) {
+  useBackToClose(onClose)
   const now = new Date()
   const dateText = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()}`
   const doc: TaskDocData = form.doc
@@ -2752,6 +2779,7 @@ function TaskViewFlow({ task, tasks, users, currentUser, readOnly = false, initi
   task: Task; tasks: Task[]; users: User[]; currentUser: User; readOnly?: boolean; initialStage?: 'phieu' | 'detail'
     onClose: () => void; onEdit?: () => void; onOpenInTasks?: () => void; forceEdit?: boolean
 }) {
+  useBackToClose(onClose)
   const [stage, setStage] = useState<'phieu' | 'detail'>(initialStage)
   const live = tasks.find(t => t.id === task.id) ?? task   // luôn dùng bản mới nhất
   const canApprove = !readOnly && canApproveSelfTask(live, currentUser, users)
@@ -2820,6 +2848,7 @@ async function rejectCrossDept(task: Task, currentUser: User) {
 }
 // Quản lý phòng đích duyệt: tự làm hoặc phân công cho bất kỳ ai trong phòng
 function CrossDeptApproveModal({ task, currentUser, users, onClose }: { task: Task; currentUser: User; users: User[]; onClose: () => void }) {
+  useBackToClose(onClose)
   const teamId = task.targetTeamId ?? currentUser.teamId
   const people = users.filter(u => u.teamId === teamId)
   const proposed = task.assignedTo.filter(id => people.some(u => u.id === id))
@@ -2925,6 +2954,7 @@ function CrossDeptApproveModal({ task, currentUser, users, onClose }: { task: Ta
 
 // Quản lý được giao task: phân công cho nhân viên phòng mình, hoặc chuyển sang phòng ban khác (quản lý phòng đó phải duyệt)
 function DelegateTaskModal({ task, currentUser, users, onClose, initialMode = 'assign', onDone }: { task: Task; currentUser: User; users: User[]; onClose: () => void; initialMode?: 'assign' | 'transfer'; onDone?: () => void }) {
+  useBackToClose(onClose)
   // Task BOD giao: quản lý luôn được chuyển sang phòng ban khác (phòng kia duyệt mới qua). Task giao chéo thường thì chỉ được phân công.
   const allowTransfer = !task.targetTeamId || isBodAssigned(task, users)
   const staff = users.filter(u => u.teamId === currentUser.teamId && u.role === 'employee' && u.isActive !== false)
@@ -4038,6 +4068,7 @@ function RejectResultModal({ task, currentUser, onClose }: { task: Task; current
 }
 
 function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; currentUser: User; users: User[]; onClose: () => void }) {
+  useBackToClose(onClose)
   const [result, setResult] = useState<'successful' | 'with_issue' | null>(null)
   const [issueText, setIssueText] = useState('')
   const [note, setNote] = useState('')
@@ -4338,6 +4369,7 @@ async function closeTask(
 }
 
 function CloseTaskModal({ task, currentUser, users, onClose }: { task: Task; currentUser: User; users: User[]; onClose: () => void }) {
+  useBackToClose(onClose)
   const [hasIssue, setHasIssue] = useState(!!task.completeIssue)
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
@@ -7869,6 +7901,7 @@ function RewardsView({ currentUser, redemptions, users }: { currentUser: User; r
 
 
 function UserProfileCard({ user, onClose, onMessage }: { user: User; onClose: () => void; onMessage?: () => void }) {
+  useBackToClose(onClose)
   const { progress, needed, level } = getExpProgress(user.exp)
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50 px-4" style={{ background: 'rgba(0,0,0,0.7)' }} onClick={onClose}>
@@ -8008,6 +8041,7 @@ function BrowseByDepartmentModal({ users, currentUser, onSelectUser, onClose }: 
 type ChatRoom = { id: string; name: string; createdBy: string }
 
 function CreateRoomModal({ currentUser, users, onClose, onCreated }: { currentUser: User; users: User[]; onClose: () => void; onCreated: (roomId: string) => void }) {
+  useBackToClose(onClose)
   const [name, setName] = useState('')
   const [picked, setPicked] = useState<string[]>([])
   const [q, setQ] = useState('')
@@ -8772,6 +8806,7 @@ function mapDbProposalRevision(r: any): ProposalRevision {
 }
 
 function SignDocumentModal({ currentUser, proposal, onClose }: { currentUser: User; proposal: Proposal; onClose: () => void }) {
+  useBackToClose(onClose)
   const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null)
   const [pdfDoc, setPdfDoc] = useState<any>(null)
   const [pageIndex, setPageIndex] = useState(0)
@@ -9721,6 +9756,7 @@ function ProposalDocView({ p, users, currentUserId, onClose, canAct, onApprove, 
   p: Proposal; users: User[]; currentUserId: string; onClose: () => void; canAct: boolean; onEdit?: () => void
   onApprove: (note: string) => Promise<void>; onReject: (note: string) => Promise<void>; onRequestReview: (note: string) => Promise<void>
 }) {
+  useBackToClose(onClose)
   const f: any = p.formData ?? {}
   const [steps, setSteps] = useState<{ id: string; approverId: string; order: number; status: string; decidedAt?: string; note?: string }[]>([])
   const [busy, setBusy] = useState(false)
@@ -10875,6 +10911,7 @@ function ProposalFormDocView({ p, users, currentUserId, onClose, canAct, onAppro
   p: Proposal; users: User[]; currentUserId: string; onClose: () => void; canAct: boolean
   onApprove: (note: string) => Promise<void>; onReject: (note: string) => Promise<void>; onRequestReview: (note: string) => Promise<void>
 }) {
+  useBackToClose(onClose)
   const f: Record<string, any> = p.formData ?? {}
   const tpl = (f.tpl as FormTpl) in FORM_TPL ? (f.tpl as FormTpl) : 'muasam'
   const cfg = FORM_TPL[tpl]
@@ -11454,6 +11491,7 @@ function ProposalHopDongView({ p, users, currentUserId, onClose, canAct, onAppro
   p: Proposal; users: User[]; currentUserId: string; onClose: () => void; canAct: boolean
   onApprove: (note: string) => Promise<void>; onReject: (note: string) => Promise<void>; onRequestReview: (note: string) => Promise<void>
 }) {
+  useBackToClose(onClose)
   const f: Record<string, any> = p.formData ?? {}
   const [steps, setSteps] = useState<{ id: string; approverId: string; order: number; status: string; decidedAt?: string; note?: string }[]>([])
   const [busy, setBusy] = useState(false)
@@ -11779,6 +11817,7 @@ function ProposalDnttView({ p, users, currentUserId, onClose, canAct, onApprove,
   p: Proposal; users: User[]; currentUserId: string; onClose: () => void; canAct: boolean
   onApprove: (note: string) => Promise<void>; onReject: (note: string) => Promise<void>; onRequestReview: (note: string) => Promise<void>
 }) {
+  useBackToClose(onClose)
   const f: any = p.formData ?? {}
   const [steps, setSteps] = useState<{ id: string; approverId: string; order: number; status: string; decidedAt?: string; note?: string }[]>([])
   const [busy, setBusy] = useState(false)
@@ -12436,6 +12475,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
   proposal: Proposal; users: User[]; currentUser: User; approvals: ProposalApproval[]; revisions: ProposalRevision[]; onClose: () => void; onOpenDoc?: () => void
   canAct?: boolean; onApprove?: () => void | Promise<void>; onReject?: () => void | Promise<void>; onRequestReview?: () => void | Promise<void>; onEdit?: () => void
 }) {
+  useBackToClose(onClose)
   const [steps, setSteps] = useState<{ id: string; approverId: string; order: number; status: string; note?: string; decidedAt?: string }[]>([])
   const userOf = (id?: string) => users.find(u => u.id === id)
   const initials = (name?: string) => (name ?? '?').split(' ').slice(-2).map(w => w[0]).join('').toUpperCase()
@@ -13142,6 +13182,7 @@ function ProposalModal({ currentUser, users, editingProposal, onClose, onCreated
 function ForwardApprovalModal({ proposal, currentUser, users, onClose }: {
   proposal: Proposal; currentUser: User; users: User[]; onClose: () => void
 }) {
+  useBackToClose(onClose)
   const [teamId, setTeamId] = useState('')
   const deptIds = useDeptMemberIds(teamId)
   const [nextApproverId, setNextApproverId] = useState('')
@@ -14638,6 +14679,7 @@ type DraftProjectTask = { title: string; description: string; assignees: string[
 function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
   currentUser: User; users: User[]; proposals: Proposal[]; onClose: () => void; onCreated: (id: string) => void
 }) {
+  useBackToClose(onClose)
   const [name, setName] = useState('')
   const [company, setCompany] = useState('')
   const [cls, setCls] = useState('initiation')
@@ -15872,6 +15914,7 @@ function ProjectViewFlow(props: {
   onCreateTask?: (projectId: string) => void; onEditTask?: (taskId: string, projectId: string) => void
   focusTaskId?: string | null; onFocusTaskHandled?: () => void
 }) {
+    useBackToClose(props.onClose)
   // Nếu đang đi tới 1 task cụ thể trong dự án thì vào thẳng trang chi tiết, không hiện phiếu
   // Nhớ đang ở phiếu hay chi tiết: tải lại trang vẫn ở đúng chỗ đó (chỉ nhớ cho đúng dự án này)
   const [stage, setStageRaw] = useState<'phieu' | 'detail'>(() => {
@@ -17132,13 +17175,15 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   useEffect(() => { try { localStorage.setItem('sidebarCollapsed', sidebarCollapsed ? '1' : '0') } catch {} }, [sidebarCollapsed])
   const [sidebarPinned, setSidebarPinned] = useState(false)  // bấm KNI Work để mở
   const [viewingEmployee, setViewingEmployee] = useState<User | null>(null)  // quản lý xem Dashboard nhân viên (chỉ xem)
-  // Nút Back của trình duyệt = quay lại trang trước trong web (không thoát hẳn khỏi web)
-const skipPushRef = useRef(false)
+ useEffect(() => { if (view !== 'dashboard') setViewingEmployee(null) }, [view])
+// Nút Back của trình duyệt = quay lại trang trước trong web (không thoát hẳn khỏi web)
+const viewRef = useRef(view)
+viewRef.current = view
 const firstRunRef = useRef(true)
 useEffect(() => {
   const onPop = (e: PopStateEvent) => {
     const v = e.state && e.state.appView
-    if (v) { skipPushRef.current = true; setView(v as View); setViewingEmployee(null) }
+    if (v && v !== viewRef.current) { setView(v as View); setViewingEmployee(null) }
   }
   window.addEventListener('popstate', onPop)
   return () => window.removeEventListener('popstate', onPop)
@@ -17146,14 +17191,21 @@ useEffect(() => {
 useEffect(() => {
   if (firstRunRef.current) {
     firstRunRef.current = false
-    window.history.replaceState({ appView: view }, '')
+    if (window.history.state && window.history.state.appView) {
+      // Tải lại trang: giữ nguyên lịch sử đã có
+      window.history.replaceState({ appView: view }, '')
+    } else if (view !== 'dashboard') {
+      // Vừa vào web ở trang khác Dashboard: thêm 1 bước Dashboard phía sau để Back là về Dashboard
+      window.history.replaceState({ appView: 'dashboard' }, '')
+      window.history.pushState({ appView: view }, '')
+    } else {
+      window.history.replaceState({ appView: view }, '')
+    }
     return
   }
-  if (skipPushRef.current) { skipPushRef.current = false; return }
   if (window.history.state?.appView === view) return
   window.history.pushState({ appView: view }, '')
 }, [view])
-  useEffect(() => { if (view !== 'dashboard') setViewingEmployee(null) }, [view])
   const sidebarOpen = sidebarPinned || sidebarHover
   const [theme, setTheme] = useState<ThemeMode>(() => (localStorage.getItem('themeMode') as ThemeMode) || 'light')
   const themeVars = useThemeVars(theme)
@@ -17330,6 +17382,7 @@ useEffect(() => {
                       onClick={() => {
                         // Bấm menu = muốn vào danh sách: quên dự án/phiếu đang mở (còn reload trang thì vẫn giữ nguyên chỗ cũ)
                         try { sessionStorage.removeItem('projectDetailId'); sessionStorage.removeItem('projectStage') } catch {}
+                        setViewingEmployee(null)
                         setView(item.id as View)
                         setSidebarHover(false)
                         if (item.id === 'social' && mentionCount > 0) setShowMentions(true)
