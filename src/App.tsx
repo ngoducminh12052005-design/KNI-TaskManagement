@@ -17132,6 +17132,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   useEffect(() => { try { localStorage.setItem('sidebarCollapsed', sidebarCollapsed ? '1' : '0') } catch {} }, [sidebarCollapsed])
   const [sidebarPinned, setSidebarPinned] = useState(false)  // bấm KNI Work để mở
   const [viewingEmployee, setViewingEmployee] = useState<User | null>(null)  // quản lý xem Dashboard nhân viên (chỉ xem)
+  useEffect(() => { if (view !== 'dashboard') setViewingEmployee(null) }, [view])
   const sidebarOpen = sidebarPinned || sidebarHover
   const [theme, setTheme] = useState<ThemeMode>(() => (localStorage.getItem('themeMode') as ThemeMode) || 'light')
   const themeVars = useThemeVars(theme)
