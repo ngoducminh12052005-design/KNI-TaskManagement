@@ -25,11 +25,17 @@ function updateAppBadge(count: number) {
 import * as XLSX from 'xlsx'
 // ===== Nút Back của trình duyệt: đóng cửa sổ / chi tiết đang mở thay vì thoát khỏi web =====
 const openOverlays = new Set<string>()
+let currentAppView = ''   // trang (view) đang hiển thị, App cập nhật mỗi lần render
 function useBackToClose(onClose?: () => void) {
   const closeRef = useRef(onClose)
   closeRef.current = onClose
   useEffect(() => {
     const id = Math.random().toString(36).slice(2)
+    // Mở chi tiết/form từ TRANG KHÁC (VD từ Dashboard bấm vào task): thêm bước "trang danh sách" trước,
+    // để bấm Back là ra danh sách, Back nữa mới về trang cũ (không nhảy lung tung)
+    if (currentAppView && window.history.state?.appView !== currentAppView) {
+      window.history.pushState({ appView: currentAppView }, '')
+    }
     const cur = window.history.state
     const next = { ...(cur || {}), overlay: id }
     // Nếu bước lịch sử hiện tại là của 1 cửa sổ đã đóng thì dùng lại, không tạo thêm bước thừa
@@ -4039,6 +4045,7 @@ async function rejectTaskResult(task: Task, me: User, reason: string) {
 }
 
 function RejectResultModal({ task, currentUser, onClose }: { task: Task; currentUser: User; onClose: () => void }) {
+  useBackToClose(onClose)
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
   const go = async () => {
@@ -4419,6 +4426,7 @@ function CloseTaskModal({ task, currentUser, users, onClose }: { task: Task; cur
 function CollaborationRequestModal({ currentUser, users, onClose }: {
   currentUser: User; users: User[]; onClose: () => void
 }) {
+  useBackToClose(onClose)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [startDate, setStartDate] = useState('')
@@ -7940,6 +7948,7 @@ function UserProfileCard({ user, onClose, onMessage }: { user: User; onClose: ()
 function BrowseByDepartmentModal({ users, currentUser, onSelectUser, onClose }: {
   users: User[]; currentUser: User; onSelectUser: (userId: string) => void; onClose: () => void
 }) {
+  useBackToClose(onClose)
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
 
@@ -8090,6 +8099,7 @@ function CreateRoomModal({ currentUser, users, onClose, onCreated }: { currentUs
 }
 
 function RoomMembersModal({ room, memberIds, currentUser, users, onClose, onGone }: { room: ChatRoom; memberIds: string[]; currentUser: User; users: User[]; onClose: () => void; onGone: () => void }) {
+  useBackToClose(onClose)
   const isOwner = room.createdBy === currentUser.id
   const [q, setQ] = useState('')
   const [busy, setBusy] = useState(false)
@@ -9300,6 +9310,7 @@ function docDiff(
   return { added: added.join('\n'), edited: edited.join('\n') }
 }
 function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, projectId }: { currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void; editing?: Proposal | null; projectId?: string }) {
+  useBackToClose(onClose)
   const noiDungRef = useRef<HTMLTextAreaElement>(null)
   const handleNoiDungPaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const file = Array.from(e.clipboardData.items).find(it => it.type.startsWith('image/'))?.getAsFile()
@@ -9996,6 +10007,7 @@ type DnttRow = { desc: string; unit: string; qty: string; price: string; invoice
 const DNTT_ROLES = ['Trưởng bộ phận/ OM/ Quản lý đơn vị', 'Kế toán trưởng', 'Ban Giám đốc/ Ban Giám Hiệu']
 
 function ProposalDnttForm({ currentUser, users, onClose, onCreated }: { currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void }) {
+  useBackToClose(onClose)
   const now = new Date()
   const dateText = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`
   const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)   // gồm cả chính người tạo nếu là quản lý (có thể tự là Trưởng bộ phận)
@@ -10670,6 +10682,7 @@ function FormDocBody({ tpl, f, set, ro, users, requester, code, dateText }: {
 
 // ---------- Form tạo mới ----------
 function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { tpl: FormTpl; currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void }) {
+  useBackToClose(onClose)
   const cfg = FORM_TPL[tpl]
   const now = new Date()
   const dateText = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`
@@ -11200,6 +11213,7 @@ function HopDongOpinions({ rows, myNote, setMyNote, pick, choice = '', setChoice
 function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated, editing }: {
   currentUser: User; users: User[]; proposals?: Proposal[]; onClose: () => void; onCreated?: (id: string) => void; editing?: Proposal | null
 }) {
+  useBackToClose(onClose)
   const now = new Date()
   const dateText = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`
   const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)
@@ -11784,6 +11798,7 @@ function HopDongDetailLeft({ p, users, currentUser, flow, canAct, onApprove, onR
 
 
 function ProposalGroupPicker({ onPick, onBack, onClose }: { onPick: (g: string) => void; onBack: () => void; onClose: () => void }) {
+  useBackToClose(onClose)
   const opts: [string, string, string][] = [
     ['Mua sắm', '🛒', 'Đề xuất mua sắm thiết bị, vật tư, dịch vụ'],
     ['Nghỉ phép', '🏖️', 'Đơn xin nghỉ phép'],
@@ -12083,6 +12098,7 @@ function ApproverPicker({ users, excludeIds, value, onChange, tone = 'light' }: 
   )
 }
 function ProposalKindPicker({ onPick, onClose }: { onPick: (k: 'dexuat' | 'totrinh') => void; onClose: () => void }) {
+  useBackToClose(onClose)
   const Opt = ({ k, icon, title, desc }: { k: 'dexuat' | 'totrinh'; icon: string; title: string; desc: string }) => (
     <button type="button" onClick={() => onPick(k)}
       className="w-full text-left rounded-xl p-4 transition-colors hover:opacity-90"
@@ -12801,6 +12817,7 @@ async function generateProposalCode(userId: string): Promise<string> {
 }
 
 function ProposalModal({ currentUser, users, editingProposal, onClose, onCreated, kind = 'dexuat', initialGroup = '' }: { currentUser: User; users: User[]; editingProposal?: Proposal | null; onClose: () => void; onCreated?: (id: string) => void; kind?: 'dexuat' | 'totrinh'; initialGroup?: string }) {
+  useBackToClose(onClose)
   const [title, setTitle] = useState(editingProposal?.title ?? '')
   const [description, setDescription] = useState(editingProposal?.description ?? '')
   const [driveUrl, setDriveUrl] = useState(editingProposal?.driveUrl ?? '')
@@ -15101,6 +15118,7 @@ async function generateProjectTaskCode(projectId: string, projectCode: string, s
 function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
   project: Project; users: User[]; currentUser: User; canAssign: boolean; onClose: () => void
 }) {
+  useBackToClose(onClose)
   const todayStr = localToday()
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -17179,6 +17197,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   // Nút Back của trình duyệt = quay lại trang trước trong web; ở Dashboard bấm Back thì ở yên, không thoát web
   const viewRef = useRef(view)
   viewRef.current = view
+  currentAppView = view
   const firstRunRef = useRef(true)
   useEffect(() => {
     const onPop = (e: PopStateEvent) => {
