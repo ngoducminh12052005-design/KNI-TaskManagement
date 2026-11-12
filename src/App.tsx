@@ -9207,7 +9207,7 @@ function DeptUserSelect({ users, excludeId, value, onChange }: {
     .sort((a, b) => (b.role === 'manager' ? 1 : 0) - (a.role === 'manager' ? 1 : 0))
   const cls = 'w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white disabled:bg-gray-100'
   return (
-    <div className="mt-4 space-y-1.5">
+    <div className="space-y-1.5">
       <select value={teamId} onChange={e => { setTeamId(e.target.value); onChange('') }} className={cls} style={{ color: '#111827' }}>
         <option value="">-- Chọn phòng ban --</option>
         {TEAMS.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
@@ -9622,7 +9622,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
         )}
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-8 text-center">
           <div className="flex flex-col">
-            <div style={{ minHeight: 74 }}>
+            <div style={{ minHeight: 96 }}>
               <p className="font-bold">Người lập tờ trình</p>
               <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
             </div>
@@ -9630,7 +9630,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
           </div>
 
           <div className="flex flex-col">
-            <div style={{ minHeight: 74 }}>
+            <div style={{ minHeight: 96 }}>
               <p className="font-bold">Trưởng bộ phận</p>
               <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
             </div>
@@ -9643,14 +9643,14 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
           </div>
 
           <div className="flex flex-col">
-            <div style={{ minHeight: 74 }}>
+            <div style={{ minHeight: 96 }}>
               <p className="font-bold">Kế toán trưởng</p>
               <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
             </div>
             <DeptUserSelect users={users} excludeId={currentUser.id} value={kttId} onChange={setKttId} />
           </div>
           <div className="flex flex-col">
-            <div style={{ minHeight: 74 }}>
+            <div style={{ minHeight: 96 }}>
               <p className="font-bold">Giám đốc công ty</p>
               <input list="gd-companies" value={gdCompany} onChange={e => setGdCompany(e.target.value)}
                 placeholder="Chọn tên công ty"
@@ -9663,22 +9663,22 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
             <DeptUserSelect users={users} excludeId={currentUser.id} value={gdId} onChange={setGdId} />
           </div>
           <div className="flex flex-col">
-            <div style={{ minHeight: 74 }}>
+            <div style={{ minHeight: 96 }}>
               <p className="font-bold">Ban Giám đốc Tập đoàn</p>
               <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
             </div>
-            <div className="space-y-1">
+            <div className="space-y-1.5">
+              <select value="" onChange={e => { if (e.target.value) setBgdIds(prev => [...prev, e.target.value]) }}
+                className="w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white" style={ink}>
+                <option value="">+ Chọn thêm người</option>
+                {userOptions()}
+              </select>
               {bgdIds.map(id => (
                 <div key={id} className="flex items-center justify-between gap-1 text-xs text-gray-700">
                   <span className="truncate">{nameOf(id)}</span>
                   <button type="button" onClick={() => setBgdIds(prev => prev.filter(x => x !== id))} className="text-red-500">✕</button>
                 </div>
               ))}
-              <select value="" onChange={e => { if (e.target.value) setBgdIds(prev => [...prev, e.target.value]) }}
-                className="w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white" style={ink}>
-                <option value="">+ Chọn thêm người</option>
-                {userOptions()}
-              </select>
             </div>
           </div>
           </div>
