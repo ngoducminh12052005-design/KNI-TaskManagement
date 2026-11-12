@@ -17132,6 +17132,27 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   useEffect(() => { try { localStorage.setItem('sidebarCollapsed', sidebarCollapsed ? '1' : '0') } catch {} }, [sidebarCollapsed])
   const [sidebarPinned, setSidebarPinned] = useState(false)  // bấm KNI Work để mở
   const [viewingEmployee, setViewingEmployee] = useState<User | null>(null)  // quản lý xem Dashboard nhân viên (chỉ xem)
+  // Nút Back của trình duyệt = quay lại trang trước trong web (không thoát hẳn khỏi web)
+const skipPushRef = useRef(false)
+const firstRunRef = useRef(true)
+useEffect(() => {
+  const onPop = (e: PopStateEvent) => {
+    const v = e.state && e.state.appView
+    if (v) { skipPushRef.current = true; setView(v as View); setViewingEmployee(null) }
+  }
+  window.addEventListener('popstate', onPop)
+  return () => window.removeEventListener('popstate', onPop)
+}, [])
+useEffect(() => {
+  if (firstRunRef.current) {
+    firstRunRef.current = false
+    window.history.replaceState({ appView: view }, '')
+    return
+  }
+  if (skipPushRef.current) { skipPushRef.current = false; return }
+  if (window.history.state?.appView === view) return
+  window.history.pushState({ appView: view }, '')
+}, [view])
   useEffect(() => { if (view !== 'dashboard') setViewingEmployee(null) }, [view])
   const sidebarOpen = sidebarPinned || sidebarHover
   const [theme, setTheme] = useState<ThemeMode>(() => (localStorage.getItem('themeMode') as ThemeMode) || 'light')
