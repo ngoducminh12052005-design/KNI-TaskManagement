@@ -9344,7 +9344,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
   ].filter((s, i, arr) => s.id && arr.findIndex(x => x.id === s.id) === i)
   const approverIds = slots.map(s => s.id)
   const signRoles = slots.map(s => s.role)
-  const sel = 'mt-6 w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white'
+  const sel = 'w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white'
   const userOptions = () => (
     <>
       {TEAMS.map(t => {
@@ -9634,7 +9634,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
               <p className="font-bold">Trưởng bộ phận</p>
               <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
             </div>
-            <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className={sel} style={ink}>
+            <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className="w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white" style={ink}>
               <option value="">-- Chọn người ký --</option>
               {(myManagers.length > 0 ? myManagers : users.filter(u => u.id !== currentUser.id)).map(u => (
                 <option key={u.id} value={u.id}>{u.name}</option>
