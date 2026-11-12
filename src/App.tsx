@@ -17176,41 +17176,36 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   const [sidebarPinned, setSidebarPinned] = useState(false)  // bấm KNI Work để mở
   const [viewingEmployee, setViewingEmployee] = useState<User | null>(null)  // quản lý xem Dashboard nhân viên (chỉ xem)
  useEffect(() => { if (view !== 'dashboard') setViewingEmployee(null) }, [view])
-  // Nút Back của trình duyệt = quay lại trang trước trong web; ở Dashboard bấm Back thì ở yên, không thoát web
-  const viewRef = useRef(view)
-  viewRef.current = view
-  const firstRunRef = useRef(true)
-  useEffect(() => {
-    const onPop = (e: PopStateEvent) => {
-      const st = e.state
-      if (st && st.base) {
-        // Chạm tới bước chặn ở đầu: ở lại Dashboard, không cho thoát khỏi web
-        if (viewRef.current !== 'dashboard') { setView('dashboard'); setViewingEmployee(null) }
-        window.history.pushState({ appView: 'dashboard' }, '')
-        return
-      }
-      const v = st && st.appView
-      if (v && v !== viewRef.current) { setView(v as View); setViewingEmployee(null) }
+// Nút Back của trình duyệt = quay lại trang trước trong web (không thoát hẳn khỏi web)
+const viewRef = useRef(view)
+viewRef.current = view
+const firstRunRef = useRef(true)
+useEffect(() => {
+  const onPop = (e: PopStateEvent) => {
+    const v = e.state && e.state.appView
+    if (v && v !== viewRef.current) { setView(v as View); setViewingEmployee(null) }
+  }
+  window.addEventListener('popstate', onPop)
+  return () => window.removeEventListener('popstate', onPop)
+}, [])
+useEffect(() => {
+  if (firstRunRef.current) {
+    firstRunRef.current = false
+    if (window.history.state && window.history.state.appView) {
+      // Tải lại trang: giữ nguyên lịch sử đã có
+      window.history.replaceState({ appView: view }, '')
+    } else if (view !== 'dashboard') {
+      // Vừa vào web ở trang khác Dashboard: thêm 1 bước Dashboard phía sau để Back là về Dashboard
+      window.history.replaceState({ appView: 'dashboard' }, '')
+      window.history.pushState({ appView: view }, '')
+    } else {
+      window.history.replaceState({ appView: view }, '')
     }
-    window.addEventListener('popstate', onPop)
-    return () => window.removeEventListener('popstate', onPop)
-  }, [])
-  useEffect(() => {
-    if (firstRunRef.current) {
-      firstRunRef.current = false
-      if (window.history.state && window.history.state.appView) {
-        // Tải lại trang: giữ nguyên lịch sử đã có
-        window.history.replaceState({ appView: view }, '')
-      } else {
-        // Vừa vào web: bước đầu là Dashboard (bước chặn), rồi mới tới trang đang xem
-        window.history.replaceState({ appView: 'dashboard', base: true }, '')
-        window.history.pushState({ appView: view }, '')
-      }
-      return
-    }
-    if (window.history.state?.appView === view) return
-    window.history.pushState({ appView: view }, '')
-  }, [view])
+    return
+  }
+  if (window.history.state?.appView === view) return
+  window.history.pushState({ appView: view }, '')
+}, [view])
   const sidebarOpen = sidebarPinned || sidebarHover
   const [theme, setTheme] = useState<ThemeMode>(() => (localStorage.getItem('themeMode') as ThemeMode) || 'light')
   const themeVars = useThemeVars(theme)
