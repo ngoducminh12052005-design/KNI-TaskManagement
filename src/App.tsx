@@ -10694,13 +10694,45 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
   const [driveUrl, setDriveUrl] = useState('')
   const [recipientId, setRecipientId] = useState('')
   const [extraApprovers, setExtraApprovers] = useState<string[]>([])
-  const [approvalMode, setApprovalMode] = useState<'seq' | 'par'>('seq')
+  const [approvalModeSel, setApprovalMode] = useState<'seq' | 'par'>('seq')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
+  // Phiếu mua sắm dùng ô ký giống Tờ trình: Người lập, Trưởng bộ phận, Kế toán trưởng, Giám đốc công ty, Ban Giám đốc Tập đoàn
+  const isMua = tpl === 'muasam'
+  const [kttId, setKttId] = useState('')
+  const [gdId, setGdId] = useState('')
+  const [gdCompany, setGdCompany] = useState('')
+  const [bgdIds, setBgdIds] = useState<string[]>([])
+  const [priority, setPriority] = useState('P3')
+  const approvalMode = isMua ? docModeOf(priority) : approvalModeSel   // mua sắm: P1/P2 song song, P3/P4 nối tiếp
+
   const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? ''
-  const approverIds = [recipientId, ...extraApprovers.filter(id => id !== recipientId)].filter(Boolean)
-  const roleOf = (i: number) => cfg.roles[i] ?? `Người duyệt ${i + 1}`
+  const slots: { role: string; id: string }[] = isMua
+    ? [
+        { role: 'Trưởng bộ phận', id: recipientId },
+        { role: 'Kế toán trưởng', id: kttId },
+        { role: gdCompany.trim() ? `Giám đốc công ty ${gdCompany.trim()}` : 'Giám đốc công ty', id: gdId },
+        ...bgdIds.map(id => ({ role: 'Ban Giám đốc Tập đoàn', id })),
+      ].filter((s, i, arr) => s.id && arr.findIndex(x => x.id === s.id) === i)
+    : [recipientId, ...extraApprovers.filter(id => id !== recipientId)].filter(Boolean).map((id, i) => ({ role: cfg.roles[i] ?? `Người duyệt ${i + 1}`, id }))
+  const approverIds = slots.map(s => s.id)
+  const signRoles = slots.map(s => s.role)
+  const roleOf = (i: number) => signRoles[i] ?? `Người duyệt ${i + 1}`
+  const sel = 'mt-6 w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white'
+  const userOptions = () => (
+    <>
+      {TEAMS.map(t => {
+        const m = users.filter(u => u.id !== currentUser.id && u.teamId === t.id)
+        return m.length === 0 ? null : (
+          <optgroup key={t.id} label={`${t.emoji} ${t.name}`}>
+            {m.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+          </optgroup>
+        )
+      })}
+      {users.filter(u => u.id !== currentUser.id && !TEAMS.some(t => t.id === u.teamId)).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+    </>
+  )
   const ink = { color: '#111827' }
 
   const pickFiles = (e: { target: HTMLInputElement }) => {
@@ -10768,7 +10800,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
     try { uploaded = await uploadProposalFiles(currentUser.id, files) }
     catch (err: any) { setSaving(false); setError('Tải file thất bại: ' + (err?.message ?? '')); return }
 
-    const formData = { ...cleaned, tpl, dateText, total, bangChu: vnMoneyWords(total) }
+    const formData = { ...cleaned, tpl, dateText, total, bangChu: vnMoneyWords(total), ...(isMua ? { priority, signRoles } : {}) }
     const participants = Array.from(new Set([currentUser.id, ...approverIds, ...(tpl === 'nghiphep' && f.handoverId ? [f.handoverId] : [])]))
 
     let data: any = null
@@ -10843,6 +10875,63 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
             )}
           </div>
 
+          {isMua ? (
+            <>
+              <p className="mt-8 mb-1 font-bold text-center">XÁC NHẬN & PHÊ DUYỆT</p>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4 text-center text-xs">
+                <div>
+                  <p className="font-bold text-[13px]">Người lập</p>
+                  <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+                  <p className="mt-10 text-xs text-gray-500">{currentUser.name}</p>
+                  <p className="text-gray-500">Ngày: {dateText}</p>
+                </div>
+                <div>
+                  <p className="font-bold text-[13px]">Trưởng bộ phận</p>
+                  <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+                  <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className={sel} style={ink}>
+                    <option value="">-- Chọn người ký --</option>
+                    {(myManagers.length > 0 ? myManagers : users.filter(u => u.id !== currentUser.id)).map(u => (
+                      <option key={u.id} value={u.id}>{u.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <p className="font-bold text-[13px]">Kế toán trưởng</p>
+                  <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+                  <DeptUserSelect users={users} excludeId={currentUser.id} value={kttId} onChange={setKttId} />
+                </div>
+                <div>
+                  <p className="font-bold text-[13px]">Giám đốc công ty</p>
+                  <input list="gd-companies-ms" value={gdCompany} onChange={e => setGdCompany(e.target.value)}
+                    placeholder="Chọn tên công ty"
+                    className="mt-1 w-full border-b border-dashed border-gray-300 bg-transparent outline-none text-center text-xs" style={ink} />
+                  <datalist id="gd-companies-ms">
+                    {COMPANIES.map(c => <option key={c} value={c} />)}
+                  </datalist>
+                  <p className="font-bold text-xs mt-1">(Ký, ghi rõ họ tên)</p>
+                  <DeptUserSelect users={users} excludeId={currentUser.id} value={gdId} onChange={setGdId} />
+                </div>
+                <div>
+                  <p className="font-bold text-[13px]">Ban Giám đốc Tập đoàn</p>
+                  <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+                  <div className="mt-6 space-y-1">
+                    {bgdIds.map(id => (
+                      <div key={id} className="flex items-center justify-between gap-1 text-xs text-gray-700">
+                        <span className="truncate">{nameOf(id)}</span>
+                        <button type="button" onClick={() => setBgdIds(prev => prev.filter(x => x !== id))} className="text-red-500">✕</button>
+                      </div>
+                    ))}
+                    <select value="" onChange={e => { if (e.target.value) setBgdIds(prev => [...prev, e.target.value]) }}
+                      className="w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white" style={ink}>
+                      <option value="">+ Chọn thêm người</option>
+                      {userOptions()}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
           <p className="mt-8 mb-1 font-bold text-center">XÁC NHẬN & PHÊ DUYỆT</p>
           <div className="grid gap-3 text-center text-xs" style={{ gridTemplateColumns: `repeat(${Math.min(5, sigCols)}, minmax(0, 1fr))` }}>
             <div>
@@ -10868,8 +10957,30 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
               </div>
             ))}
           </div>
+            </>
+          )}
         </div>
 
+        {isMua ? (
+          <div className="max-w-[860px] mx-auto mb-4 bg-white shadow-xl p-6 text-[13px] space-y-4" style={ink}>
+            <p className="font-bold">Luồng phê duyệt</p>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Mức độ ưu tiên *</label>
+              <select value={priority} onChange={e => setPriority(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
+                <option value="P1">P1 · Rất khẩn cấp</option>
+                <option value="P2">P2 · Khẩn cấp</option>
+                <option value="P3">P3 · Bình thường</option>
+                <option value="P4">P4 · Thấp</option>
+              </select>
+              <p className="text-[11px] text-gray-500 mt-1">
+                {approvalMode === 'par' ? '⚡ P1, P2: Trưởng bộ phận duyệt trước, sau đó các người còn lại nhận cùng lúc (song song).' : '➡️ P3, P4: duyệt lần lượt từng người (nối tiếp).'}
+              </p>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                🏛️ Ban Giám đốc Tập đoàn duyệt thì phiếu coi như đã được duyệt, những người còn lại không cần duyệt nữa.
+              </p>
+            </div>
+          </div>
+        ) : (
         <div className="max-w-[860px] mx-auto mb-4 bg-white shadow-xl p-6 text-[13px] space-y-4" style={ink}>
           <p className="font-bold">Luồng phê duyệt</p>
           <div>
@@ -10904,6 +11015,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
             </select>
           </div>
         </div>
+        )}
       </div>
 
       <div className="shrink-0 px-4 py-3 flex items-center justify-end gap-3" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
@@ -10955,7 +11067,7 @@ function ProposalFormDocView({ p, users, currentUserId, onClose, canAct, onAppro
   const STATUS_COLOR: Record<string, string> = {
     approved: '#059669', pending: '#b45309', waiting: '#6b7280', rejected: '#dc2626', revision: '#b45309', skipped: '#6b7280',
   }
-  const roleOf = (i: number) => cfg.roles[i] ?? `Người duyệt ${i + 1}`
+  const roleOf = (i: number) => (Array.isArray(f.signRoles) && f.signRoles[i]) || cfg.roles[i] || `Người duyệt ${i + 1}`
   const ink = { color: '#111827' }
   const isReview = p.status === 'rejected' && !!p.rejectedReason?.startsWith('[REVIEW]')
   const requester = users.find(u => u.id === p.submittedBy)
@@ -10999,7 +11111,7 @@ function ProposalFormDocView({ p, users, currentUserId, onClose, canAct, onAppro
           <p className="mt-8 mb-1 font-bold text-center">XÁC NHẬN & PHÊ DUYỆT</p>
           <div className="grid gap-3 text-center text-xs" style={{ gridTemplateColumns: `repeat(${Math.min(5, sigCols)}, minmax(0, 1fr))` }}>
             <div>
-              <p className="font-bold">{tpl === 'nghiphep' ? 'Người làm đơn' : 'Người đề xuất'}</p>
+              <p className="font-bold">{tpl === 'nghiphep' ? 'Người làm đơn' : tpl === 'muasam' ? 'Người lập' : 'Người đề xuất'}</p>
               <p className="italic text-blue-600">(Ký & ghi rõ họ tên)</p>
               <p className="mt-8 font-semibold">{nameOf(p.submittedBy)}</p>
               <p className="text-gray-500">Ngày: {dateText}</p>
