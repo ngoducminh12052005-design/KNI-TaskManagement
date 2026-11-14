@@ -10799,7 +10799,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
   const approverIds = slots.map(s => s.id)
   const signRoles = slots.map(s => s.role)
   const roleOf = (i: number) => signRoles[i] ?? `Người duyệt ${i + 1}`
-  const sel = 'mt-6 w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white'
+  const sel = 'w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white'
   const userOptions = () => (
     <>
       {TEAMS.map(t => {
@@ -10957,17 +10957,21 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
 
           {isMua ? (
             <>
-              <p className="mt-8 mb-1 font-bold text-center">XÁC NHẬN & PHÊ DUYỆT</p>
+                            <p className="mt-8 mb-1 font-bold text-center">XÁC NHẬN & PHÊ DUYỆT</p>
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4 text-center text-xs">
-                <div>
-                  <p className="font-bold text-[13px]">Người lập</p>
-                  <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
-                  <p className="mt-10 text-xs text-gray-500">{currentUser.name}</p>
+                <div className="flex flex-col">
+                  <div style={{ minHeight: 96 }}>
+                    <p className="font-bold text-[13px]">Người lập</p>
+                    <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+                  </div>
+                  <p className="mt-2 text-xs text-gray-500">{currentUser.name}</p>
                   <p className="text-gray-500">Ngày: {dateText}</p>
                 </div>
-                <div>
-                  <p className="font-bold text-[13px]">Trưởng bộ phận</p>
-                  <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+                <div className="flex flex-col">
+                  <div style={{ minHeight: 96 }}>
+                    <p className="font-bold text-[13px]">Trưởng bộ phận</p>
+                    <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+                  </div>
                   <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className={sel} style={ink}>
                     <option value="">-- Chọn người ký --</option>
                     {(myManagers.length > 0 ? myManagers : users.filter(u => u.id !== currentUser.id)).map(u => (
@@ -10975,37 +10979,43 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
                     ))}
                   </select>
                 </div>
-                <div>
-                  <p className="font-bold text-[13px]">Kế toán trưởng</p>
-                  <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+                <div className="flex flex-col">
+                  <div style={{ minHeight: 96 }}>
+                    <p className="font-bold text-[13px]">Kế toán trưởng</p>
+                    <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+                  </div>
                   <DeptUserSelect users={users} excludeId={currentUser.id} value={kttId} onChange={setKttId} />
                 </div>
-                <div>
-                  <p className="font-bold text-[13px]">Giám đốc công ty</p>
-                  <input list="gd-companies-ms" value={gdCompany} onChange={e => setGdCompany(e.target.value)}
-                    placeholder="Chọn tên công ty"
-                    className="mt-1 w-full border-b border-dashed border-gray-300 bg-transparent outline-none text-center text-xs" style={ink} />
-                  <datalist id="gd-companies-ms">
-                    {COMPANIES.map(c => <option key={c} value={c} />)}
-                  </datalist>
-                  <p className="font-bold text-xs mt-1">(Ký, ghi rõ họ tên)</p>
+                <div className="flex flex-col">
+                  <div style={{ minHeight: 96 }}>
+                    <p className="font-bold text-[13px]">Giám đốc công ty</p>
+                    <input list="gd-companies-ms" value={gdCompany} onChange={e => setGdCompany(e.target.value)}
+                      placeholder="Chọn tên công ty"
+                      className="mt-1 w-full border-b border-dashed border-gray-300 bg-transparent outline-none text-center text-xs" style={ink} />
+                    <datalist id="gd-companies-ms">
+                      {COMPANIES.map(c => <option key={c} value={c} />)}
+                    </datalist>
+                    <p className="font-bold text-xs mt-1">(Ký, ghi rõ họ tên)</p>
+                  </div>
                   <DeptUserSelect users={users} excludeId={currentUser.id} value={gdId} onChange={setGdId} />
                 </div>
-                <div>
-                  <p className="font-bold text-[13px]">Ban Giám đốc Tập đoàn</p>
-                  <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
-                  <div className="mt-6 space-y-1">
+                <div className="flex flex-col">
+                  <div style={{ minHeight: 96 }}>
+                    <p className="font-bold text-[13px]">Ban Giám đốc Tập đoàn</p>
+                    <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <select value="" onChange={e => { if (e.target.value) setBgdIds(prev => [...prev, e.target.value]) }}
+                      className="w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white" style={ink}>
+                      <option value="">+ Chọn thêm người</option>
+                      {userOptions()}
+                    </select>
                     {bgdIds.map(id => (
                       <div key={id} className="flex items-center justify-between gap-1 text-xs text-gray-700">
                         <span className="truncate">{nameOf(id)}</span>
                         <button type="button" onClick={() => setBgdIds(prev => prev.filter(x => x !== id))} className="text-red-500">✕</button>
                       </div>
                     ))}
-                    <select value="" onChange={e => { if (e.target.value) setBgdIds(prev => [...prev, e.target.value]) }}
-                      className="w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white" style={ink}>
-                      <option value="">+ Chọn thêm người</option>
-                      {userOptions()}
-                    </select>
                   </div>
                 </div>
               </div>
