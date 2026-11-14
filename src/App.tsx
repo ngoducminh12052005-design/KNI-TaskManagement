@@ -1044,6 +1044,12 @@ function getSlaStartMs(task: Task): number | null {
   return slaStartAfterOffDays(raw, task.company, !!taskStartTime(task))
 }
 // Tính hạn SLA và kiểm tra trễ hạn
+// Giờ hoàn thành theo SLA (chỉ hiện khi ngày hạn trùng với hạn SLA), VD "09:00"
+function slaDueClock(task: Task): string {
+  const dl = getSlaDeadline(task)
+  if (!dl || !task.dueDate || vnDateKey(dl.getTime()) !== task.dueDate) return ''
+  return new Date(dl.getTime() + VN_OFFSET_MS).toISOString().slice(11, 16)
+}
 function getSlaDeadline(task: Task): Date | null {
   // Đồng hồ SLA chạy từ lúc được giao (slaStartAt), không chờ nhân viên bấm Bắt đầu.
   // Task cũ chưa có slaStartAt thì vẫn tính từ lúc bắt đầu như trước.
@@ -2287,6 +2293,20 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
       return next
     })
 
+  // Ngày + giờ hoàn thành tự tính từ ngày bắt đầu, giờ bắt đầu và mức SLA
+  const slaDue = useMemo(() => {
+    const cfg = form.slaLevel ? (SLA_LEVELS as any)[form.slaLevel] : null
+    if (!cfg || !form.startDate) return null
+    const from = slaStartAfterOffDays(Math.max(Date.now(), startMs(form.startDate, form.startTime)), form.company, !!form.startTime)
+    const end = addSlaSkipOffDays(from, cfg.hours * 3600000, form.company)
+    return { date: vnDateKey(end), time: new Date(end + VN_OFFSET_MS).toISOString().slice(11, 16) }
+  }, [form.slaLevel, form.startDate, form.startTime, form.company])
+  const slaInitRef = useRef(true)
+  useEffect(() => {
+    if (slaInitRef.current) { slaInitRef.current = false; if (editingTask) return }   // mở sửa task cũ: giữ hạn đang có
+    if (slaDue && slaDue.date !== form.dueDate) patchForm({ dueDate: slaDue.date }, { dueDate: slaDue.date })
+  }, [slaDue?.date])
+
   const renderList = (list: string[], set: (v: string[]) => void, bullet: string, placeholder: string) => (
     <div className="space-y-1">
       {list.map((v, i) => (
@@ -2512,7 +2532,14 @@ const hoursMs = (SLA_LEVELS as any)[form.slaLevel].hours * 3600000
                 )}
               </td>
               <td className={`${td} font-bold bg-gray-50`} style={{ width: '22%' }}>Hạn hoàn thành</td>
-              <td className={td}><input type="date" value={form.dueDate} min={form.startDate || undefined} onChange={e => patchForm({ dueDate: e.target.value }, { dueDate: e.target.value })} className={cell} style={ink} /></td>
+              <td className={td}>
+                <div className="flex gap-2">
+                  <input type="date" value={form.dueDate} min={form.startDate || undefined} onChange={e => patchForm({ dueDate: e.target.value }, { dueDate: e.target.value })} className={cell} style={ink} />
+                  <input type="time" value={slaDue?.time ?? ''} readOnly disabled className={cell} style={{ ...ink, maxWidth: 110, opacity: slaDue ? 1 : 0.4 }}
+                    title="Giờ hoàn thành = giờ bắt đầu + mức SLA (tự tính, chỉ có khi chọn mức SLA)" />
+                </div>
+                {slaDue && <p className="text-[10px] mt-1" style={{ color: '#b45309' }}>⏱ Tự tính theo SLA: hoàn thành lúc {slaDue.time} ngày {slaDue.date.split('-').reverse().join('/')}. Cần ngày khác thì sửa tay ô ngày.</p>}
+              </td>
             </tr>
                         <tr>
               <td className={`${td} font-bold bg-gray-50`}>Mức độ SLA</td>
@@ -3415,7 +3442,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
               {info('Hỗ trợ', names(task.supporters))}
               {info('Quản lý (PM)', names(task.projectManager))}
               {info('Ngày bắt đầu', `${fmtD(task.startDate)}${taskStartTime(task) ? ` · ${taskStartTime(task)}` : ''}`)}
-              {info('Hạn hoàn thành', fmtD(task.dueDate))}
+              {info('Hạn hoàn thành', `${fmtD(task.dueDate)}${slaDueClock(task) ? ` · ${slaDueClock(task)}` : ''}`)}
               {info('Mức độ SLA', task.slaLevel ? SLA_LEVELS[task.slaLevel].label : 'Không áp dụng SLA')}
               {task.slaLevel && info('Hạn SLA', getSlaDeadline(task) ? fmtClockVN(getSlaDeadline(task)!.toISOString()) : slaIdleText(task))}
               {task.slaLevel && slaOffDayNote(task.startDate, task.company, taskStartTime(task)) && (
@@ -3689,7 +3716,7 @@ function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, canSen
           {heading('THÔNG TIN GIAO VIỆC')}
           <table className="w-full border-collapse mb-4">
             <tbody>
-              <tr><td className={lab} style={{ width: '22%' }}>Ngày bắt đầu</td><td className={td}>{fmtD(task.startDate)}{taskStartTime(task) ? ` · ${taskStartTime(task)}` : ''}</td><td className={lab} style={{ width: '22%' }}>Hạn hoàn thành</td><td className={td}>{fmtD(task.dueDate)}</td></tr>
+              <tr><td className={lab} style={{ width: '22%' }}>Ngày bắt đầu</td><td className={td}>{fmtD(task.startDate)}{taskStartTime(task) ? ` · ${taskStartTime(task)}` : ''}</td><td className={lab} style={{ width: '22%' }}>Hạn hoàn thành</td><td className={td}>{fmtD(task.dueDate)}{slaDueClock(task) ? ` · ${slaDueClock(task)}` : ''}</td></tr>
               <tr><td className={lab}>Danh mục</td><td className={td} colSpan={3}>{taskCategoryLabel(task.category)}</td></tr>
               <tr><td className={lab}>Mức độ SLA</td><td className={td}>{task.slaLevel ? SLA_LEVELS[task.slaLevel].label : 'Không áp dụng SLA'}</td><td className={lab}>EXP thưởng</td><td className={td}>+{task.expReward}</td></tr>
               <tr><td className={lab}>Trạng thái</td><td className={td} colSpan={3}>{statusText}</td></tr>
