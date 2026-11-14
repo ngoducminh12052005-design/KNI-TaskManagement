@@ -1008,6 +1008,13 @@ const COMPANY_CODES: Record<string, string> = {
   'ACVN': 'ACVN',
 }
 
+// Tên công ty (kể cả dạng viết liền của Dự án) rút gọn để hiện ở cột Co. trong các danh sách cho khỏi tràn
+const COMPANY_SHORT: Record<string, string> = {
+  'FIRSTSTEPS': 'FS',
+  'AMERYS': 'AMR',
+}
+const companyShort = (c: string) => COMPANY_CODES[c] ?? COMPANY_SHORT[c] ?? c
+
 // Gắn tiền tố "KNI-" vào tên task; nếu đổi công ty thì gỡ tiền tố cũ trước
 const withCompanyPrefix = (title: string, company?: string, oldCompany?: string) => {
   let t = title.trim()
@@ -1826,7 +1833,7 @@ function DashboardProposals({ proposals, currentUser, users, onOpen, onViewAll, 
                       <div className="font-mono text-xs font-bold break-all">{p.code ?? '—'}</div>
                       {need && <div className="text-[10px] font-bold mt-0.5" style={{ color: '#7c3aed' }}>📥 Cần bạn duyệt</div>}
                     </td>
-                    <td className={`${td} font-bold`}>{p.company ? (COMPANY_CODES[p.company] ?? p.company) : '—'}</td>
+                    <td className={`${td} font-bold`}>{p.company ? companyShort(p.company) : '—'}</td>
                     <td className={td}><p className="text-sm font-semibold leading-snug break-words">{withCompanyPrefix(p.title, p.company)}</p></td>
                     <td className={td}>
                       <span className="inline-block px-2 py-1 rounded-lg font-semibold whitespace-nowrap" style={{ background: bg, color }}>{label}</span>
@@ -1955,7 +1962,7 @@ setProjects((p.data ?? []).map((x: any) => mapDbProject(x, byProject[x.id] ?? []
                     style={{ borderTop: '1px solid var(--border)', color: 'var(--text-primary)' }}>
                     <td className={td} style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
                     <td className={td}><div className="font-mono text-xs font-bold break-all">{p.code || '—'}</div></td>
-                    <td className={`${td} font-bold`}>{p.company ? (COMPANY_CODES[p.company] ?? p.company) : '—'}</td>
+                    <td className={`${td} font-bold`}>{p.company ? companyShort(p.company) : '—'}</td>
                     <td className={td}><p className="text-sm font-semibold leading-snug break-words">{withCompanyPrefix(p.name, p.company)}</p></td>
                     <td className={td}>
                       <span className="px-2 py-1 rounded-lg font-semibold" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
@@ -5387,7 +5394,7 @@ function TaskTracker({ tasks: rawTasks, users, currentUser }: { tasks: Task[]; u
                 <tr key={t.id} style={isOver(t) ? { background: '#dc262612' } : undefined}>
                   <td className={`${td} text-center`} style={cellBorder}>{i + 1}</td>
                   <td className={`${td} font-mono`} style={cellBorder}>{t.taskCode ?? '—'}</td>
-                  <td className={`${td} text-center font-semibold`} style={cellBorder}>{t.company ? (COMPANY_CODES[t.company] ?? t.company) : '—'}</td>
+                  <td className={`${td} text-center font-semibold`} style={cellBorder}>{t.company ? companyShort(t.company) : '—'}</td>
                   <td className={`${td} font-semibold`} style={cellBorder}>{t.title}</td>
                   <td className={`${td} text-center`} style={cellBorder}>
                     <span className="px-2 py-0.5 rounded-md font-semibold whitespace-nowrap" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
@@ -6245,7 +6252,7 @@ function TaskListTable({ tasks, users, currentUser, onOpen }: { tasks: Task[]; u
                     </div>
                   )}
                 </td>
-                <td className={`${td} font-bold`}>{t.company ? (COMPANY_CODES[t.company] ?? t.company) : '—'}</td>
+                <td className={`${td} font-bold`}>{t.company ? companyShort(t.company) : '—'}</td>
                 <td className={td}>
                   <p className="text-sm font-semibold leading-snug break-words" title={t.description || undefined}>
                     {withCompanyPrefix(t.title, t.company)}
@@ -7808,7 +7815,7 @@ function BodLogView({ tasks, users }: { tasks: Task[]; users: User[] }) {
                         <tr key={t.id} style={{ borderBottom: '1px solid var(--border)' }}>
                           <td className={td} style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
                           <td className={td}><div className="font-mono font-bold break-all" style={{ color: 'var(--text-primary)' }}>{t.taskCode ?? '—'}</div></td>
-                          <td className={`${td} font-bold`} style={{ color: 'var(--text-primary)' }}>{t.company ? (COMPANY_CODES[t.company] ?? t.company) : '—'}</td>
+                          <td className={`${td} font-bold`} style={{ color: 'var(--text-primary)' }}>{t.company ? companyShort(t.company) : '—'}</td>
                           <td className={`${td} text-sm font-semibold break-words`} style={{ color: 'var(--text-primary)', maxWidth: 260 }}>{withCompanyPrefix(t.title, t.company)}</td>
                           <td className={td}>
                             <span className="px-2 py-1 rounded-lg font-semibold whitespace-nowrap"
@@ -13708,7 +13715,7 @@ function ProposalListTable({ proposals, users, currentUser, isMyTurn, onOpen }: 
                   <div className="font-mono text-xs font-bold break-all">{p.code ?? '—'}</div>
                   {need && <div className="text-[10px] font-bold mt-0.5" style={{ color: '#7c3aed' }}>📥 Cần bạn duyệt</div>}
                 </td>
-                <td className={`${td} font-bold`}>{p.company ? (COMPANY_CODES[p.company] ?? p.company) : '—'}</td>
+                <td className={`${td} font-bold`}>{p.company ? companyShort(p.company) : '—'}</td>
                 <td className={td}>
                   <p className="text-sm font-semibold leading-snug break-words">{withCompanyPrefix(p.title, p.company)}</p>
                   <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
@@ -16313,7 +16320,7 @@ function ProjectListTable({ projects, tasks, users, currentUser, canSee, onOpen 
                   : <span className="px-2 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap shrink-0" style={{ background: st[1], color: st[2] }}>{st[0]}</span>}
               </div>
               <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>
-                {p.company ? (COMPANY_CODES[p.company] ?? p.company) : '—'} · {p.memberIds.length} thành viên · {list.length} task
+                {p.company ? companyShort(p.company) : '—'} · {p.memberIds.length} thành viên · {list.length} task
                 {waiting > 0 && <span style={{ color: '#7c3aed' }}> · 📤 {waiting} chờ duyệt</span>}
                 {late > 0 && <span style={{ color: '#dc2626' }}> · ⚠️ {late} quá hạn</span>}
               </p>
@@ -16366,7 +16373,7 @@ function ProjectListTable({ projects, tasks, users, currentUser, canSee, onOpen 
                 style={{ borderTop: '1px solid var(--border)', background: late > 0 ? '#dc262612' : undefined, color: 'var(--text-primary)' }}>
                 <td className={td} style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
                 <td className={td}><div className="font-mono text-xs font-bold break-all">{p.code || '—'}</div></td>
-                <td className={`${td} font-bold`}>{p.company ? (COMPANY_CODES[p.company] ?? p.company) : '—'}</td>
+                <td className={`${td} font-bold`}>{p.company ? companyShort(p.company) : '—'}</td>
                 <td className={td}>
                   <p className="text-sm font-semibold leading-snug break-words">{p.name}</p>
                   <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
