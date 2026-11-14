@@ -10430,9 +10430,9 @@ type FormTpl = 'nghiphep' | 'congtac' | 'muasam'
 
 const FORM_TPL: Record<FormTpl, { group: string; icon: string; title: string; en: string; formNo: string; roles: string[]; hint: string; noun: string }> = {
   nghiphep: {
-    group: 'Nghỉ phép', icon: '🏖️', title: 'ĐƠN XIN NGHỈ PHÉP', en: '(Leave Application Form)', formNo: 'BM-HR-01',
-    roles: ['Trưởng bộ phận', 'Phòng Nhân sự (HR)', 'Ban Giám đốc (nếu > 3 ngày)'],
-    hint: 'chọn phòng ban rồi chọn lần lượt <b>Phòng Nhân sự (HR)</b>, <b>Ban Giám đốc</b> (nếu nghỉ trên 3 ngày)',
+    group: 'Nghỉ phép', icon: '🏖️', title: 'ĐƠN XIN NGHỈ PHÉP', en: '(Leave Application Form)', formNo: 'HR-F15',
+    roles: ['Trưởng bộ phận', 'Trưởng phòng Nhân sự', 'Giám đốc công ty'],
+    hint: 'tự động theo luồng cố định: Trưởng bộ phận → Trưởng phòng Nhân sự → Giám đốc công ty',
     noun: 'đơn xin nghỉ phép',
   },
   congtac: {
@@ -10452,12 +10452,12 @@ const FORM_TPL_BY_GROUP: Record<string, FormTpl> = { 'Nghỉ phép': 'nghiphep',
 const isFormDoc = (p: Proposal) => p.kind !== 'totrinh' && p.kind !== 'dntt' && !!p.formData?.tpl
 
 const LEAVE_TYPES: [string, string][] = [
-  ['annual', 'Phép năm (Annual Leave)'],
-  ['paid', 'Nghỉ việc riêng hưởng nguyên lương (Kết hôn, đám cưới con, tang chế...)'],
-  ['unpaid', 'Nghỉ không hưởng lương (Unpaid Leave)'],
-  ['sick', 'Nghỉ ốm / Thai sản (Có xác nhận y tế)'],
-  ['comp', 'Nghỉ bù (Compensatory Leave)'],
-  ['other', 'Khác'],
+  ['phep', 'Nghỉ phép'],
+  ['conom', 'Nghỉ con ốm'],
+  ['om', 'Nghỉ ốm'],
+  ['hieuhi', 'Nghỉ hiếu hỉ'],
+  ['thaisan', 'Nghỉ thai sản'],
+  ['khongluong', 'Nghỉ việc riêng không hưởng lương'],
 ]
 const PURCHASE_REASONS: [string, string][] = [
   ['new', 'Trang bị mới cho nhân sự / dự án mới'],
@@ -10478,7 +10478,7 @@ const rowAmt = (r: any) => (Number(r.qty) || 0) * (Number(r.price) || 0)
 function initFormData(tpl: FormTpl, u: User): Record<string, any> {
   const base = { tpl, dept: u.department ?? '', position: '', empCode: '' }
   if (tpl === 'nghiphep') {
-    return { ...base, leaveType: 'annual', leaveOther: '', fromDate: '', toDate: '', totalDays: '', session: 'full', reason: '',
+    return { ...base, company: u.company ?? '', joinDate: '', leaveType: 'phep', leaveOther: '', fromDate: '', toDate: '', totalDays: '', session: 'full', reason: '',
       handoverId: '', handoverPosition: '', handoverDept: '', handoverContent: '', phone: '', email: '' }
   }
   if (tpl === 'congtac') {
@@ -10548,7 +10548,34 @@ function FormDocBody({ tpl, f, set, ro, users, requester, code, dateText }: {
     : null
   const days = f.totalDays !== '' && f.totalDays != null ? f.totalDays : calcDays(f.fromDate, f.toDate)
 
-  const head = (
+  const head = tpl === 'nghiphep' ? (
+    <>
+      <table className="w-full border-collapse mb-2" style={{ border: '1px solid #000' }}>
+        <tbody>
+          <tr>
+            <td rowSpan={3} className="border border-black p-2 text-center align-middle" style={{ width: '24%' }}>
+              <img src={companyLogo} alt="KNI" className="h-14 mx-auto object-contain" />
+            </td>
+            <td className="border border-black px-2 py-1.5 text-xs" style={{ width: '38%' }}>Phòng/ban: Nhân sự</td>
+            <td className="border border-black px-2 py-1.5 text-xs">Mã số: {cfg.formNo}</td>
+          </tr>
+          <tr>
+            <td className="border border-black px-2 py-1.5 text-xs">Loại tài liệu: Biểu mẫu</td>
+            <td className="border border-black px-2 py-1.5 text-xs">Ngày ban hành lần đầu: 09/01/2026</td>
+          </tr>
+          <tr>
+            <td className="border border-black px-2 py-1.5 text-xs">Lần ban hành: Ver01</td>
+            <td className="border border-black px-2 py-1.5 text-xs">Ngày chỉnh sửa cuối cùng: 09/01/2026</td>
+          </tr>
+          <tr>
+            <td colSpan={3} className="border border-black px-2 py-2 text-center font-bold">{cfg.title}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p className="text-center text-xl font-bold mt-4 mb-4">{cfg.title}</p>
+      <p className="text-[11px] text-gray-500 mt-1 mb-3">Số/No: <span className="font-mono">{code ?? 'RTASK… (tự sinh khi gửi)'}</span></p>
+    </>
+  ) : (
     <>
       <p className="font-bold text-gray-500">TẬP ĐOÀN KHÔI NGUYÊN INVESTMENT (KNI)</p>
       <p className="font-bold text-gray-500">CÔNG TY {(requester?.company || '').toUpperCase()} – {(f.dept || requester?.department || '').toUpperCase()}</p>
@@ -10568,39 +10595,47 @@ function FormDocBody({ tpl, f, set, ro, users, requester, code, dateText }: {
     return (
       <>
         {head}
-        <div className="space-y-1.5 mb-3">
-          <div className="flex items-center gap-2"><span className="shrink-0">Mã nhân viên:</span>{txt('empCode')}</div>
-          <p>Họ và tên: <b>{requester?.name}</b></p>
-          <div className="flex items-center gap-2"><span className="shrink-0">Chức danh / Vị trí:</span>{txt('position')}</div>
-          <div className="flex items-center gap-2"><span className="shrink-0">Bộ phận / Phòng ban:</span>{txt('dept')}</div>
-          <p>Ngày làm đơn: {dateText}</p>
+        {sec('I. THÔNG TIN NHÂN VIÊN')}
+        <div className="space-y-1.5 mb-3 pl-4">
+          <p>Họ tên: <b>{requester?.name}</b></p>
+          <div className="flex items-center gap-2"><span className="shrink-0">Chức vụ:</span>{txt('position')}</div>
+          <div className="flex items-center gap-2"><span className="shrink-0">Phòng Ban:</span>{txt('dept')}</div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="shrink-0">Làm việc tại Công ty:</span>
+            {ro ? <span>{f.company || '…………'}</span> : (
+              <select value={f.company ?? ''} onChange={e => set({ company: e.target.value })} className="bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500" style={ink}>
+                <option value="">-- chọn --</option>
+                {COMPANIES.map(c => <option key={c} value={c}>{c.toUpperCase()}</option>)}
+              </select>
+            )}
+          </div>
+          <div className="flex items-center gap-2"><span className="shrink-0">Ngày bắt đầu làm việc:</span>{date('joinDate')}</div>
+          <div className="flex items-center gap-2"><span className="shrink-0">Số điện thoại liên hệ trong thời gian nghỉ:</span>{txt('phone')}</div>
         </div>
-        {sec('I. THÔNG TIN NGHỈ PHÉP')}
-        <p className="font-semibold">1. Loại nghỉ phép</p>
-        <div className="pl-4 space-y-0.5 mb-2">
-          {LEAVE_TYPES.map(([v, l]) => <div key={v}>{opt('leaveType', v, l)}</div>)}
-          {f.leaveType === 'other' && <div className="pl-6">{txt('leaveOther', 'Ghi rõ loại nghỉ')}</div>}
-        </div>
-        <p className="font-semibold">2. Thời gian nghỉ</p>
-        <div className="pl-4 space-y-1 mb-2">
-          <p className="flex flex-wrap items-center gap-2">Từ ngày: {date('fromDate')} đến hết ngày: {date('toDate')}</p>
+        {sec('II. THÔNG TIN NGÀY NGHỈ')}
+        <div className="space-y-1.5 mb-2 pl-4">
+          <div><p>Lý do xin nghỉ:</p>{area('reason', 3, 'Nêu rõ lý do xin nghỉ...')}</div>
+          <p>Ngày xin nghỉ: {dateText}</p>
+          <p className="flex flex-wrap items-center gap-2">Người thay thế: {userPick('handoverId', requester?.id)}</p>
+          <p className="flex flex-wrap items-center gap-2">Thời gian nghỉ: từ {date('fromDate')} đến hết {date('toDate')}</p>
           <p className="flex items-center gap-2">Tổng số ngày nghỉ:{' '}
             {ro ? <b>{days || '…'}</b> : <input type="number" min="0" step="0.5" value={days} onChange={e => set({ totalDays: e.target.value })} className="w-20 bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500" style={ink} />} ngày
           </p>
           <div className="flex flex-wrap items-center gap-6">Chi tiết ca nghỉ: {opt('session', 'full', 'Cả ngày')}{opt('session', 'am', 'Sáng')}{opt('session', 'pm', 'Chiều')}</div>
         </div>
-        <p className="font-semibold">3. Lý do xin nghỉ</p>
-        <div className="pl-4 mb-2">{area('reason', 3, 'Nêu rõ lý do xin nghỉ...')}</div>
-        {sec('II. BÀN GIAO CÔNG VIỆC TRONG THỜI GIAN NGHỈ')}
-        <div className="space-y-1.5 pl-4">
-          <p className="flex flex-wrap items-center gap-2">Người nhận bàn giao: {userPick('handoverId', requester?.id)}</p>
-          <div className="flex items-center gap-2"><span className="shrink-0">Chức danh:</span>{txt('handoverPosition')}</div>
+        <div className="pl-4 mb-2 space-y-1">
+          <p className="font-semibold text-xs">Chi tiết bàn giao công việc (nếu có)</p>
+          <div className="flex items-center gap-2"><span className="shrink-0">Chức danh người thay thế:</span>{txt('handoverPosition')}</div>
           <div className="flex items-center gap-2"><span className="shrink-0">Bộ phận:</span>{txt('handoverDept')}</div>
           <div><p>Nội dung công việc bàn giao:</p>{area('handoverContent', 3)}</div>
-          <p className="font-semibold">Thông tin liên lạc khẩn cấp khi nghỉ:</p>
-          <div className="flex items-center gap-2 pl-4"><span className="shrink-0">SĐT:</span>{txt('phone')}</div>
-          <div className="flex items-center gap-2 pl-4"><span className="shrink-0">Email:</span>{txt('email')}</div>
         </div>
+        {sec('III. HÌNH THỨC XIN NGHỈ')}
+        <div className="pl-4 mb-2 grid grid-cols-2 gap-x-6 gap-y-0.5">
+          {LEAVE_TYPES.map(([v, l]) => <div key={v}>{opt('leaveType', v, l)}</div>)}
+        </div>
+        <p className="text-xs italic mt-2" style={{ color: '#4b5563' }}>
+          Lưu ý: Đối với Cán bộ Nhân viên khi nghỉ phép phải liệt kê hạng mục công việc gấp và bàn giao cho người thay thế hỗ trợ hoặc báo cho quản lý trực tiếp biết. Trong tất cả các trường hợp, người xin nghỉ phép phải đảm bảo kết nối điện thoại để hỗ trợ khi công việc cần gấp.
+        </p>
       </>
     )
   }
@@ -10819,16 +10854,32 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [users.length, currentUser.id, currentUser.teamId])
   const [bgdIds, setBgdIds] = useState<string[]>([])
+    // Đơn nghỉ phép: bước 2 là Trưởng phòng Nhân sự. Chọn sẵn người phòng Nhân sự-IT-Pháp chế (ưu tiên quản lý), vẫn đổi được.
+  const hrTeamMembers = users
+    .filter(u => u.teamId === 't1c' && u.id !== currentUser.id)
+    .sort((a, b) => (b.role === 'manager' ? 1 : 0) - (a.role === 'manager' ? 1 : 0))
+  const [hrHeadId, setHrHeadId] = useState('')
+  useEffect(() => {
+    if (tpl !== 'nghiphep') return
+    setHrHeadId(prev => prev || (hrTeamMembers.find(u => u.role === 'manager') ?? hrTeamMembers[0])?.id || '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [users.length, currentUser.id, tpl])
   const [priority, setPriority] = useState('P3')
   const approvalMode = isMua ? docModeOf(priority) : approvalModeSel   // mua sắm: P1/P2 song song, P3/P4 nối tiếp
 
   const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? ''
-  const slots: { role: string; id: string }[] = isMua
+    const slots: { role: string; id: string }[] = isMua
     ? [
         { role: 'Trưởng bộ phận', id: recipientId },
         { role: 'Kế toán trưởng', id: kttId },
         { role: gdCompany.trim() ? `Giám đốc công ty ${gdCompany.trim()}` : 'Giám đốc công ty', id: gdId },
         ...bgdIds.map(id => ({ role: 'Ban Giám đốc Tập đoàn', id })),
+      ].filter((s, i, arr) => s.id && arr.findIndex(x => x.id === s.id) === i)
+    : tpl === 'nghiphep'
+    ? [
+        { role: 'Trưởng bộ phận', id: recipientId },
+        { role: 'Trưởng phòng Nhân sự', id: hrHeadId },
+        { role: gdCompany.trim() ? `Giám đốc công ty ${gdCompany.trim()}` : 'Giám đốc công ty', id: gdId },
       ].filter((s, i, arr) => s.id && arr.findIndex(x => x.id === s.id) === i)
     : [recipientId, ...extraApprovers.filter(id => id !== recipientId)].filter(Boolean).map((id, i) => ({ role: cfg.roles[i] ?? `Người duyệt ${i + 1}`, id }))
   const approverIds = slots.map(s => s.id)
@@ -10908,15 +10959,19 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
       brief = String(f.reason).trim().slice(0, 200)
       cleaned = { ...f, items: rows, old: (f.old as any[]).filter(r => String(r.name).trim()) }
     }
-    if (!recipientId) { setError('Vui lòng chọn người duyệt đầu tiên.'); return }
+    if (tpl === 'nghiphep') {
+      if (!recipientId) { setError('Không xác định được Trưởng bộ phận duyệt. Vui lòng chọn thủ công.'); return }
+      if (!hrHeadId) { setError('Không xác định được Trưởng phòng Nhân sự duyệt.'); return }
+      if (!gdId) { setError('Vui lòng chọn Giám đốc công ty duyệt.'); return }
+    } else if (!recipientId) { setError('Vui lòng chọn người duyệt đầu tiên.'); return }
 
     setSaving(true); setError('')
     let uploaded: { name: string; path: string; size: number; type: string }[] = []
     try { uploaded = await uploadProposalFiles(currentUser.id, files) }
     catch (err: any) { setSaving(false); setError('Tải file thất bại: ' + (err?.message ?? '')); return }
 
-    const formData = { ...cleaned, tpl, dateText, total, bangChu: vnMoneyWords(total), ...(isMua ? { priority, signRoles } : {}) }
-    const participants = Array.from(new Set([currentUser.id, ...approverIds, ...(tpl === 'nghiphep' && f.handoverId ? [f.handoverId] : [])]))
+    const formData = { ...cleaned, tpl, dateText, total, bangChu: vnMoneyWords(total), ...(tpl === 'nghiphep' ? { gdCompany, bgdIds } : {}) }
+    const participants = Array.from(new Set([currentUser.id, ...approverIds, ...(tpl === 'nghiphep' && f.handoverId ? [f.handoverId] : []), ...(tpl === 'nghiphep' ? bgdIds : [])]))
 
     let data: any = null
     let insertError: any = null
@@ -10962,7 +11017,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
     onClose()
   }
 
-  const sigCols = (tpl === 'nghiphep' ? 2 : 1) + Math.max(approverIds.length, 1)
+  const sigCols = 1 + Math.max(approverIds.length, 1)
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#d1d5db' }}>
@@ -11057,7 +11112,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
             </>
           ) : (
             <>
-          <p className="mt-8 mb-1 font-bold text-center">XÁC NHẬN & PHÊ DUYỆT</p>
+                    <p className="mt-8 mb-1 font-bold text-center">XÁC NHẬN & PHÊ DUYỆT</p>
           <div className="grid gap-3 text-center text-xs" style={{ gridTemplateColumns: `repeat(${Math.min(5, sigCols)}, minmax(0, 1fr))` }}>
             <div>
               <p className="font-bold">{tpl === 'nghiphep' ? 'Người làm đơn' : 'Người đề xuất'}</p>
@@ -11065,14 +11120,6 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
               <p className="mt-8 font-semibold">{currentUser.name}</p>
               <p className="text-gray-500">Ngày: {dateText}</p>
             </div>
-            {tpl === 'nghiphep' && (
-              <div>
-                <p className="font-bold">Người nhận bàn giao</p>
-                <p className="italic text-blue-600">(Ký & ghi rõ họ tên)</p>
-                <p className="mt-8 font-semibold">{f.handoverId ? nameOf(f.handoverId) : '…………'}</p>
-                <p className="text-gray-500">Ngày: ……/……/……</p>
-              </div>
-            )}
             {(approverIds.length > 0 ? approverIds : ['']).map((id, i) => (
               <div key={i}>
                 <p className="font-bold">{roleOf(i)}</p>
@@ -11082,65 +11129,114 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
               </div>
             ))}
           </div>
+          {tpl === 'nghiphep' && (
+            <p className="mt-3 text-[11px] text-gray-500">📢 Ban Giám đốc Tập đoàn được thông báo (không cần duyệt): {bgdIds.length > 0 ? bgdIds.map(nameOf).join(', ') : '—'}</p>
+          )}
+
+        <div className="max-w-[860px] mx-auto mb-4 bg-white shadow-xl p-6 text-[13px] space-y-4" style={ink}>
+          <p className="font-bold">Luồng phê duyệt</p>
+          {tpl === 'nghiphep' ? (
+            <>
+              <p className="text-xs text-gray-500">Luồng duyệt cố định, nối tiếp từng bước. Tên đã được điền sẵn — bấm vào ô để đổi người nếu cần.</p>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">1. Trưởng bộ phận *</label>
+                <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
+                  <option value="">-- Chọn người duyệt --</option>
+                  {TEAMS.map(t => {
+                    const members = users.filter(u => u.id !== currentUser.id && u.teamId === t.id)
+                    return members.length === 0 ? null : (
+                      <optgroup key={t.id} label={`${t.emoji} ${t.name}`}>
+                        {members.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+                      </optgroup>
+                    )
+                  })}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">2. Trưởng phòng Nhân sự *</label>
+                <select value={hrHeadId} onChange={e => setHrHeadId(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
+                  <option value="">-- Chọn người duyệt --</option>
+                  {hrTeamMembers.length > 0 && (
+                    <optgroup label="🧑‍💼 Gợi ý (phòng Nhân sự-IT-Pháp chế)">
+                      {hrTeamMembers.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+                    </optgroup>
+                  )}
+                  {TEAMS.map(t => {
+                    const members = users.filter(u => u.id !== currentUser.id && u.teamId === t.id)
+                    return members.length === 0 ? null : (
+                      <optgroup key={t.id} label={`${t.emoji} ${t.name}`}>
+                        {members.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+                      </optgroup>
+                    )
+                  })}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">3. Giám đốc công ty * — chọn công ty rồi chọn người duyệt</label>
+                <div className="space-y-1.5">
+                  <select value={gdCompany} onChange={e => { setGdCompany(e.target.value); setGdId('') }} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
+                    <option value="">-- Chọn công ty --</option>
+                    {COMPANIES.map(c => <option key={c} value={c}>{c.toUpperCase()}</option>)}
+                  </select>
+                  <DeptUserSelect users={users} excludeId={currentUser.id} value={gdId} onChange={setGdId} />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Ban Giám đốc Tập đoàn (chỉ để thông báo, không cần duyệt)</label>
+                <div className="flex flex-wrap gap-1.5 mb-1.5">
+                  {bgdIds.map(id => (
+                    <span key={id} className="text-xs px-2 py-0.5 rounded-full flex items-center gap-1 bg-gray-100">
+                      {nameOf(id)}
+                      <button type="button" onClick={() => setBgdIds(prev => prev.filter(x => x !== id))} className="text-red-500">✕</button>
+                    </span>
+                  ))}
+                </div>
+                <select value="" onChange={e => { if (e.target.value) setBgdIds(prev => [...prev, e.target.value]) }}
+                  className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
+                  <option value="">+ Chọn thêm người</option>
+                  {users.filter(u => u.isDirector && !bgdIds.includes(u.id)).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">1. Trưởng bộ phận / Quản lý đơn vị {myManagers.length > 0 ? '(quản lý phòng ban của bạn)' : ''} *</label>
+                <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
+                  <option value="">-- Chọn người duyệt --</option>
+                  {myManagers.length > 0
+                    ? myManagers.map(u => <option key={u.id} value={u.id}>{u.name} — {u.department}</option>)
+                    : (
+                      <>
+                        {TEAMS.map(t => {
+                          const members = users.filter(u => u.id !== currentUser.id && u.teamId === t.id)
+                          return members.length === 0 ? null : (
+                            <optgroup key={t.id} label={`${t.emoji} ${t.name}`}>
+                              {members.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+                            </optgroup>
+                          )
+                        })}
+                      </>
+                    )}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Người duyệt tiếp theo: <span dangerouslySetInnerHTML={{ __html: cfg.hint }} /> (duyệt theo thứ tự trong danh sách)</label>
+                <ApproverPicker users={users} excludeIds={[currentUser.id, recipientId]} value={extraApprovers} onChange={setExtraApprovers} />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Luồng phê duyệt</label>
+                <select value={approvalMode} onChange={e => setApprovalMode(e.target.value as 'seq' | 'par')} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
+                  <option value="seq">Nối tiếp (lần lượt)</option>
+                  <option value="par">Song song (Trưởng bộ phận trước, rồi cùng lúc)</option>
+                </select>
+              </div>
             </>
           )}
         </div>
-
-        {isMua ? (
-          <div className="max-w-[860px] mx-auto mb-4 bg-white shadow-xl p-6 text-[13px] space-y-4" style={ink}>
-            <p className="font-bold">Luồng phê duyệt</p>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Mức độ ưu tiên *</label>
-              <select value={priority} onChange={e => setPriority(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
-                <option value="P1">P1 · Rất khẩn cấp</option>
-                <option value="P2">P2 · Khẩn cấp</option>
-                <option value="P3">P3 · Bình thường</option>
-                <option value="P4">P4 · Thấp</option>
-              </select>
-              <p className="text-[11px] text-gray-500 mt-1">
-                {approvalMode === 'par' ? '⚡ P1, P2: Trưởng bộ phận duyệt trước, sau đó các người còn lại nhận cùng lúc (song song).' : '➡️ P3, P4: duyệt lần lượt từng người (nối tiếp).'}
-              </p>
-              <p className="text-[11px] text-gray-500 mt-0.5">
-                🏛️ Ban Giám đốc Tập đoàn duyệt thì phiếu coi như đã được duyệt, những người còn lại không cần duyệt nữa.
-              </p>
-            </div>
-          </div>
-        ) : (
-        <div className="max-w-[860px] mx-auto mb-4 bg-white shadow-xl p-6 text-[13px] space-y-4" style={ink}>
-          <p className="font-bold">Luồng phê duyệt</p>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">1. Trưởng bộ phận / Quản lý đơn vị {myManagers.length > 0 ? '(quản lý phòng ban của bạn)' : ''} *</label>
-            <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
-              <option value="">-- Chọn người duyệt --</option>
-              {myManagers.length > 0
-                ? myManagers.map(u => <option key={u.id} value={u.id}>{u.name} — {u.department}</option>)
-                : (
-                  <>
-                    {TEAMS.map(t => {
-                      const members = users.filter(u => u.id !== currentUser.id && u.teamId === t.id)
-                      return members.length === 0 ? null : (
-                        <optgroup key={t.id} label={`${t.emoji} ${t.name}`}>
-                          {members.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
-                        </optgroup>
-                      )
-                    })}
-                  </>
-                )}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Người duyệt tiếp theo: <span dangerouslySetInnerHTML={{ __html: cfg.hint }} /> (duyệt theo thứ tự trong danh sách)</label>
-            <ApproverPicker users={users} excludeIds={[currentUser.id, recipientId]} value={extraApprovers} onChange={setExtraApprovers} />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Luồng phê duyệt</label>
-            <select value={approvalMode} onChange={e => setApprovalMode(e.target.value as 'seq' | 'par')} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
-              <option value="seq">Nối tiếp (lần lượt)</option>
-              <option value="par">Song song (Trưởng bộ phận trước, rồi cùng lúc)</option>
-            </select>
-          </div>
+      </>
+          )}
         </div>
-        )}
       </div>
 
       <div className="shrink-0 px-4 py-3 flex items-center justify-end gap-3" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
@@ -11197,7 +11293,7 @@ function ProposalFormDocView({ p, users, currentUserId, onClose, canAct, onAppro
   const isReview = p.status === 'rejected' && !!p.rejectedReason?.startsWith('[REVIEW]')
   const requester = users.find(u => u.id === p.submittedBy)
   const dateText = new Date(p.createdAt).toLocaleDateString('vi-VN')
-  const sigCols = (tpl === 'nghiphep' ? 2 : 1) + flow.length
+  const sigCols = 1 + flow.length
 
   const act = async (fn: (note: string) => Promise<void>, needNote = false) => {
     if (needNote && !myNote.trim()) { setWarn('Hãy ghi ý kiến của bạn vào ô dưới tên bạn ở cuối văn bản.'); return }
@@ -11241,14 +11337,6 @@ function ProposalFormDocView({ p, users, currentUserId, onClose, canAct, onAppro
               <p className="mt-8 font-semibold">{nameOf(p.submittedBy)}</p>
               <p className="text-gray-500">Ngày: {dateText}</p>
             </div>
-            {tpl === 'nghiphep' && (
-              <div>
-                <p className="font-bold">Người nhận bàn giao</p>
-                <p className="italic text-blue-600">(Ký & ghi rõ họ tên)</p>
-                <p className="mt-8 font-semibold">{nameOf(f.handoverId)}</p>
-                <p className="text-gray-500">Ngày: ……/……/……</p>
-              </div>
-            )}
             {flow.map((s, i) => {
               const mine = canAct && s.approverId === currentUserId && s.status === 'pending'
               return (
@@ -11269,6 +11357,9 @@ function ProposalFormDocView({ p, users, currentUserId, onClose, canAct, onAppro
               )
             })}
           </div>
+          {tpl === 'nghiphep' && Array.isArray(f.bgdIds) && f.bgdIds.length > 0 && (
+            <p className="mt-3 text-[11px] text-gray-500">📢 Ban Giám đốc Tập đoàn được thông báo (không cần duyệt): {f.bgdIds.map(nameOf).join(', ')}</p>
+          )}
           {p.status === 'rejected' && p.rejectedReason && !isReview && (
             <p className="mt-6 text-xs text-red-600">Lý do từ chối: {p.rejectedReason}</p>
           )}
