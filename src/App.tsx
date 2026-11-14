@@ -10550,13 +10550,16 @@ function FormDocBody({ tpl, f, set, ro, users, requester, code, dateText }: {
 
   const head = (
     <>
-      <p className="font-bold text-[12px]">TẬP ĐOÀN ĐẦU TƯ KHÔI NGUYÊN (KNI GROUP)</p>
-      <p className="text-[11px] text-gray-600">Mẫu số: {cfg.formNo} · Ngày ban hành: 21/10/2026</p>
-      <div className="text-center my-5">
-        <p className="text-lg font-bold">{cfg.title}</p>
-        <p className="text-lg font-bold text-blue-600">{cfg.en}</p>
-        <p className="text-[11px] text-gray-500 mt-1">Số/No: <span className="font-mono">{code ?? 'RTASK… (tự sinh khi gửi)'}</span></p>
+      <p className="font-bold text-gray-500">TẬP ĐOÀN KHÔI NGUYÊN INVESTMENT (KNI)</p>
+      <p className="font-bold text-gray-500">CÔNG TY {(requester?.company || '').toUpperCase()} – {(f.dept || requester?.department || '').toUpperCase()}</p>
+      <div className="grid grid-cols-3 border border-black my-5">
+        <div className="p-3 text-xs border-r border-black flex items-center">Số/No: <span className="ml-1 font-mono text-gray-500">{code ?? 'RTASK… (tự sinh khi gửi)'}</span></div>
+        <div className="col-span-2 p-3 text-center">
+          <p className="text-2xl font-bold">{cfg.title}</p>
+          <p className="text-lg font-bold text-blue-400">{cfg.en}</p>
+        </div>
       </div>
+      <p className="text-[11px] text-gray-500 -mt-3 mb-3">Mẫu số: {cfg.formNo} · Ngày ban hành: 21/10/2026</p>
     </>
   )
   const sec = (t: string) => <p className="font-bold mt-4 mb-1">{t}</p>
