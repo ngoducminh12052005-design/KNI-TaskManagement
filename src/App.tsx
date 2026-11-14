@@ -10783,6 +10783,11 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
   const [kttId, setKttId] = useState('')
   const [gdId, setGdId] = useState('')
   const [gdCompany, setGdCompany] = useState('')
+  useEffect(() => {
+    setRecipientId(prev => prev || defaultHeadOf(users, currentUser))
+    setKttId(prev => prev || defaultChiefAccountant(users, currentUser.id))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [users.length, currentUser.id, currentUser.teamId])
   const [bgdIds, setBgdIds] = useState<string[]>([])
   const [priority, setPriority] = useState('P3')
   const approvalMode = isMua ? docModeOf(priority) : approvalModeSel   // mua sắm: P1/P2 song song, P3/P4 nối tiếp
