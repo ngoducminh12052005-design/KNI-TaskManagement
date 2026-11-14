@@ -11045,13 +11045,13 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
             )}
           </div>
 
-          {isMua ? (
+          {(isMua || tpl === 'nghiphep') ? (
             <>
-                            <p className="mt-8 mb-1 font-bold text-center">XÁC NHẬN & PHÊ DUYỆT</p>
+              <p className="mt-8 mb-1 font-bold text-center">XÁC NHẬN & PHÊ DUYỆT</p>
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4 text-center text-xs">
                 <div className="flex flex-col">
                   <div style={{ minHeight: 96 }}>
-                    <p className="font-bold text-[13px]">Người lập</p>
+                    <p className="font-bold text-[13px]">{tpl === 'nghiphep' ? 'Người làm đơn' : 'Người lập'}</p>
                     <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
                   </div>
                   <p className="mt-2 text-xs text-gray-500">{currentUser.name}</p>
@@ -11069,13 +11069,23 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
                     ))}
                   </select>
                 </div>
-                <div className="flex flex-col">
-                  <div style={{ minHeight: 96 }}>
-                    <p className="font-bold text-[13px]">Kế toán trưởng</p>
-                    <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+                {tpl === 'nghiphep' ? (
+                  <div className="flex flex-col">
+                    <div style={{ minHeight: 96 }}>
+                      <p className="font-bold text-[13px]">Trưởng phòng Nhân sự</p>
+                      <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+                    </div>
+                    <DeptUserSelect users={users} excludeId={currentUser.id} value={hrHeadId} onChange={setHrHeadId} />
                   </div>
-                  <DeptUserSelect users={users} excludeId={currentUser.id} value={kttId} onChange={setKttId} />
-                </div>
+                ) : (
+                  <div className="flex flex-col">
+                    <div style={{ minHeight: 96 }}>
+                      <p className="font-bold text-[13px]">Kế toán trưởng</p>
+                      <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+                    </div>
+                    <DeptUserSelect users={users} excludeId={currentUser.id} value={kttId} onChange={setKttId} />
+                  </div>
+                )}
                 <div className="flex flex-col">
                   <div style={{ minHeight: 96 }}>
                     <p className="font-bold text-[13px]">Giám đốc công ty</p>
@@ -11092,13 +11102,15 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
                 <div className="flex flex-col">
                   <div style={{ minHeight: 96 }}>
                     <p className="font-bold text-[13px]">Ban Giám đốc Tập đoàn</p>
-                    <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+                    <p className="font-bold text-xs">{tpl === 'nghiphep' ? '(Nhận thông báo, không cần ký)' : '(Ký, ghi rõ họ tên)'}</p>
                   </div>
                   <div className="space-y-1.5">
                     <select value="" onChange={e => { if (e.target.value) setBgdIds(prev => [...prev, e.target.value]) }}
                       className="w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white" style={ink}>
                       <option value="">+ Chọn thêm người</option>
-                      {userOptions()}
+                      {tpl === 'nghiphep'
+                        ? users.filter(u => u.isDirector && !bgdIds.includes(u.id)).map(u => <option key={u.id} value={u.id}>{u.name}</option>)
+                        : userOptions()}
                     </select>
                     {bgdIds.map(id => (
                       <div key={id} className="flex items-center justify-between gap-1 text-xs text-gray-700">
@@ -11109,134 +11121,88 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
                   </div>
                 </div>
               </div>
+              {tpl === 'nghiphep' && (
+                <p className="mt-3 text-[11px] text-gray-500 text-center">Duyệt nối tiếp: Trưởng bộ phận → Trưởng phòng Nhân sự → Giám đốc công ty. Tên đã được điền sẵn, bấm vào ô để đổi người nếu cần.</p>
+              )}
             </>
           ) : (
             <>
-                    <p className="mt-8 mb-1 font-bold text-center">XÁC NHẬN & PHÊ DUYỆT</p>
-          <div className="grid gap-3 text-center text-xs" style={{ gridTemplateColumns: `repeat(${Math.min(5, sigCols)}, minmax(0, 1fr))` }}>
-            <div>
-              <p className="font-bold">{tpl === 'nghiphep' ? 'Người làm đơn' : 'Người đề xuất'}</p>
-              <p className="italic text-blue-600">(Ký & ghi rõ họ tên)</p>
-              <p className="mt-8 font-semibold">{currentUser.name}</p>
-              <p className="text-gray-500">Ngày: {dateText}</p>
-            </div>
-            {(approverIds.length > 0 ? approverIds : ['']).map((id, i) => (
-              <div key={i}>
-                <p className="font-bold">{roleOf(i)}</p>
-                <p className="italic text-blue-600">&nbsp;</p>
-                <p className="mt-8 font-semibold">{id ? nameOf(id) : '…………'}</p>
-                <p className="text-gray-500">Ngày: ……/……/……</p>
+              <p className="mt-8 mb-1 font-bold text-center">XÁC NHẬN & PHÊ DUYỆT</p>
+              <div className="grid gap-3 text-center text-xs" style={{ gridTemplateColumns: `repeat(${Math.min(5, sigCols)}, minmax(0, 1fr))` }}>
+                <div>
+                  <p className="font-bold">Người đề xuất</p>
+                  <p className="italic text-blue-600">(Ký & ghi rõ họ tên)</p>
+                  <p className="mt-8 font-semibold">{currentUser.name}</p>
+                  <p className="text-gray-500">Ngày: {dateText}</p>
+                </div>
+                {(approverIds.length > 0 ? approverIds : ['']).map((id, i) => (
+                  <div key={i}>
+                    <p className="font-bold">{roleOf(i)}</p>
+                    <p className="italic text-blue-600">&nbsp;</p>
+                    <p className="mt-8 font-semibold">{id ? nameOf(id) : '…………'}</p>
+                    <p className="text-gray-500">Ngày: ……/……/……</p>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          {tpl === 'nghiphep' && (
-            <p className="mt-3 text-[11px] text-gray-500">📢 Ban Giám đốc Tập đoàn được thông báo (không cần duyệt): {bgdIds.length > 0 ? bgdIds.map(nameOf).join(', ') : '—'}</p>
+            </>
           )}
+        </div>
 
-        <div className="max-w-[860px] mx-auto mb-4 bg-white shadow-xl p-6 text-[13px] space-y-4" style={ink}>
-          <p className="font-bold">Luồng phê duyệt</p>
-          {tpl === 'nghiphep' ? (
-            <>
-              <p className="text-xs text-gray-500">Luồng duyệt cố định, nối tiếp từng bước. Tên đã được điền sẵn — bấm vào ô để đổi người nếu cần.</p>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">1. Trưởng bộ phận *</label>
-                <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
-                  <option value="">-- Chọn người duyệt --</option>
-                  {TEAMS.map(t => {
-                    const members = users.filter(u => u.id !== currentUser.id && u.teamId === t.id)
-                    return members.length === 0 ? null : (
-                      <optgroup key={t.id} label={`${t.emoji} ${t.name}`}>
-                        {members.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
-                      </optgroup>
-                    )
-                  })}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">2. Trưởng phòng Nhân sự *</label>
-                <select value={hrHeadId} onChange={e => setHrHeadId(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
-                  <option value="">-- Chọn người duyệt --</option>
-                  {hrTeamMembers.length > 0 && (
-                    <optgroup label="🧑‍💼 Gợi ý (phòng Nhân sự-IT-Pháp chế)">
-                      {hrTeamMembers.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
-                    </optgroup>
+        {isMua ? (
+          <div className="max-w-[860px] mx-auto mb-4 bg-white shadow-xl p-6 text-[13px] space-y-4" style={ink}>
+            <p className="font-bold">Luồng phê duyệt</p>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Mức độ ưu tiên *</label>
+              <select value={priority} onChange={e => setPriority(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
+                <option value="P1">P1 · Rất khẩn cấp</option>
+                <option value="P2">P2 · Khẩn cấp</option>
+                <option value="P3">P3 · Bình thường</option>
+                <option value="P4">P4 · Thấp</option>
+              </select>
+              <p className="text-[11px] text-gray-500 mt-1">
+                {approvalMode === 'par' ? '⚡ P1, P2: Trưởng bộ phận duyệt trước, sau đó các người còn lại nhận cùng lúc (song song).' : '➡️ P3, P4: duyệt lần lượt từng người (nối tiếp).'}
+              </p>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                🏛️ Ban Giám đốc Tập đoàn duyệt thì phiếu coi như đã được duyệt, những người còn lại không cần duyệt nữa.
+              </p>
+            </div>
+          </div>
+        ) : tpl === 'nghiphep' ? null : (
+          <div className="max-w-[860px] mx-auto mb-4 bg-white shadow-xl p-6 text-[13px] space-y-4" style={ink}>
+            <p className="font-bold">Luồng phê duyệt</p>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">1. Trưởng bộ phận / Quản lý đơn vị {myManagers.length > 0 ? '(quản lý phòng ban của bạn)' : ''} *</label>
+              <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
+                <option value="">-- Chọn người duyệt --</option>
+                {myManagers.length > 0
+                  ? myManagers.map(u => <option key={u.id} value={u.id}>{u.name} — {u.department}</option>)
+                  : (
+                    <>
+                      {TEAMS.map(t => {
+                        const members = users.filter(u => u.id !== currentUser.id && u.teamId === t.id)
+                        return members.length === 0 ? null : (
+                          <optgroup key={t.id} label={`${t.emoji} ${t.name}`}>
+                            {members.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+                          </optgroup>
+                        )
+                      })}
+                    </>
                   )}
-                  {TEAMS.map(t => {
-                    const members = users.filter(u => u.id !== currentUser.id && u.teamId === t.id)
-                    return members.length === 0 ? null : (
-                      <optgroup key={t.id} label={`${t.emoji} ${t.name}`}>
-                        {members.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
-                      </optgroup>
-                    )
-                  })}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">3. Giám đốc công ty * — chọn công ty rồi chọn người duyệt</label>
-                <div className="space-y-1.5">
-                  <select value={gdCompany} onChange={e => { setGdCompany(e.target.value); setGdId('') }} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
-                    <option value="">-- Chọn công ty --</option>
-                    {COMPANIES.map(c => <option key={c} value={c}>{c.toUpperCase()}</option>)}
-                  </select>
-                  <DeptUserSelect users={users} excludeId={currentUser.id} value={gdId} onChange={setGdId} />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Ban Giám đốc Tập đoàn (chỉ để thông báo, không cần duyệt)</label>
-                <div className="flex flex-wrap gap-1.5 mb-1.5">
-                  {bgdIds.map(id => (
-                    <span key={id} className="text-xs px-2 py-0.5 rounded-full flex items-center gap-1 bg-gray-100">
-                      {nameOf(id)}
-                      <button type="button" onClick={() => setBgdIds(prev => prev.filter(x => x !== id))} className="text-red-500">✕</button>
-                    </span>
-                  ))}
-                </div>
-                <select value="" onChange={e => { if (e.target.value) setBgdIds(prev => [...prev, e.target.value]) }}
-                  className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
-                  <option value="">+ Chọn thêm người</option>
-                  {users.filter(u => u.isDirector && !bgdIds.includes(u.id)).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                </select>
-              </div>
-            </>
-          ) : (
-            <>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">1. Trưởng bộ phận / Quản lý đơn vị {myManagers.length > 0 ? '(quản lý phòng ban của bạn)' : ''} *</label>
-                <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
-                  <option value="">-- Chọn người duyệt --</option>
-                  {myManagers.length > 0
-                    ? myManagers.map(u => <option key={u.id} value={u.id}>{u.name} — {u.department}</option>)
-                    : (
-                      <>
-                        {TEAMS.map(t => {
-                          const members = users.filter(u => u.id !== currentUser.id && u.teamId === t.id)
-                          return members.length === 0 ? null : (
-                            <optgroup key={t.id} label={`${t.emoji} ${t.name}`}>
-                              {members.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
-                            </optgroup>
-                          )
-                        })}
-                      </>
-                    )}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Người duyệt tiếp theo: <span dangerouslySetInnerHTML={{ __html: cfg.hint }} /> (duyệt theo thứ tự trong danh sách)</label>
-                <ApproverPicker users={users} excludeIds={[currentUser.id, recipientId]} value={extraApprovers} onChange={setExtraApprovers} />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Luồng phê duyệt</label>
-                <select value={approvalMode} onChange={e => setApprovalMode(e.target.value as 'seq' | 'par')} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
-                  <option value="seq">Nối tiếp (lần lượt)</option>
-                  <option value="par">Song song (Trưởng bộ phận trước, rồi cùng lúc)</option>
-                </select>
-              </div>
-            </>
-          )}
-        </div>
-      </>
-          )}
-        </div>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Người duyệt tiếp theo: <span dangerouslySetInnerHTML={{ __html: cfg.hint }} /> (duyệt theo thứ tự trong danh sách)</label>
+              <ApproverPicker users={users} excludeIds={[currentUser.id, recipientId]} value={extraApprovers} onChange={setExtraApprovers} />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Luồng phê duyệt</label>
+              <select value={approvalMode} onChange={e => setApprovalMode(e.target.value as 'seq' | 'par')} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
+                <option value="seq">Nối tiếp (lần lượt)</option>
+                <option value="par">Song song (Trưởng bộ phận trước, rồi cùng lúc)</option>
+              </select>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="shrink-0 px-4 py-3 flex items-center justify-end gap-3" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
