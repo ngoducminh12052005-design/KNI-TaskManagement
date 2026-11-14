@@ -9280,22 +9280,42 @@ function useDeptMemberIds(teamId: string): string[] {
   }, [teamId])
   return ids
 }
-// Chọn người ký theo 2 bước: chọn phòng ban trước, rồi mới hiện người trong phòng đó
+// Chọn người ký: bình thường chỉ hiện 1 ô tên người (giống ô Trưởng bộ phận).
+// Muốn đổi người khác thì chọn "Chọn người khác…" rồi mới hiện ô chọn phòng ban và người trong phòng đó.
 function DeptUserSelect({ users, excludeId, value, onChange }: {
   users: User[]; excludeId: string; value: string; onChange: (id: string) => void
 }) {
   const [teamId, setTeamId] = useState(() => users.find(u => u.id === value)?.teamId ?? '')
+  const [picking, setPicking] = useState(false)        // đang chọn người khác theo phòng ban
+  const prevRef = useRef('')                           // người đang chọn trước khi bấm "Chọn người khác"
   const deptIds = useDeptMemberIds(teamId)
   const members = users
     .filter(u => u.id !== excludeId && (u.teamId === teamId || deptIds.includes(u.id)))
     .sort((a, b) => (b.role === 'manager' ? 1 : 0) - (a.role === 'manager' ? 1 : 0))
-      // Người ký được chọn sẵn từ bên ngoài (VD Kế toán trưởng mặc định): tự hiện đúng phòng ban của người đó
+  // Người ký được chọn sẵn từ bên ngoài (VD Kế toán trưởng mặc định): tự hiện đúng phòng ban của người đó
   useEffect(() => {
     const tid = users.find(u => u.id === value)?.teamId
     if (value && tid && tid !== teamId && !members.some(m => m.id === value)) setTeamId(tid)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value])
   const cls = 'w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white disabled:bg-gray-100'
+  const label = (u: User) => `${u.name}${u.role === 'manager' ? ' (Quản lý)' : ''}`
+  const cur = users.find(u => u.id === value)
+
+  // Đã có người: chỉ hiện 1 ô tên người
+  if (value && cur && !picking) {
+    return (
+      <select value={value} className={cls} style={{ color: '#111827' }}
+        onChange={e => {
+          if (e.target.value === '__other__') { prevRef.current = value; setTeamId(cur.teamId); setPicking(true) }
+          else onChange(e.target.value)
+        }}>
+        <option value={value}>{label(cur)}</option>
+        <option value="__other__">🔄 Chọn người khác…</option>
+      </select>
+    )
+  }
+  // Chưa có người (hoặc đang chọn người khác): chọn phòng ban trước, rồi mới hiện người trong phòng đó
   return (
     <div className="space-y-1.5">
       <select value={teamId} onChange={e => { setTeamId(e.target.value); onChange('') }} className={cls} style={{ color: '#111827' }}>
@@ -9303,10 +9323,14 @@ function DeptUserSelect({ users, excludeId, value, onChange }: {
         {TEAMS.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
       </select>
       {teamId && (
-        <select value={value} onChange={e => onChange(e.target.value)} className={cls} style={{ color: '#111827' }}>
+        <select value={value} onChange={e => { onChange(e.target.value); if (e.target.value) setPicking(false) }} className={cls} style={{ color: '#111827' }}>
           <option value="">-- Chọn người ký --</option>
-          {members.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+          {members.map(u => <option key={u.id} value={u.id}>{label(u)}</option>)}
         </select>
+      )}
+      {picking && prevRef.current && (
+        <button type="button" onClick={() => { onChange(prevRef.current); setPicking(false) }}
+          className="text-[11px] text-gray-500 hover:text-gray-700 underline">↩ Giữ người cũ</button>
       )}
     </div>
   )
