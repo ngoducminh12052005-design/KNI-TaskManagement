@@ -9244,6 +9244,20 @@ function docSoThanhChu(value: number): string {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
+// ===== Người ký để sẵn khi tạo mới (người dùng muốn chọn người khác thì đổi sau) =====
+const stripVn = (s: string) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase()
+// Trưởng bộ phận của người lập: quản lý cùng phòng ban (nếu chính người lập là quản lý thì là chính họ)
+function defaultHeadOf(users: User[], me: User): string {
+  const mgrs = users.filter(u => u.isActive !== false && u.role === 'manager' && u.teamId === me.teamId)
+  return (mgrs.find(u => u.id === me.id) ?? mgrs[0])?.id ?? ''
+}
+// Kế toán trưởng: người có chức danh "Kế toán trưởng", nếu không có thì lấy quản lý phòng Kế toán
+function defaultChiefAccountant(users: User[], meId: string): string {
+  const cands = users.filter(u => u.isActive !== false && u.id !== meId)
+  const byTitle = cands.find(u => stripVn(u.position ?? '').includes('ke toan truong'))
+  if (byTitle) return byTitle.id
+  return cands.find(u => u.teamId === 't1e' && u.role === 'manager')?.id ?? ''
+}
 // Lấy id những người được thêm vào phòng ban (kể cả phòng phụ như IT Main)
 function useDeptMemberIds(teamId: string): string[] {
   const [ids, setIds] = useState<string[]>([])
@@ -9265,6 +9279,12 @@ function DeptUserSelect({ users, excludeId, value, onChange }: {
   const members = users
     .filter(u => u.id !== excludeId && (u.teamId === teamId || deptIds.includes(u.id)))
     .sort((a, b) => (b.role === 'manager' ? 1 : 0) - (a.role === 'manager' ? 1 : 0))
+      // Người ký được chọn sẵn từ bên ngoài (VD Kế toán trưởng mặc định): tự hiện đúng phòng ban của người đó
+  useEffect(() => {
+    const tid = users.find(u => u.id === value)?.teamId
+    if (value && tid && tid !== teamId && !members.some(m => m.id === value)) setTeamId(tid)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value])
   const cls = 'w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white disabled:bg-gray-100'
   return (
     <div className="space-y-1.5">
@@ -9367,6 +9387,11 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
   const [kttId, setKttId] = useState('')                 // Kế toán trưởng
   const [gdId, setGdId] = useState('')                   // Giám đốc
   const [gdCompany, setGdCompany] = useState('')         // Công ty của Giám đốc (chọn hoặc tự điền)
+    useEffect(() => {
+    setRecipientId(prev => prev || defaultHeadOf(users, currentUser))
+    setKttId(prev => prev || defaultChiefAccountant(users, currentUser.id))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [users.length, currentUser.id, currentUser.teamId])
   const [bgdIds, setBgdIds] = useState<string[]>([])     // Ban Giám đốc KNI (chọn 1 hoặc nhiều người)
   const [priority, setPriority] = useState<string>(efd.priority ?? 'P3')
   const approvalMode = docModeOf(priority)
@@ -9391,7 +9416,13 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing?.id])
-
+    // Tạo mới: để sẵn Trưởng bộ phận (của người lập) và Kế toán trưởng, muốn chọn người khác thì đổi sau
+  useEffect(() => {
+    if (editing) return
+    setRecipientId(prev => prev || defaultHeadOf(users, currentUser))
+    setKttId(prev => prev || defaultChiefAccountant(users, currentUser.id))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [users.length, currentUser.id, currentUser.teamId])
   const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? ''
   const rowAmount = (r: DocCostRow) => toVnd((Number(r.qty) || 0) * (Number(r.price) || 0))
   const total = rows.reduce((s, r) => s + rowAmount(r), 0)
@@ -9578,7 +9609,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
         <p className="font-bold text-gray-500">TẬP ĐOÀN KHÔI NGUYÊN INVESTMENT (KNI)</p>
         <div className="flex items-center gap-2 font-bold text-gray-500 flex-wrap">
           <span>CÔNG TY</span>
-          <select value={company} onChange={e => setCompany(e.target.value)} className="border-b border-dashed border-gray-300 bg-transparent outline-none font-bold" style={ink}>
+          <select value={company} onChange={e => { setCompany(e.target.value); setGdCompany(e.target.value) }} className="border-b border-dashed border-gray-300 bg-transparent outline-none font-bold" style={ink}>
             <option value="">-- chọn --</option>
             {COMPANIES.map(c => <option key={c} value={c}>{c.toUpperCase()}</option>)}
           </select>
