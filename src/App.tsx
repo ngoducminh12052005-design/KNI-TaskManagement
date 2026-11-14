@@ -3927,6 +3927,21 @@ async function uploadTaskFiles(userId: string, files: File[]) {
   for (let i = 0; i < files.length; i += 4) out.push(...await Promise.all(files.slice(i, i + 4).map(up)))
   return out
 }
+// Nút chọn tệp (thay ô "Chọn tệp / Không có tệp nào được chọn" mặc định của trình duyệt cho dễ nhìn)
+function FileButton({ accept, count = 0, onChange }: { accept?: string; count?: number; onChange: (e: { target: HTMLInputElement }) => void }) {
+  const ref = useRef<HTMLInputElement>(null)
+  return (
+    <div className="flex items-center gap-3">
+      <input ref={ref} type="file" multiple accept={accept} onChange={onChange} className="hidden" />
+      <button type="button" onClick={() => ref.current?.click()}
+        className="px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors hover:bg-blue-50"
+        style={{ border: '2px solid #2563eb', color: '#1d4ed8', background: '#fff' }}>
+        📎 Chọn tệp
+      </button>
+      <span className="text-xs text-gray-500">{count > 0 ? `Đã chọn ${count} tệp` : 'Chưa chọn tệp nào'}</span>
+    </div>
+  )
+}
 
 function FilePicker({ files, setFiles }: { files: File[]; setFiles: (f: File[]) => void }) {
   const inputRef = useRef<HTMLInputElement>(null)
@@ -9655,7 +9670,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
           className={`${area} mb-4`} style={ink} />
 
         <p className="font-bold mb-1">Tài liệu đính kèm theo Tờ trình:</p>
-        <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" onChange={pickFiles} className="text-xs" />
+        <FileButton accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" count={files.length} onChange={pickFiles} />
         {files.length > 0 && (
           <ul className="mt-1 space-y-0.5">
             {files.map((f, i) => (
@@ -10231,7 +10246,7 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated }: { currentU
 
           <div className="mt-4">
             <p className="font-bold text-xs mb-1">Chứng từ đính kèm (hóa đơn, báo giá, ủy nhiệm chi...):</p>
-            <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={pickFiles} className="text-xs" />
+            <FileButton accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" count={files.length} onChange={pickFiles} />
             {files.length > 0 && (
               <ul className="mt-1 space-y-0.5">
                 {files.map((f, i) => (
@@ -10862,7 +10877,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
 
           <div className="mt-4">
             <p className="font-bold text-xs mb-1">Tài liệu đính kèm (giấy xác nhận y tế, báo giá, lịch trình...):</p>
-            <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={pickFiles} className="text-xs" />
+            <FileButton accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" count={files.length} onChange={pickFiles} />
             {files.length > 0 && (
               <ul className="mt-1 space-y-0.5">
                 {files.map((x, i) => (
@@ -11546,7 +11561,7 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
             {editing && (editing.attachments ?? []).length > 0 && (
               <p className="text-[11px] mb-1 text-gray-600">Đã đính kèm trước đó (giữ nguyên): {(editing.attachments ?? []).map(a => a.name).join(', ')}. Chọn thêm file bên dưới nếu cần bổ sung.</p>
             )}
-            <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={pickFiles} className="text-xs" />
+            <FileButton accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" count={files.length} onChange={pickFiles} />
             {files.length > 0 && (
               <ul className="mt-1 space-y-0.5">
                 {files.map((x, i) => (
