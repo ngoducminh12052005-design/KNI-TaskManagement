@@ -830,7 +830,8 @@ const TEAMS = [
   { id: 't3e', name: 'Genki House - Kinh doanh-Lễ tân', emoji: '💼' },
   { id: 't3f', name: 'Genki House - Hỗ trợ', emoji: '🧹' },
   { id: 't4', name: 'Genki Farm', emoji: '🌾' },
-  { id: 't5', name: 'Les Sens Phú Quốc', emoji: '🏝️' },
+  { id: 't5', name: 'Les Sens', emoji: '🏝️' },
+  { id: 't7', name: 'Amerys', emoji: '🏨' },
   { id: 't6', name: 'ACVN', emoji: '🎓' },
 ]
 
@@ -1001,7 +1002,9 @@ const COMPANY_CODES: Record<string, string> = {
   'Genki House': 'GH',
   'Genki Farm': 'GF',
   'First Steps': 'FS',
-  'Les Sens Phú Quốc': 'LSPQ',
+  'Les Sens': 'LS',
+  'Amerys': 'AMR',
+  'Les Sens Phú Quốc': 'LSPQ',   // dữ liệu cũ
   'ACVN': 'ACVN',
 }
 
@@ -12963,7 +12966,7 @@ async function openProposalFile(path: string) {
 }
 
 const PROPOSAL_GROUPS = ['Mua sắm', 'Nghỉ phép', 'Đi công tác', 'Đề nghị thanh toán', 'Khác']
-const COMPANIES = ['KNI', 'Genki House', 'Genki Farm', 'First Steps', 'Les Sens Phú Quốc', 'ACVN']
+const COMPANIES = ['KNI', 'Genki House', 'Genki Farm', 'First Steps', 'Les Sens', 'Amerys', 'ACVN']
 
 async function generateProposalCode(userId: string): Promise<string> {
   const d = new Date()
