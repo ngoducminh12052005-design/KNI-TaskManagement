@@ -2450,7 +2450,7 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
           userId={currentUser.id}
         />
 
-        <p className="font-bold mb-1">CÁC HẠNG MỤC CÔNG VIỆC</p>
+        <p className="font-bold mb-1 mt-4">CÁC HẠNG MỤC CÔNG VIỆC</p>
         <div className="overflow-x-auto">
           <table className="w-full border-collapse" style={{ minWidth: 600 }}>
             <thead>
@@ -9945,9 +9945,9 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
           className={`${area} mb-4`} style={ink} />
 
         <p className="font-bold mb-1">NỘI DUNG <span className="font-normal text-gray-400">(dán ảnh được, Ctrl+V)</span></p>
-        <textarea ref={noiDungRef} value={noiDung} onChange={e => setNoiDung(e.target.value)} onPaste={handleNoiDungPaste} rows={10}
-          placeholder={'I. NỘI DUNG ĐIỀU CHỈNH & TỐI ƯU CHI PHÍ\n1. Về Máy tính xách tay & Phần mềm bản quyền: ...\n2. Về Thiết bị In ấn / Copy / Scan: ...'}
-          className={`${area} mb-4`} style={ink} />
+        <div className="mb-4">
+          <TaskRichTextEditor value={noiDung} onChange={setNoiDung} userId={currentUser.id} />
+        </div>
 
         <p className="font-bold mb-1">CHI PHÍ</p>
         <div className="overflow-x-auto">
