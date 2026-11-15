@@ -9870,7 +9870,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
   const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)   // gồm cả chính người tạo nếu là quản lý (có thể tự là Trưởng bộ phận)
 
   const efd: Record<string, any> = editing?.formData ?? {}
-  const draft = useDraftScope('totrinh', currentUser.id, draftId, !editing, s => s.title ?? '', projectId ? { projectId } : undefined)
+  const draft = useDraftScope('totrinh', currentUser.id, draftId, !editing, s => (s.title || s.intro || s.noiDung || '').toString(), projectId ? { projectId } : undefined)
   const [title, setTitle] = draft.useS('title', editing?.title ?? '')
   const [company, setCompany] = draft.useS('company', editing?.company ?? '')
   const [place, setPlace] = draft.useS<string>('place', efd.place ?? 'HCMC')
