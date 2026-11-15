@@ -802,15 +802,13 @@ const INITIAL_MESSAGES: Message[] = [
 ]
 
 const REWARDS: Reward[] = [
-  { id: 'r1', name: 'Voucher WinMart', description: 'Voucher mua sắm 100.000đ', cost: 200, emoji: '🛒', category: 'Mua sắm' },
-  { id: 'r2', name: 'Nghỉ phép 1 ngày', description: '01 ngày nghỉ có hưởng lương', cost: 1000, emoji: '🏖️', category: 'Phúc lợi' },
-  { id: 'r3', name: 'Voucher Grab', description: 'Voucher GrabFood/GrabCar 200.000đ', cost: 500, emoji: '🛵', category: 'Phúc lợi' },
-  { id: 'r4', name: 'Team Lunch', description: 'Bữa trưa cùng team tối đa 8 người', cost: 800, emoji: '🍜', category: 'Ẩm thực' },
-  { id: 'r5', name: 'Voucher Shopee', description: 'Voucher mua sắm 150.000đ', cost: 350, emoji: '🛍️', category: 'Mua sắm' },
-  { id: 'r6', name: 'Combo phụ kiện', description: 'Chuột, bàn phím hoặc tai nghe', cost: 3000, emoji: '🖥️', category: 'Thiết bị' },
-  { id: 'r7', name: 'WFH 1 ngày', description: 'Làm việc từ xa 1 ngày', cost: 150, emoji: '🏠', category: 'Phúc lợi' },
-  { id: 'r8', name: 'Voucher CGV', description: 'Voucher xem phim 150.000đ', cost: 250, emoji: '🎬', category: 'Giải trí' },
-  { id: 'r9', name: 'Khám sức khỏe', description: 'Voucher khám sức khỏe 300.000đ', cost: 400, emoji: '🩺', category: 'Sức khỏe' },
+  { id: 'k20', name: '20 Koin', description: 'Gói đổi 20 Koin vào ví của bạn', cost: 2000, emoji: '🪙', category: 'Gói Koin' },
+  { id: 'k50', name: '50 Koin', description: 'Gói đổi 50 Koin vào ví của bạn', cost: 5000, emoji: '🪙', category: 'Gói Koin' },
+  { id: 'k100', name: '100 Koin', description: 'Gói đổi 100 Koin vào ví của bạn', cost: 10000, emoji: '🪙', category: 'Gói Koin' },
+  { id: 'k200', name: '200 Koin', description: 'Gói đổi 200 Koin vào ví của bạn', cost: 20000, emoji: '🪙', category: 'Gói Koin' },
+  { id: 'k500', name: '500 Koin', description: 'Gói đổi 500 Koin vào ví của bạn', cost: 50000, emoji: '🪙', category: 'Gói Koin' },
+  { id: 'k1000', name: '1.000 Koin', description: 'Gói đổi 1.000 Koin vào ví của bạn', cost: 100000, emoji: '🪙', category: 'Gói Koin' },
+  { id: 'k5000', name: '5.000 Koin', description: 'Gói đổi 5.000 Koin vào ví của bạn', cost: 500000, emoji: '🪙', category: 'Gói Koin' },
 ]
 
 
@@ -8102,16 +8100,18 @@ function RewardsView({ currentUser, redemptions, users }: { currentUser: User; r
   }
 
   const handleRedeem = async (r: Reward) => {
-    if (availablePoints < r.cost || redeemed.includes(r.id)) return
-    const { error } = await supabase.from('redemptions').insert({
-      user_id: currentUser.id, reward_id: r.id, reward_name: r.name, cost: r.cost,
+    if (availablePoints < r.cost) return
+    const k = Math.round(r.cost / POINTS_PER_KOIN)
+    const { error } = await supabase.from('koin_exchanges').insert({
+      user_id: currentUser.id, points: r.cost, koin: k,
     })
     if (error) { setNotice('❌ Lỗi: ' + error.message); setTimeout(() => setNotice(''), 3500); return }
 
     await supabase.from('notifications').insert({
-      message: `🎁 ${currentUser.name} vừa dùng ${r.cost} điểm đổi lấy: ${r.name}`,
+      message: `🪙 ${currentUser.name} vừa dùng ${r.cost} điểm đổi lấy: ${r.name}`,
     })
 
+    await loadKoin()
     setNotice(`🎉 Đổi thành công: ${r.name}!`)
     setTimeout(() => setNotice(''), 3500)
   }
@@ -8162,13 +8162,12 @@ function RewardsView({ currentUser, redemptions, users }: { currentUser: User; r
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {REWARDS.map(r => {
           const can = availablePoints >= r.cost
-          const done = redeemed.includes(r.id)
           return (
             <div key={r.id} className="rounded-xl p-5 flex flex-col transition-all hover:-translate-y-0.5"
               style={{
                 background: 'var(--bg-panel)',
-                border: `1px solid ${done ? '#10b98130' : can ? 'var(--border)' : 'var(--border)'}`,
-                opacity: done ? 0.75 : can ? 1 : 0.6,
+                border: '1px solid var(--border)',
+                opacity: can ? 1 : 0.6,
               }}>
               <div className="text-4xl text-center mb-3">{r.emoji}</div>
               <div className="flex-1 text-center">
@@ -8181,13 +8180,13 @@ function RewardsView({ currentUser, redemptions, users }: { currentUser: User; r
                   {r.cost.toLocaleString()} EXP
                 </span>
               </div>
-              <button onClick={() => handleRedeem(r)} disabled={!can || done}
+              <button onClick={() => handleRedeem(r)} disabled={!can}
                 className="w-full py-2 rounded-lg font-bold text-sm disabled:cursor-not-allowed"
                 style={{
-                  background: done ? '#10b98118' : can ? 'linear-gradient(135deg,#7c3aed,#f59e0b)' : 'var(--bg-card-alt)',
-                  color: done ? '#10b981' : can ? '#fff' : 'var(--text-muted)',
+                  background: can ? 'linear-gradient(135deg,#7c3aed,#f59e0b)' : 'var(--bg-card-alt)',
+                  color: can ? '#fff' : 'var(--text-muted)',
                 }}>
-                {done ? '✓ Đã đổi' : can ? 'Đổi ngay' : 'Chưa đủ EXP'}
+                {can ? 'Đổi ngay' : 'Chưa đủ EXP'}
               </button>
             </div>
           )
