@@ -14641,14 +14641,23 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
       <div className="p-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>{contractsMode ? '📑 Phê duyệt hợp đồng' : '📜 Tờ trình & Đề xuất'}</h2>
+          <h2 className="text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>{contractsMode ? '📑 Hợp đồng' : '📜 Tờ trình & Đề xuất'}</h2>
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{contractsMode ? `${countDexuat} phiếu hợp đồng` : `${countTotrinh} tờ trình · ${countDexuat} đề xuất`}</p>
         </div>
-        <button onClick={() => { if (contractsMode) { setCreateKind('dexuat'); setCreateGroup('Hợp đồng') } setShowModal(true) }}
-          className="px-4 py-2.5 rounded-xl font-bold text-white text-sm"
-          style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', boxShadow: '0 0 20px #7c3aed40' }}>
-            {contractsMode ? '+ Tạo phiếu hợp đồng' : '+ Tạo mới'}
-        </button>
+        <div className="flex gap-2">
+          {contractsMode && (
+            <button type="button" onClick={() => alert('Tính năng Ký kết hợp đồng chữ ký số đang được phát triển, chưa sử dụng được.')}
+              className="px-4 py-2.5 rounded-xl font-bold text-sm"
+              style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+              ✍️ Ký kết hợp đồng (chữ ký số)
+            </button>
+          )}
+          <button onClick={() => { if (contractsMode) { setCreateKind('dexuat'); setCreateGroup('Hợp đồng') } setShowModal(true) }}
+            className="px-4 py-2.5 rounded-xl font-bold text-white text-sm"
+            style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', boxShadow: '0 0 20px #7c3aed40' }}>
+              {contractsMode ? '+ Tạo phiếu hợp đồng' : '+ Tạo mới'}
+          </button>
+        </div>
       </div>
 
             <div className="flex gap-2 mb-5">
@@ -17676,7 +17685,7 @@ const NAV = [
   { id: 'projects', label: 'Dự án', icon: '🗂️' },
   { id: 'directory', label: 'Danh bạ', icon: '📇' },
   { id: 'proposals', label: 'Tờ trình', icon: '📜' },
-  { id: 'contracts', label: 'Phê duyệt hợp đồng', icon: '📑' },
+  { id: 'contracts', label: 'Hợp đồng', icon: '📑' },
   { id: 'leaderboard', label: 'Xếp hạng', icon: '🏆' },
   { id: 'rewards', label: 'Quà', icon: '🎁' },
   { id: 'social', label: 'Social', icon: '💬' },
