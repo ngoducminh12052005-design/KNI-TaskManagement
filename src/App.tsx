@@ -11852,8 +11852,8 @@ function HopDongInfo({ f, set, ro }: { f: Record<string, any>; set: (patch: Reco
                 {ro
                   ? <span className="whitespace-pre-wrap block">{f[k] || ''}</span>
                   : kind === 'area'
-                    ? <textarea value={f[k] ?? ''} onChange={e => set({ [k]: e.target.value })} rows={3}
-                        className="w-full bg-transparent outline-none resize-none border-b border-dashed border-gray-300 focus:border-blue-500" style={ink} />
+                    ? <textarea value={f[k] ?? ''} onChange={e => set({ [k]: e.target.value })} rows={1}
+                      className="w-full bg-transparent outline-none resize-none border-b border-dashed border-gray-300 focus:border-blue-500" style={ink} />
                     : <input value={f[k] ?? ''} onChange={e => set({ [k]: e.target.value })}
                         className="w-full bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500" style={ink} />}
               </td>
