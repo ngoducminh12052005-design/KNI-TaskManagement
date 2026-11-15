@@ -11821,6 +11821,19 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
   const candidates = (proposals ?? []).filter(p => p.kind === 'totrinh' && p.code
     && (currentUser.isDirector || p.submittedBy === currentUser.id || p.participants.includes(currentUser.id)))
 
+  const swapRef = useRef<HTMLInputElement>(null)
+  const [swapIdx, setSwapIdx] = useState(-1)
+  const [removedOld, setRemovedOld] = useState<string[]>([])   // file đã đính kèm trước đó mà người dùng bỏ đi (khi sửa & gửi lại)
+  const oldKept = (editing?.attachments ?? []).filter(a => !removedOld.includes(a.path))
+  const swapFile = (e: { target: HTMLInputElement }) => {
+    const nf = e.target.files?.[0]
+    e.target.value = ''
+    if (!nf || swapIdx < 0) return
+    if (nf.size > MAX_FILE_MB * 1024 * 1024) { setError(`File "${nf.name}" lớn hơn ${MAX_FILE_MB}MB. Hãy nén hoặc chia nhỏ file rồi chọn lại.`); return }
+    setError('')
+    setFiles(prev => prev.map((x, j) => (j === swapIdx ? nf : x)))
+    setSwapIdx(-1)
+  }
   const pickFiles = (e: { target: HTMLInputElement }) => {
     const picked = Array.from(e.target.files ?? [])
     const tooBig = picked.find(x => x.size > MAX_FILE_MB * 1024 * 1024)
@@ -11849,7 +11862,7 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
     if (!String(f.company).trim()) { setError('Vui lòng nhập pháp nhân ký kết hợp đồng.'); return }
     if (!String(f.contractNo).trim()) { setError('Vui lòng nhập số hợp đồng và ngày hợp đồng.'); return }
     if (!String(f.purpose).trim()) { setError('Vui lòng nhập mục đích hợp đồng.'); return }
-    if (files.length === 0 && !driveUrl.trim() && (editing?.attachments ?? []).length === 0) { setError('Bắt buộc đính kèm hợp đồng (chọn file).'); return }
+    if (files.length === 0 && !driveUrl.trim() && oldKept.length === 0) { setError('Bắt buộc đính kèm hợp đồng (chọn file).'); return }
     if (codeInput.trim()) { setError('Bạn đã gõ mã tờ trình nhưng chưa bấm "＋ Gắn tờ trình".'); return }
     if (codes.length === 0) { setError('Bắt buộc đính kèm tờ trình (gắn mã tờ trình RTASK).'); return }
     const missing = approvers.findIndex(x => !x)
@@ -11888,6 +11901,7 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
       if (gained.length) addedLines.push(`• Gắn thêm tờ trình: ${gained.join(', ')}`)
       if (lost.length) editedLines.push(`• Gỡ tờ trình: ${lost.join(', ')}`)
       if (uploaded.length) addedLines.push(`• Bổ sung file hợp đồng: ${uploaded.map(x => x.name).join(', ')}`)
+      if (removedOld.length) editedLines.push(`• Bỏ file hợp đồng: ${(editing.attachments ?? []).filter(a => removedOld.includes(a.path)).map(a => a.name).join(', ')}`)
       const oldDrive = (editing.driveUrl ?? '').trim()
       if (driveUrl.trim() !== oldDrive) (oldDrive ? editedLines : addedLines).push(`• Link Drive hợp đồng: ${driveUrl.trim() || '(bỏ link)'}`)
 
@@ -11904,7 +11918,7 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
         recipient_id: recipientId, status: 'pending', rejected_reason: null,
         participants: Array.from(new Set([currentUser.id, ...approverIds])),
         approval_mode: approvalMode,
-        attachments: [...(editing.attachments ?? []), ...uploaded.map(x => ({ ...x, round }))],
+        attachments: [...oldKept, ...uploaded.map(x => ({ ...x, round }))],
         form_data: { ...formData, dateText: efd.dateText ?? dateText },
       }).eq('id', editing.id)
       if (upErr) { setSaving(false); setError(upErr.message); return }
@@ -11989,15 +12003,38 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
           <div className="mt-4 rounded p-3" style={{ background: '#fffbeb', border: '1px solid #fcd34d' }}>
             <p className="font-bold text-xs mb-1">📎 1. Hợp đồng đính kèm <span className="text-red-600">(bắt buộc)</span></p>
             {editing && (editing.attachments ?? []).length > 0 && (
-              <p className="text-[11px] mb-1 text-gray-600">Đã đính kèm trước đó (giữ nguyên): {(editing.attachments ?? []).map(a => a.name).join(', ')}. Chọn thêm file bên dưới nếu cần bổ sung.</p>
+              <div className="mb-1">
+                <p className="text-[11px] text-gray-600">Đã đính kèm trước đó (bấm Xem để mở, ✕ để bỏ file cũ nếu muốn đổi sang file khác):</p>
+                <ul className="mt-0.5 space-y-0.5">
+                  {(editing.attachments ?? []).map(a => {
+                    const gone = removedOld.includes(a.path)
+                    return (
+                      <li key={a.path} className="flex items-center justify-between gap-2 text-xs" style={gone ? { opacity: 0.45, textDecoration: 'line-through' } : undefined}>
+                        <span className="truncate">📄 {a.name}</span>
+                        <span className="flex-shrink-0">
+                          {!gone && <button type="button" onClick={() => openProposalFile(a.path)} className="text-blue-600 px-1.5 font-semibold">👁 Xem</button>}
+                          {gone
+                            ? <button type="button" onClick={() => setRemovedOld(prev => prev.filter(p => p !== a.path))} className="text-blue-600 px-1.5">↩ Giữ lại</button>
+                            : <button type="button" onClick={() => setRemovedOld(prev => [...prev, a.path])} className="text-red-500 px-1">✕</button>}
+                        </span>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
             )}
             <FileButton accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" count={files.length} onChange={pickFiles} />
+            <input ref={swapRef} type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" className="hidden" onChange={swapFile} />
             {files.length > 0 && (
               <ul className="mt-1 space-y-0.5">
                 {files.map((x, i) => (
-                  <li key={i} className="flex items-center justify-between text-xs">
-                    <span className="truncate">☐ {x.name} ({(x.size / 1024 / 1024).toFixed(1)}MB)</span>
-                    <button type="button" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} className="text-red-500 px-1">✕</button>
+                  <li key={`${x.name}-${x.size}-${i}`} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="truncate">☑ {x.name} ({(x.size / 1024 / 1024).toFixed(1)}MB)</span>
+                    <span className="flex-shrink-0">
+                      <button type="button" onClick={() => previewLocalFile(x)} title="Mở file để kiểm tra đã chọn đúng chưa" className="text-blue-600 px-1.5 font-semibold">👁 Xem</button>
+                      <button type="button" onClick={() => { setSwapIdx(i); swapRef.current?.click() }} title="Chọn file khác thay cho file này" className="text-amber-700 px-1.5">🔄 Đổi</button>
+                      <button type="button" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} className="text-red-500 px-1">✕</button>
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -13357,6 +13394,16 @@ async function uploadProposalFiles(userId: string, files: File[]) {
   return out
 }
 
+// Xem nhanh file vừa chọn (chưa tải lên): ảnh / PDF / txt mở ở tab mới, file Word / Excel thì tải về để mở xem
+function previewLocalFile(f: File) {
+  const url = URL.createObjectURL(f)
+  const viewable = /^(image\/(?!svg)|application\/pdf|text\/plain)/.test(f.type || '')
+  const a = document.createElement('a')
+  a.href = url
+  if (viewable) { a.target = '_blank'; a.rel = 'noopener' } else { a.download = f.name }
+  document.body.appendChild(a); a.click(); a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 120000)
+}
 async function openProposalFile(path: string) {
   if (/^https?:\/\//i.test(path)) { window.open(path, '_blank', 'noopener'); return }
   const { data, error } = await supabase.storage.from('proposal-files').createSignedUrl(path, 3600)
