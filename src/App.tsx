@@ -7922,10 +7922,12 @@ function RewardsView({ currentUser, redemptions, users }: { currentUser: User; r
   const redeemed = myRedemptions.map(r => r.rewardId)
 
   const handleExchangeKoin = async () => {
-    const k = Math.floor(Number(koinInput))
-    if (!k || k <= 0) { setNotice('❌ Nhập số Koin muốn đổi (số nguyên lớn hơn 0)'); setTimeout(() => setNotice(''), 3500); return }
-    const pts = k * POINTS_PER_KOIN
-    if (pts > availablePoints) { setNotice(`❌ Không đủ điểm: đổi ${k} Koin cần ${pts.toLocaleString()} điểm`); setTimeout(() => setNotice(''), 3500); return }
+    const entered = Math.floor(Number(koinInput))          // số điểm người dùng nhập
+    if (!entered || entered <= 0) { setNotice('❌ Nhập số điểm muốn đổi'); setTimeout(() => setNotice(''), 3500); return }
+    const k = Math.floor(entered / POINTS_PER_KOIN)         // số Koin nhận được (chỉ đổi tròn Koin)
+    if (k < 1) { setNotice(`❌ Cần ít nhất ${POINTS_PER_KOIN} điểm để đổi 1 Koin`); setTimeout(() => setNotice(''), 3500); return }
+    const pts = k * POINTS_PER_KOIN                         // số điểm thực sự bị trừ (điểm dư giữ lại)
+    if (pts > availablePoints) { setNotice(`❌ Không đủ điểm: bạn đang có ${availablePoints.toLocaleString()} điểm`); setTimeout(() => setNotice(''), 3500); return }
     setExchanging(true)
     const { error } = await supabase.from('koin_exchanges').insert({ user_id: currentUser.id, points: pts, koin: k })
     setExchanging(false)
@@ -7975,7 +7977,7 @@ function RewardsView({ currentUser, redemptions, users }: { currentUser: User; r
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h3 className="font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>🪙 Đổi điểm ra Koin</h3>
-            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{POINTS_PER_KOIN} điểm = 1 Koin · {(10 * POINTS_PER_KOIN).toLocaleString()} điểm = 10 Koin</p>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{POINTS_PER_KOIN} điểm = 1 Koin · {(10 * POINTS_PER_KOIN).toLocaleString()} điểm = 10 Koin · Bạn đang có <b>{availablePoints.toLocaleString()}</b> điểm</p>
           </div>
           <div className="text-right">
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Koin của bạn</div>
@@ -7983,14 +7985,19 @@ function RewardsView({ currentUser, redemptions, users }: { currentUser: User; r
           </div>
         </div>
         <div className="flex items-center gap-2 mt-3 flex-wrap">
-          <input type="number" min={1} value={koinInput} onChange={e => setKoinInput(e.target.value)} placeholder="Số Koin muốn đổi"
-            className="px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)', width: 180 }} />
-          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>= {((Math.floor(Number(koinInput)) || 0) * POINTS_PER_KOIN).toLocaleString()} điểm</span>
+          <input type="number" min={0} step={POINTS_PER_KOIN} value={koinInput} onChange={e => setKoinInput(e.target.value)} placeholder="Nhập số điểm muốn đổi"
+            className="px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)', width: 200 }} />
+          <span className="text-sm font-bold" style={{ color: '#d97706' }}>= {Math.floor((Math.floor(Number(koinInput)) || 0) / POINTS_PER_KOIN).toLocaleString()} Koin</span>
           <button type="button" onClick={handleExchangeKoin} disabled={exchanging}
             className="px-4 py-2 rounded-lg font-bold text-sm text-white disabled:opacity-40" style={{ background: 'linear-gradient(135deg,#7c3aed,#f59e0b)' }}>Đổi sang Koin</button>
-          <button type="button" onClick={() => setKoinInput(String(Math.floor(availablePoints / POINTS_PER_KOIN)))}
+          <button type="button" onClick={() => setKoinInput(String(Math.floor(availablePoints / POINTS_PER_KOIN) * POINTS_PER_KOIN))}
             className="px-3 py-2 rounded-lg text-xs font-semibold" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>Đổi tối đa</button>
         </div>
+                {(Math.floor(Number(koinInput)) || 0) % POINTS_PER_KOIN > 0 && (Math.floor(Number(koinInput)) || 0) >= POINTS_PER_KOIN && (
+          <p className="text-[11px] mt-2" style={{ color: 'var(--text-muted)' }}>
+            Chỉ đổi tròn Koin: {Math.floor((Math.floor(Number(koinInput)) || 0) / POINTS_PER_KOIN) * POINTS_PER_KOIN} điểm sẽ bị trừ, {(Math.floor(Number(koinInput)) || 0) % POINTS_PER_KOIN} điểm dư được giữ lại.
+          </p>
+        )}
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {REWARDS.map(r => {
