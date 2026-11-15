@@ -1752,6 +1752,168 @@ function NoteDrawer({ title, subtitle, table, fkCol, fkId, textCol, users, curre
     </div>
   )
 }
+// ===== Bản nháp tự lưu (lưu trên trình duyệt này, theo từng tài khoản) =====
+type DraftKind = 'task' | 'totrinh' | 'dntt' | 'bieumau' | 'hopdong' | 'dexuat' | 'project'
+interface DraftRec { id: string; kind: DraftKind; title: string; at: number; data: Record<string, any>; meta?: Record<string, any> }
+const DRAFT_EVENT = 'kni-drafts-changed'
+const DRAFT_KIND_LABEL: Record<DraftKind, string> = {
+  task: 'Task', totrinh: 'Tờ trình', dntt: 'Đề nghị thanh toán', bieumau: 'Văn bản mẫu', hopdong: 'Hợp đồng', dexuat: 'Đề xuất', project: 'Dự án',
+}
+const draftKey = (uid: string) => `kni_drafts_v1:${uid}`
+const newDraftId = () => `d${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+function readDrafts(uid: string): DraftRec[] {
+  try {
+    const a = JSON.parse(localStorage.getItem(draftKey(uid)) ?? '[]')
+    return Array.isArray(a) ? a : []
+  } catch { return [] }
+}
+function writeDrafts(uid: string, list: DraftRec[]) {
+  try { localStorage.setItem(draftKey(uid), JSON.stringify(list.slice(0, 40))) } catch {}
+  try { window.dispatchEvent(new Event(DRAFT_EVENT)) } catch {}
+}
+function saveDraft(uid: string, rec: DraftRec) {
+  writeDrafts(uid, [rec, ...readDrafts(uid).filter(d => d.id !== rec.id)])
+}
+function deleteDraft(uid: string, id: string) {
+  writeDrafts(uid, readDrafts(uid).filter(d => d.id !== id))
+}
+
+// Dùng trong form có nhiều ô nhập: thay useState(...) bằng draft.useS('tên', ...) cho các ô người dùng nhập.
+// Tự lưu nháp sau 0,6 giây kể từ lần sửa cuối, và lưu ngay khi thoát form hoặc tải lại trang.
+function useDraftScope(
+  kind: DraftKind, uid: string, draftId: string | undefined, enabled: boolean,
+  titleOf: (s: Record<string, any>) => string, meta?: Record<string, any>,
+) {
+  const idRef = useRef(draftId ?? newDraftId())
+  const restored = useRef<Record<string, any>>(enabled && draftId ? (readDrafts(uid).find(d => d.id === draftId)?.data ?? {}) : {})
+  const store = useRef<Record<string, any>>({})
+  const base = useRef<Record<string, string>>({})
+  const timer = useRef<any>(null)
+  const killed = useRef(false)
+  const latest = useRef({ titleOf, meta })
+  latest.current = { titleOf, meta }
+  const persist = () => {
+    if (!enabled || killed.current) return
+    // Chỉ lưu khi người dùng đã nhập gì đó khác với lúc mới mở form
+    const changed = Object.keys(store.current).some(k => JSON.stringify(store.current[k]) !== base.current[k])
+    if (!changed) return
+    // Chưa gõ tiêu đề / nội dung chính thì chưa tạo nháp (tránh nháp rỗng do form tự điền sẵn)
+    const title = (latest.current.titleOf(store.current) || '').trim()
+    if (!title) return
+    saveDraft(uid, { id: idRef.current, kind, at: Date.now(), data: { ...store.current }, meta: latest.current.meta, title })
+  }
+  useEffect(() => {
+    const flush = () => { clearTimeout(timer.current); persist() }
+    window.addEventListener('beforeunload', flush)
+    window.addEventListener('pagehide', flush)
+    return () => {
+      window.removeEventListener('beforeunload', flush)
+      window.removeEventListener('pagehide', flush)
+      flush()   // bấm thoát form cũng lưu
+    }
+  }, [])
+  function useS<T>(key: string, init: T | (() => T)): [T, (v: T | ((p: T) => T)) => void] {
+    const [v, setV] = useState<T>(() => {
+      const d = typeof init === 'function' ? (init as () => T)() : init
+      base.current[key] = JSON.stringify(d)
+      return key in restored.current ? (restored.current[key] as T) : d
+    })
+    store.current[key] = v
+    const first = useRef(true)
+    useEffect(() => {
+      if (first.current) { first.current = false; return }
+      clearTimeout(timer.current)
+      timer.current = setTimeout(persist, 600)
+    }, [v])
+    return [v, setV]
+  }
+  return {
+    useS,
+    // Gọi khi gửi/tạo thành công: xóa bản nháp
+    clear: () => { killed.current = true; clearTimeout(timer.current); if (enabled) deleteDraft(uid, idRef.current) },
+  }
+}
+
+// Dùng cho form dạng cửa sổ có 1 state lớn (Task): tự lưu khi đang soạn, xóa khi lưu thành công
+function useAutoDraft(o: { session: boolean; on: boolean; uid: string; kind: DraftKind; title: string; data: any; meta?: Record<string, any> }) {
+  const ctl = useRef({ id: '', skip: false })
+  const latest = useRef(o)
+  latest.current = o
+  const write = (c: typeof o) => {
+    if (ctl.current.skip || !c.on) return
+    if (!ctl.current.id) ctl.current.id = newDraftId()
+    saveDraft(c.uid, { id: ctl.current.id, kind: c.kind, title: c.title.trim() || '(chưa đặt tên)', at: Date.now(), data: c.data, meta: c.meta })
+  }
+  const dataKey = JSON.stringify(o.data)
+  useEffect(() => {
+    if (!o.on) return
+    const t = setTimeout(() => write(o), 600)
+    return () => { clearTimeout(t); if (!latest.current.on) write(o) }
+  }, [o.on, dataKey])
+  useEffect(() => {
+    const h = () => write(latest.current)
+    window.addEventListener('beforeunload', h)
+    window.addEventListener('pagehide', h)
+    return () => { window.removeEventListener('beforeunload', h); window.removeEventListener('pagehide', h) }
+  }, [])
+  useEffect(() => { if (!o.session) ctl.current = { id: '', skip: false } }, [o.session])
+  return {
+    resume: (id: string) => { ctl.current = { id, skip: false } },
+    clear: () => { if (ctl.current.id) deleteDraft(o.uid, ctl.current.id); ctl.current.skip = true },
+  }
+}
+
+// Nút "Nháp (n)" + danh sách bản nháp của một mục
+function DraftsButton({ uid, kinds, onResume }: { uid: string; kinds: DraftKind[]; onResume: (d: DraftRec) => void }) {
+  const [open, setOpen] = useState(false)
+  const [list, setList] = useState<DraftRec[]>([])
+  const kindsKey = kinds.join(',')
+  useEffect(() => {
+    const load = () => setList(readDrafts(uid).filter(d => kinds.includes(d.kind)).sort((a, b) => b.at - a.at))
+    load()
+    window.addEventListener(DRAFT_EVENT, load)
+    window.addEventListener('storage', load)
+    return () => { window.removeEventListener(DRAFT_EVENT, load); window.removeEventListener('storage', load) }
+  }, [uid, kindsKey])
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} title="Bản nháp đã tự lưu"
+        className="px-4 py-2.5 rounded-xl font-bold text-sm"
+        style={{ background: 'var(--bg-card-alt)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
+        📝 Nháp{list.length > 0 ? ` (${list.length})` : ''}
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={() => setOpen(false)}>
+          <div className="w-full max-w-lg rounded-2xl p-5" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', maxHeight: '80vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>📝 Bản nháp</h3>
+              <button type="button" onClick={() => setOpen(false)} className="text-lg px-2" style={{ color: 'var(--text-muted)' }}>✕</button>
+            </div>
+            <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>Tự lưu khi bạn đang điền form mà thoát ra hoặc tải lại trang. Nháp lưu trên trình duyệt này. File đính kèm không lưu trong nháp, cần chọn lại.</p>
+            {list.length === 0 ? (
+              <p className="text-sm py-6 text-center" style={{ color: 'var(--text-muted)' }}>Chưa có bản nháp nào.</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {list.map(d => (
+                  <div key={d.id} className="flex items-center gap-3 rounded-xl p-3" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold truncate" style={{ color: 'var(--text-primary)' }}>{d.title}</p>
+                      <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{DRAFT_KIND_LABEL[d.kind]} · {new Date(d.at).toLocaleString('vi-VN')}</p>
+                    </div>
+                    <button type="button" onClick={() => { setOpen(false); onResume(d) }}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold text-white shrink-0" style={{ background: '#7c3aed' }}>Tiếp tục</button>
+                    <button type="button" onClick={() => { if (confirm('Xóa bản nháp này?')) deleteDraft(uid, d.id) }}
+                      className="px-2 py-1.5 rounded-lg text-xs shrink-0" style={{ color: '#dc2626' }} title="Xóa nháp">🗑</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
 
 function DashboardProposals({ proposals, currentUser, users, onOpen, onViewAll, dateFilter }: {
   proposals: Proposal[]; currentUser: User; users: User[]; onOpen?: (id: string) => void; onViewAll: () => void
@@ -6681,6 +6843,20 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     company: '',
     doc: emptyTaskDoc(),
   })
+    // ===== Nháp task: tự lưu khi đang soạn task mới, thoát hoặc tải lại trang vẫn còn =====
+  const taskDraft = useAutoDraft({
+    session: showModal,
+    on: showModal && !editingTask && !projectCtx && (form.title.trim() !== '' || form.description.trim() !== ''),
+    uid: currentUser.id, kind: 'task', title: form.title, data: { form, selfMode, crossMode, crossTeamId },
+  })
+  const resumeTaskDraft = (rec: DraftRec) => {
+    const d = rec.data
+    taskDraft.resume(rec.id)
+    setEditingTask(null); setProjectCtx(null)
+    setSelfMode(!!d.selfMode); setCrossMode(!!d.crossMode); setCrossTeamId(d.crossTeamId ?? '')
+    setForm(f => ({ ...f, ...d.form }))
+    setShowModal(true)
+  }
   // Trợ lý BOD không có 2 tab giao phòng ban: luôn rơi về "Giao task từ BOD" (trừ khi bấm "Tự tạo cho tôi")
   useEffect(() => {
     if (showModal && !editingTask && currentUser.isBodAssistant && !currentUser.isDirector && !selfMode && !crossMode && !form.fromBod) {
@@ -7080,6 +7256,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       }
     }
 
+    taskDraft.clear()
     setShowModal(false)
     setEditingTask(null)
     setSelfMode(false)
@@ -7117,6 +7294,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{visible.length} task</p>
         </div>
         <div className="flex gap-2">
+          <DraftsButton uid={currentUser.id} kinds={['task']} onResume={resumeTaskDraft} />
           <button onClick={() => setShowModal(true)}
             className="px-4 py-2.5 rounded-xl font-bold text-white text-sm flex items-center gap-2 transition-all hover:scale-105"
             style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', boxShadow: '0 0 20px #7c3aed40' }}>
@@ -9668,7 +9846,7 @@ function docDiff(
   if (nw.newFiles > 0) added.push(`Đính kèm thêm ${nw.newFiles} file`)
   return { added: added.join('\n'), edited: edited.join('\n') }
 }
-function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, projectId }: { currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void; editing?: Proposal | null; projectId?: string }) {
+function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, projectId, draftId }: { draftId?: string; currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void; editing?: Proposal | null; projectId?: string }) {
   useBackToClose(onClose)
   const noiDungRef = useRef<HTMLTextAreaElement>(null)
   const handleNoiDungPaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -9692,32 +9870,33 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
   const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)   // gồm cả chính người tạo nếu là quản lý (có thể tự là Trưởng bộ phận)
 
   const efd: Record<string, any> = editing?.formData ?? {}
-  const [title, setTitle] = useState(editing?.title ?? '')
-  const [company, setCompany] = useState(editing?.company ?? '')
-  const [place, setPlace] = useState<string>(efd.place ?? 'HCMC')
-  const [kinhGui, setKinhGui] = useState<string[]>(efd.kinhGui?.length ? efd.kinhGui : ['Ban Giám đốc Tập đoàn KNI'])
-  const [canCu, setCanCu] = useState<string[]>(efd.canCu?.length ? efd.canCu : [''])
-  const [intro, setIntro] = useState<string>(efd.intro ?? '')
-  const [noiDung, setNoiDung] = useState<string>(efd.noiDung ?? '')
-  const [rows, setRows] = useState<DocCostRow[]>(efd.costRows?.length
+  const draft = useDraftScope('totrinh', currentUser.id, draftId, !editing, s => s.title ?? '', projectId ? { projectId } : undefined)
+  const [title, setTitle] = draft.useS('title', editing?.title ?? '')
+  const [company, setCompany] = draft.useS('company', editing?.company ?? '')
+  const [place, setPlace] = draft.useS<string>('place', efd.place ?? 'HCMC')
+  const [kinhGui, setKinhGui] = draft.useS<string[]>('kinhGui', efd.kinhGui?.length ? efd.kinhGui : ['Ban Giám đốc Tập đoàn KNI'])
+  const [canCu, setCanCu] = draft.useS<string[]>('canCu', efd.canCu?.length ? efd.canCu : [''])
+  const [intro, setIntro] = draft.useS<string>('intro', efd.intro ?? '')
+  const [noiDung, setNoiDung] = draft.useS<string>('noiDung', efd.noiDung ?? '')
+  const [rows, setRows] = draft.useS<DocCostRow[]>('rows', efd.costRows?.length
     ? efd.costRows.map((r: any) => ({ item: r.item ?? '', unit: r.unit ?? '', qty: String(r.qty ?? ''), price: String(r.price ?? ''), note: r.note ?? '' }))
     : [{ item: '', unit: '', qty: '', price: '', note: '' }])
   const [bangChu, setBangChu] = useState('')
-  const [thongTinKhac, setThongTinKhac] = useState<string>(efd.thongTinKhac ?? '')
-  const [deNghi, setDeNghi] = useState<string>(efd.deNghi ?? '')
+  const [thongTinKhac, setThongTinKhac] = draft.useS<string>('thongTinKhac', efd.thongTinKhac ?? '')
+  const [deNghi, setDeNghi] = draft.useS<string>('deNghi', efd.deNghi ?? '')
   const [files, setFiles] = useState<File[]>([])
-  const [driveUrl, setDriveUrl] = useState(editing?.driveUrl ?? '')
-  const [recipientId, setRecipientId] = useState('')
-  const [kttId, setKttId] = useState('')                 // Kế toán trưởng
-  const [gdId, setGdId] = useState('')                   // Giám đốc
-  const [gdCompany, setGdCompany] = useState('')         // Công ty của Giám đốc (chọn hoặc tự điền)
+  const [driveUrl, setDriveUrl] = draft.useS('driveUrl', editing?.driveUrl ?? '')
+  const [recipientId, setRecipientId] = draft.useS('recipientId', '')
+  const [kttId, setKttId] = draft.useS('kttId', '')                 // Kế toán trưởng
+  const [gdId, setGdId] = draft.useS('gdId', '')                   // Giám đốc
+  const [gdCompany, setGdCompany] = draft.useS('gdCompany', '')         // Công ty của Giám đốc (chọn hoặc tự điền)
     useEffect(() => {
     setRecipientId(prev => prev || defaultHeadOf(users, currentUser))
     setKttId(prev => prev || defaultChiefAccountant(users, currentUser.id))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [users.length, currentUser.id, currentUser.teamId])
-  const [bgdIds, setBgdIds] = useState<string[]>([])     // Ban Giám đốc KNI (chọn 1 hoặc nhiều người)
-  const [priority, setPriority] = useState<string>(efd.priority ?? 'P3')
+  const [bgdIds, setBgdIds] = draft.useS<string[]>('bgdIds', [])     // Ban Giám đốc KNI (chọn 1 hoặc nhiều người)
+  const [priority, setPriority] = draft.useS<string>('priority', efd.priority ?? 'P3')
   const approvalMode = docModeOf(priority)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -9904,7 +10083,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
     }
     setSaving(false)
     if (insertError) { setError(insertError.message); return }
-    if (data?.id) onCreated?.(data.id)
+    draft.clear(); if (data?.id) onCreated?.(data.id)
 
     const notifyIds = [recipientId].filter(x => x !== currentUser.id)
     for (const id of notifyIds) {
@@ -10376,26 +10555,27 @@ function vnMoneyWords(input: number): string {
 type DnttRow = { desc: string; unit: string; qty: string; price: string; invoice: string }
 const DNTT_ROLES = ['Trưởng bộ phận/ OM/ Quản lý đơn vị', 'Kế toán trưởng', 'Ban Giám đốc/ Ban Giám Hiệu']
 
-function ProposalDnttForm({ currentUser, users, onClose, onCreated }: { currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void }) {
+function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: { draftId?: string; currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void }) {
   useBackToClose(onClose)
   const now = new Date()
   const dateText = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`
   const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)   // gồm cả chính người tạo nếu là quản lý (có thể tự là Trưởng bộ phận)
 
-  const [dept, setDept] = useState(currentUser.department ?? '')
-  const [content, setContent] = useState('')
-  const [relatedInput, setRelatedInput] = useState('')
-  const [payMethod, setPayMethod] = useState<'cash' | 'bank' | ''>('')
-  const [rows, setRows] = useState<DnttRow[]>([{ desc: '', unit: '', qty: '1', price: '', invoice: '' }])
-  const [owner, setOwner] = useState('')
-  const [account, setAccount] = useState('')
-  const [bankName, setBankName] = useState('')
-  const [branch, setBranch] = useState('')
+  const draft = useDraftScope('dntt', currentUser.id, draftId, true, s => s.content ?? '')
+  const [dept, setDept] = draft.useS('dept', currentUser.department ?? '')
+  const [content, setContent] = draft.useS('content', '')
+  const [relatedInput, setRelatedInput] = draft.useS('relatedInput', '')
+  const [payMethod, setPayMethod] = draft.useS<'cash' | 'bank' | ''>('payMethod', '')
+  const [rows, setRows] = draft.useS<DnttRow[]>('rows', [{ desc: '', unit: '', qty: '1', price: '', invoice: '' }])
+  const [owner, setOwner] = draft.useS('owner', '')
+  const [account, setAccount] = draft.useS('account', '')
+  const [bankName, setBankName] = draft.useS('bankName', '')
+  const [branch, setBranch] = draft.useS('branch', '')
   const [files, setFiles] = useState<File[]>([])
-  const [driveUrl, setDriveUrl] = useState('')
-  const [recipientId, setRecipientId] = useState('')
-  const [extraApprovers, setExtraApprovers] = useState<string[]>([])
-  const [approvalMode, setApprovalMode] = useState<'seq' | 'par'>('seq')
+  const [driveUrl, setDriveUrl] = draft.useS('driveUrl', '')
+  const [recipientId, setRecipientId] = draft.useS('recipientId', '')
+  const [extraApprovers, setExtraApprovers] = draft.useS<string[]>('extraApprovers', [])
+  const [approvalMode, setApprovalMode] = draft.useS<'seq' | 'par'>('approvalMode', 'seq')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -10482,7 +10662,7 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated }: { currentU
     }
     setSaving(false)
     if (insertError) { setError(insertError.message); return }
-    if (data?.id) onCreated?.(data.id)
+    draft.clear(); if (data?.id) onCreated?.(data.id)
 
     const notifyIds = [recipientId].filter(x => x !== currentUser.id)
     for (const id of notifyIds) {
@@ -11089,45 +11269,46 @@ function FormDocBody({ tpl, f, set, ro, users, requester, code, dateText }: {
 }
 
 // ---------- Form tạo mới ----------
-function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { tpl: FormTpl; currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void }) {
+function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draftId }: { draftId?: string; tpl: FormTpl; currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void }) {
   useBackToClose(onClose)
   const cfg = FORM_TPL[tpl]
   const now = new Date()
   const dateText = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`
   const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)   // gồm cả chính người tạo nếu là quản lý (có thể tự là Trưởng bộ phận)
 
-  const [f, setF] = useState<Record<string, any>>(() => initFormData(tpl, currentUser))
+  const draft = useDraftScope('bieumau', currentUser.id, draftId, true, s => { const fx = s.f ?? {}; const t = String(fx.reason || fx.purpose || fx.destination || fx.items?.[0]?.name || '').trim(); return t ? `${FORM_TPL[tpl].title}: ${t}`.slice(0, 90) : '' }, { tpl })
+  const [f, setF] = draft.useS<Record<string, any>>('f', () => initFormData(tpl, currentUser))
   const set = (patch: Record<string, any>) => setF(prev => ({ ...prev, ...patch }))
   const [files, setFiles] = useState<File[]>([])
-  const [driveUrl, setDriveUrl] = useState('')
-  const [recipientId, setRecipientId] = useState('')
-  const [extraApprovers, setExtraApprovers] = useState<string[]>([])
-  const [approvalModeSel, setApprovalMode] = useState<'seq' | 'par'>('seq')
+  const [driveUrl, setDriveUrl] = draft.useS('driveUrl', '')
+  const [recipientId, setRecipientId] = draft.useS('recipientId', '')
+  const [extraApprovers, setExtraApprovers] = draft.useS<string[]>('extraApprovers', [])
+  const [approvalModeSel, setApprovalMode] = draft.useS<'seq' | 'par'>('approvalMode', 'seq')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   // Phiếu mua sắm dùng ô ký giống Tờ trình: Người lập, Trưởng bộ phận, Kế toán trưởng, Giám đốc công ty, Ban Giám đốc Tập đoàn
   const isMua = tpl === 'muasam'
-  const [kttId, setKttId] = useState('')
-  const [gdId, setGdId] = useState('')
-  const [gdCompany, setGdCompany] = useState('')
+  const [kttId, setKttId] = draft.useS('kttId', '')
+  const [gdId, setGdId] = draft.useS('gdId', '')
+  const [gdCompany, setGdCompany] = draft.useS('gdCompany', '')
   useEffect(() => {
     setRecipientId(prev => prev || defaultHeadOf(users, currentUser))
     setKttId(prev => prev || defaultChiefAccountant(users, currentUser.id))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [users.length, currentUser.id, currentUser.teamId])
-  const [bgdIds, setBgdIds] = useState<string[]>([])
+  const [bgdIds, setBgdIds] = draft.useS<string[]>('bgdIds', [])
     // Đơn nghỉ phép: bước 2 là Trưởng phòng Nhân sự. Chọn sẵn người phòng Nhân sự-IT-Pháp chế (ưu tiên quản lý), vẫn đổi được.
   const hrTeamMembers = users
     .filter(u => u.teamId === 't1c' && u.id !== currentUser.id)
     .sort((a, b) => (b.role === 'manager' ? 1 : 0) - (a.role === 'manager' ? 1 : 0))
-  const [hrHeadId, setHrHeadId] = useState('')
+  const [hrHeadId, setHrHeadId] = draft.useS('hrHeadId', '')
   useEffect(() => {
     if (tpl !== 'nghiphep') return
     setHrHeadId(prev => prev || (hrTeamMembers.find(u => u.role === 'manager') ?? hrTeamMembers[0])?.id || '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [users.length, currentUser.id, tpl])
-  const [priority, setPriority] = useState('P3')
+  const [priority, setPriority] = draft.useS('priority', 'P3')
   const approvalMode = isMua ? docModeOf(priority) : approvalModeSel   // mua sắm: P1/P2 song song, P3/P4 nối tiếp
 
   const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? ''
@@ -11260,7 +11441,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated }: { 
     }
     setSaving(false)
     if (insertError) { setError(insertError.message); return }
-    if (data?.id) onCreated?.(data.id)
+    draft.clear(); if (data?.id) onCreated?.(data.id)
 
     const notifyIds = [recipientId].filter(x => x !== currentUser.id)
     for (const id of notifyIds) {
@@ -11767,7 +11948,7 @@ function HopDongOpinions({ rows, myNote, setMyNote, pick, choice = '', setChoice
 }
 
 // ---------- Form tạo phiếu phê duyệt hợp đồng ----------
-function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated, editing }: {
+function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated, editing, draftId }: { draftId?: string;
   currentUser: User; users: User[]; proposals?: Proposal[]; onClose: () => void; onCreated?: (id: string) => void; editing?: Proposal | null
 }) {
   useBackToClose(onClose)
@@ -11776,18 +11957,19 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
   const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)
 
   const efd: Record<string, any> = editing?.formData ?? {}
-  const [f, setF] = useState<Record<string, any>>({
+  const draft = useDraftScope('hopdong', currentUser.id, draftId, !editing, s => s.f?.partner || s.f?.contractNo || '')
+  const [f, setF] = draft.useS<Record<string, any>>('f', {
     partner: efd.partner ?? '', company: efd.company ?? '', contractNo: efd.contractNo ?? '',
     purpose: efd.purpose ?? '', value: efd.value ?? '', note: efd.note ?? '',
   })
   const set = (patch: Record<string, any>) => setF(prev => ({ ...prev, ...patch }))
   const [files, setFiles] = useState<File[]>([])
-  const [driveUrl, setDriveUrl] = useState(editing?.driveUrl ?? '')
-  const [codes, setCodes] = useState<string[]>(Array.isArray(efd.relatedCodes) ? efd.relatedCodes : [])
+  const [driveUrl, setDriveUrl] = draft.useS('driveUrl', editing?.driveUrl ?? '')
+  const [codes, setCodes] = draft.useS<string[]>('codes', Array.isArray(efd.relatedCodes) ? efd.relatedCodes : [])
   const [codeInput, setCodeInput] = useState('')
   const [codeMsg, setCodeMsg] = useState('')
-  const [approvers, setApprovers] = useState<string[]>(() => [myManagers.length === 1 ? myManagers[0].id : '', '', '', ''])
-  const [approvalMode, setApprovalMode] = useState<'seq' | 'par'>('seq')
+  const [approvers, setApprovers] = draft.useS<string[]>('approvers', () => [myManagers.length === 1 ? myManagers[0].id : '', '', '', ''])
+  const [approvalMode, setApprovalMode] = draft.useS<'seq' | 'par'>('approvalMode', 'seq')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const ink = { color: '#111827' }
@@ -11969,7 +12151,7 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
     }
     setSaving(false)
     if (insertError) { setError(insertError.message); return }
-    if (data?.id) onCreated?.(data.id)
+    draft.clear(); if (data?.id) onCreated?.(data.id)
 
     if (recipientId !== currentUser.id) {
       await supabase.from('notifications').insert({
@@ -13423,13 +13605,14 @@ async function generateProposalCode(userId: string): Promise<string> {
   return `${prefix}${String((count ?? 0) + 1).padStart(2, '0')}`
 }
 
-function ProposalModal({ currentUser, users, editingProposal, onClose, onCreated, kind = 'dexuat', initialGroup = '' }: { currentUser: User; users: User[]; editingProposal?: Proposal | null; onClose: () => void; onCreated?: (id: string) => void; kind?: 'dexuat' | 'totrinh'; initialGroup?: string }) {
+function ProposalModal({ currentUser, users, editingProposal, onClose, onCreated, kind = 'dexuat', initialGroup = '', draftId }: { draftId?: string; currentUser: User; users: User[]; editingProposal?: Proposal | null; onClose: () => void; onCreated?: (id: string) => void; kind?: 'dexuat' | 'totrinh'; initialGroup?: string }) {
   useBackToClose(onClose)
-  const [title, setTitle] = useState(editingProposal?.title ?? '')
-  const [description, setDescription] = useState(editingProposal?.description ?? '')
-  const [driveUrl, setDriveUrl] = useState(editingProposal?.driveUrl ?? '')
+  const draft = useDraftScope('dexuat', currentUser.id, draftId, !editingProposal, s => s.title ?? '', { group: initialGroup })
+  const [title, setTitle] = draft.useS('title', editingProposal?.title ?? '')
+  const [description, setDescription] = draft.useS('description', editingProposal?.description ?? '')
+  const [driveUrl, setDriveUrl] = draft.useS('driveUrl', editingProposal?.driveUrl ?? '')
   const [revisionNote, setRevisionNote] = useState('')
-  const [recipientId, setRecipientId] = useState(
+  const [recipientId, setRecipientId] = draft.useS('recipientId', 
     editingProposal?.recipientId ?? ''
   )
   const [resubmitTeamId, setResubmitTeamId] = useState(
@@ -13438,18 +13621,18 @@ function ProposalModal({ currentUser, users, editingProposal, onClose, onCreated
   const [addedNote, setAddedNote] = useState('')
   const [editedNote, setEditedNote] = useState('')
   const [error, setError] = useState('')
-  const [groupName, setGroupName] = useState(editingProposal?.groupName ?? initialGroup)
-  const [company, setCompany] = useState(editingProposal?.company ?? '')
-  const [days, setDays] = useState('')
-  const [brief, setBrief] = useState(editingProposal?.brief ?? '')
+  const [groupName, setGroupName] = draft.useS('groupName', editingProposal?.groupName ?? initialGroup)
+  const [company, setCompany] = draft.useS('company', editingProposal?.company ?? '')
+  const [days, setDays] = draft.useS('days', '')
+  const [brief, setBrief] = draft.useS('brief', editingProposal?.brief ?? '')
   const [files, setFiles] = useState<File[]>([])
-  const [costItems, setCostItems] = useState<{ item: string; cost: string; amount: number }[]>([])
+  const [costItems, setCostItems] = draft.useS<{ item: string; cost: string; amount: number }[]>('costItems', [])
   const [ciItem, setCiItem] = useState('')
   const [ciCost, setCiCost] = useState('')
   const [ciAmount, setCiAmount] = useState('')
   const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)   // gồm cả chính người tạo nếu là quản lý (có thể tự là Trưởng bộ phận)
-  const [extraApprovers, setExtraApprovers] = useState<string[]>([])
-  const [approvalMode, setApprovalMode] = useState<'seq' | 'par'>('seq')
+  const [extraApprovers, setExtraApprovers] = draft.useS<string[]>('extraApprovers', [])
+  const [approvalMode, setApprovalMode] = draft.useS<'seq' | 'par'>('approvalMode', 'seq')
   const [saving, setSaving] = useState(false)
 
 
@@ -13531,7 +13714,7 @@ function ProposalModal({ currentUser, users, editingProposal, onClose, onCreated
       }
       setSaving(false)
       if (insertError) { setError(insertError.message); return }
-      if (data?.id) onCreated?.(data.id)
+      draft.clear(); if (data?.id) onCreated?.(data.id)
 
       await supabase.from('notifications').insert({
         message: `📜 ${currentUser.name} vừa trình tờ trình "${title.trim()}" cho bạn`,
@@ -14230,6 +14413,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   useEffect(() => { if (!detailProposal && !docProposal) setBackTo(null) }, [detailProposal, docProposal])
   const [createKind, setCreateKind] = useState<'dexuat' | 'totrinh' | null>(null)
   const [createGroup, setCreateGroup] = useState<string | null>(null)
+  const [resumeDraft, setResumeDraft] = useState<DraftRec | null>(null)   // đang mở lại một bản nháp
   const [listTab, setListTab] = useState<'totrinh' | 'dexuat'>('totrinh')
   const [viewMode, setViewMode] = useState<'list' | 'tracker'>('list')
   const [search, setSearch] = useState('')
@@ -14699,6 +14883,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
               ✍️ Ký kết hợp đồng (chữ ký số)
             </button>
           )}
+                    <DraftsButton uid={currentUser.id} kinds={contractsMode ? ['hopdong'] : ['totrinh', 'dexuat', 'dntt', 'bieumau', 'hopdong']} onResume={setResumeDraft} />
           <button onClick={() => { if (contractsMode) { setCreateKind('dexuat'); setCreateGroup('Hợp đồng') } setShowModal(true) }}
             className="px-4 py-2.5 rounded-xl font-bold text-white text-sm"
             style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', boxShadow: '0 0 20px #7c3aed40' }}>
@@ -14788,6 +14973,16 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
           <ProposalDocForm currentUser={currentUser} users={users} onCreated={setOpenNewId}
           onClose={() => { setShowModal(false); setCreateKind(null); setCreateGroup(null) }} />
       )}
+            {resumeDraft && (() => {
+        const rd = resumeDraft
+        const close = () => setResumeDraft(null)
+        if (rd.kind === 'totrinh') return <ProposalDocForm key={rd.id} draftId={rd.id} projectId={rd.meta?.projectId} currentUser={currentUser} users={users} onCreated={setOpenNewId} onClose={close} />
+        if (rd.kind === 'dntt') return <ProposalDnttForm key={rd.id} draftId={rd.id} currentUser={currentUser} users={users} onCreated={setOpenNewId} onClose={close} />
+        if (rd.kind === 'bieumau' && rd.meta?.tpl) return <ProposalFormDocForm key={rd.id} draftId={rd.id} tpl={rd.meta.tpl} currentUser={currentUser} users={users} onCreated={setOpenNewId} onClose={close} />
+        if (rd.kind === 'hopdong') return <ProposalHopDongForm key={rd.id} draftId={rd.id} currentUser={currentUser} users={users} proposals={proposals} onCreated={setOpenNewId} onClose={close} />
+        if (rd.kind === 'dexuat') return <ProposalModal key={rd.id} draftId={rd.id} kind="dexuat" initialGroup={rd.meta?.group ?? ''} currentUser={currentUser} users={users} onCreated={setOpenNewId} onClose={close} />
+        return null
+      })()}
       {detailProposal && (() => {
         const cur = proposals.find(x => x.id === detailProposal.id) ?? detailProposal
         return (
@@ -15309,30 +15504,31 @@ function ProjectMemberPicker({ users, excludeIds, value, onChange }: {
 // Task nhập sẵn trong form tạo dự án (tạo cùng lúc với dự án)
 type DraftProjectTask = { title: string; description: string; assignees: string[]; slaLevel: string; exp: number; startDate: string; startTime?: string; dueDate: string }
 
-function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
+function ProjectForm({ currentUser, users, proposals, onClose, onCreated, draftId }: { draftId?: string;
   currentUser: User; users: User[]; proposals: Proposal[]; onClose: () => void; onCreated: (id: string) => void
 }) {
   useBackToClose(onClose)
-  const [name, setName] = useState('')
-  const [company, setCompany] = useState('')
-  const [cls, setCls] = useState('initiation')
-  const [priority, setPriority] = useState('P3')
+  const draft = useDraftScope('project', currentUser.id, draftId, true, s => s.name ?? '')
+  const [name, setName] = draft.useS('name', '')
+  const [company, setCompany] = draft.useS('company', '')
+  const [cls, setCls] = draft.useS('cls', 'initiation')
+  const [priority, setPriority] = draft.useS('priority', 'P3')
   const [status, setStatus] = useState('planning')
-  const [objective, setObjective] = useState('')
-  const [description, setDescription] = useState('')
-  const [ownerId, setOwnerId] = useState('')
-  const [managerIds, setManagerIds] = useState<string[]>([currentUser.id])
+  const [objective, setObjective] = draft.useS('objective', '')
+  const [description, setDescription] = draft.useS('description', '')
+  const [ownerId, setOwnerId] = draft.useS('ownerId', '')
+  const [managerIds, setManagerIds] = draft.useS<string[]>('managerIds', [currentUser.id])
   const managerId = managerIds[0] ?? ''   // PM chính (lưu ở cột manager_id)
-  const [teamId, setTeamId] = useState(currentUser.teamId)
-  const [members, setMembers] = useState<string[]>([])
-  const [approverIds, setApproverIds] = useState<string[]>([])   // người cần duyệt dự án (trưởng bộ phận + BOD)
-  const [affected, setAffected] = useState('')
-  const [plannedStart, setPlannedStart] = useState('')
-  const [plannedEnd, setPlannedEnd] = useState('')
-  const [budget, setBudget] = useState('')
-  const [supplierName, setSupplierName] = useState('')
-  const [supplierRef, setSupplierRef] = useState('')
-  const [riskLevel, setRiskLevel] = useState('medium')
+  const [teamId, setTeamId] = draft.useS('teamId', currentUser.teamId)
+  const [members, setMembers] = draft.useS<string[]>('members', [])
+  const [approverIds, setApproverIds] = draft.useS<string[]>('approverIds', [])   // người cần duyệt dự án (trưởng bộ phận + BOD)
+  const [affected, setAffected] = draft.useS('affected', '')
+  const [plannedStart, setPlannedStart] = draft.useS('plannedStart', '')
+  const [plannedEnd, setPlannedEnd] = draft.useS('plannedEnd', '')
+  const [budget, setBudget] = draft.useS('budget', '')
+  const [supplierName, setSupplierName] = draft.useS('supplierName', '')
+  const [supplierRef, setSupplierRef] = draft.useS('supplierRef', '')
+  const [riskLevel, setRiskLevel] = draft.useS('riskLevel', 'medium')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -15344,9 +15540,9 @@ function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
   const blankTask = (): DraftProjectTask => ({ title: '', description: '', assignees: isStaff ? [currentUser.id] : [], slaLevel: '', exp: slaExpRange('').suggested, startDate: todayStr, startTime: '', dueDate: '' })
   const [openTask, setOpenTask] = useState(false)
   const [openProp, setOpenProp] = useState(false)
-  const [draftTasks, setDraftTasks] = useState<DraftProjectTask[]>([])
+  const [draftTasks, setDraftTasks] = draft.useS<DraftProjectTask[]>('draftTasks', [])
   const [nt, setNt] = useState<DraftProjectTask>(blankTask)
-  const [attachIds, setAttachIds] = useState<string[]>([])
+  const [attachIds, setAttachIds] = draft.useS<string[]>('attachIds', [])
   const uname = (id: string) => users.find(u => u.id === id)?.name ?? id
   const attachable = proposals.filter(p => !p.projectId && p.code
     && (!!currentUser.isDirector || p.submittedBy === currentUser.id || p.recipientId === currentUser.id || p.participants.includes(currentUser.id)))
@@ -15460,7 +15656,7 @@ function ProjectForm({ currentUser, users, proposals, onClose, onCreated }: {
     if (attachIds.length > 0) await supabase.from('proposals').update({ project_id: created.id }).in('id', attachIds)
     if (failed.length > 0) alert('Dự án đã tạo nhưng chưa tạo được task: ' + failed.join(', ') + '. Bạn thêm lại trong chi tiết dự án.')
     setSaving(false)
-    onCreated(created.id)
+    draft.clear(); onCreated(created.id)
     onClose()
   }
 
@@ -16971,6 +17167,7 @@ function ProjectsView({ currentUser, users, tasks, proposals, onOpenTask, onOpen
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [resumeProjectDraft, setResumeProjectDraft] = useState<DraftRec | null>(null)
   const [openId, setOpenId] = useState<string | null>(null)
   // Nhớ dự án đang mở: tải lại trang vẫn ở đúng chỗ (sessionStorage = theo từng tab)
   const [restoreId, setRestoreId] = useState<string | null>(() => { try { return sessionStorage.getItem('projectDetailId') } catch { return null } })
@@ -17044,8 +17241,11 @@ setProjects((p.data ?? []).map((x: any) => mapDbProject(x, byProject[x.id] ?? []
           <h2 className="text-2xl font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>🗂️ Dự án</h2>
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{visible.length} dự án</p>
         </div>
-        <button type="button" onClick={() => setShowForm(true)} className="px-4 py-2.5 rounded-xl font-bold text-white text-sm"
-          style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', boxShadow: '0 0 20px #7c3aed40' }}>+ Tạo dự án</button>
+        <div className="flex gap-2">
+          <DraftsButton uid={currentUser.id} kinds={['project']} onResume={setResumeProjectDraft} />
+          <button type="button" onClick={() => setShowForm(true)} className="px-4 py-2.5 rounded-xl font-bold text-white text-sm"
+            style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', boxShadow: '0 0 20px #7c3aed40' }}>+ Tạo dự án</button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2 mb-3">
@@ -17082,6 +17282,7 @@ setProjects((p.data ?? []).map((x: any) => mapDbProject(x, byProject[x.id] ?? []
             canSee={canSee} onOpen={p => setOpenId(p.id)} />}
 
       {showForm && <ProjectForm currentUser={currentUser} users={users} proposals={proposals} onClose={() => setShowForm(false)} onCreated={async (id) => { await load(); setOpenId(id) }} />}
+      {resumeProjectDraft && <ProjectForm key={resumeProjectDraft.id} draftId={resumeProjectDraft.id} currentUser={currentUser} users={users} proposals={proposals} onClose={() => setResumeProjectDraft(null)} onCreated={async (id) => { await load(); setOpenId(id) }} />}
       {open && <ProjectViewFlow key={open.id} project={open} users={users} tasks={tasks} proposals={proposals} currentUser={currentUser} canEdit={canEditProject(open)} onClose={() => setOpenId(null)} onChanged={load} onOpenTask={onOpenTask} onOpenProposal={onOpenProposal} onCreateTask={onCreateTask} onEditTask={onEditTask} focusTaskId={focusTaskId} onFocusTaskHandled={onFocusTaskHandled} />}
     </div>
   )
