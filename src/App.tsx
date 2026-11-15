@@ -2129,6 +2129,7 @@ const fmtTaskMoney = (n: number) => Math.round(n).toLocaleString('vi-VN')
 // Bỏ dòng trống trước khi lưu vào cột tasks.form_data
 // Các lần nộp kết quả lưu trong form_data._meta.submissions (không cần thêm cột trong database)
 const taskMeta = (t: { formData?: any }): any => (t.formData && typeof t.formData === 'object' ? (t.formData as any)._meta : undefined) ?? {}
+const parentTaskIdOf = (t: { formData?: any }): string | undefined => taskMeta(t).parentTaskId || undefined
 // Giờ bắt đầu của task ("HH:MM", lưu trong form_data._meta.startTime, không cần thêm cột database)
 const taskStartTime = (t: { formData?: any }): string => taskMeta(t).startTime || ''
 // Mốc bắt đầu = ngày + giờ bắt đầu (không nhập giờ thì lấy 00:00)
@@ -4602,6 +4603,29 @@ async function closeTask(
     const supporter = users.find(u => u.id === uid)
     if (supporter) {
       await supabase.from('profiles').update({ exp: supporter.exp + supportExp }).eq('id', supporter.id)
+    }
+  }
+
+  // Task con vừa Close: nếu tất cả task con khác của cùng 1 task cha cũng đã xong -> tự động hoàn thành luôn task cha
+  const parentId = taskMeta(task).parentTaskId
+  if (parentId) {
+    const { data: siblings } = await supabase.from('tasks').select('id, status').eq('form_data->_meta->>parentTaskId', parentId)
+    const allDone = (siblings ?? []).every(s => s.id === task.id || s.status === 'completed')
+    if (allDone) {
+      await supabase.from('tasks').update({
+        status: 'completed', approved_by: currentUser.id, approved_at: approvedAt,
+        close_result: 'successful', close_note: 'Tự động hoàn thành: tất cả task con đã xong.',
+      }).eq('id', parentId)
+      const { data: parentRow } = await supabase.from('tasks').select('title, task_code, assigned_to, created_by').eq('id', parentId).single()
+      if (parentRow) {
+        const notifyIds = Array.from(new Set([...(parentRow.assigned_to ?? []), parentRow.created_by])).filter((id: string) => id && id !== currentUser.id)
+        for (const uid of notifyIds) {
+          await supabase.from('notifications').insert({
+            message: `✅ Task cha [${parentRow.task_code ?? ''}] "${parentRow.title}" đã tự động hoàn thành vì tất cả task con đã xong.`,
+            target_user_id: uid, link_task_id: parentId,
+          })
+        }
+      }
     }
   }
 
@@ -15651,8 +15675,8 @@ async function generateProjectTaskCode(projectId: string, projectCode: string, s
 }
 
 
-function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
-  project: Project; users: User[]; currentUser: User; canAssign: boolean; onClose: () => void
+function ProjectTaskForm({ project, users, currentUser, canAssign, onClose, parentTask }: {
+  project: Project; users: User[]; currentUser: User; canAssign: boolean; onClose: () => void; parentTask?: Task | null
 }) {
   useBackToClose(onClose)
   const todayStr = localToday()
@@ -15680,16 +15704,20 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
     if (!title.trim()) { setError('Vui lòng nhập tên task.'); return }
     if (assignees.length === 0) { setError('Vui lòng chọn ít nhất một người phụ trách.'); return }
     if (dueDate && dueDate < startDate) { setError('Hạn hoàn thành phải sau ngày bắt đầu.'); return }
-        if ((exp < range.min || exp > range.max) && !window.confirm(`EXP ${exp} nằm ngoài khung gợi ý ${range.min}–${range.max} của ${slaLevel || 'task không SLA'}. Vẫn lưu?`)) return
+    if (parentTask?.dueDate && dueDate && dueDate > parentTask.dueDate) { setError(`Task con phải xong trước hạn của task cha (${new Date(parentTask.dueDate).toLocaleDateString('vi-VN')}).`); return }
+        if (!parentTask && (exp < range.min || exp > range.max) && !window.confirm(`EXP ${exp} nằm ngoài khung gợi ý ${range.min}–${range.max} của ${slaLevel || 'task không SLA'}. Vẫn lưu?`)) return
     setSaving(true); setError('')
     const creatingForSelf = !canAssign
-    const finalDue = dueDate || localDateStr(new Date(Date.now() + 7 * 86400000))
+    const finalDue = dueDate || (parentTask?.dueDate ?? localDateStr(new Date(Date.now() + 7 * 86400000)))
 
     let newTask: any = null
     let lastError: any = null
     let code = ''
     for (let i = 0; i < 3; i++) {
       code = await generateProjectTaskCode(project.id, project.code, i)
+      const meta: Record<string, any> = {}
+      if (startTime) meta.startTime = startTime
+      if (parentTask) meta.parentTaskId = parentTask.id
       const res = await supabase.from('tasks').insert({
         title: title.trim(), description: description.trim(), exp_reward: exp,
         task_code: code, project_id: project.id, company: project.company ?? null,
@@ -15699,14 +15727,14 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
         supporters: [],
         created_by: currentUser.id,
         start_date: startDate, due_date: finalDue,
-        form_data: startTime ? { _meta: { startTime } } : null,
+        form_data: Object.keys(meta).length > 0 ? { _meta: meta } : null,
         category: 'projects_dev', priority: 'medium', self_created: creatingForSelf,
         important: false, urgent: false, is_team_project: false,
         cross_dept_pending: false, target_team_id: null,
         // Dự án chưa duyệt thì task ở nháp (duyệt dự án xong mới giao + tính SLA)
         creation_approval: creatingForSelf && currentUser.role === 'employee' ? 'pending' : 'approved',
-        sla_level: slaLevel || null,
-        sla_start_at: slaLevel ? new Date(Math.max(Date.now(), startMs(startDate, startTime))).toISOString() : null,
+        sla_level: parentTask ? null : (slaLevel || null),
+        sla_start_at: parentTask ? null : (slaLevel ? new Date(Math.max(Date.now(), startMs(startDate, startTime))).toISOString() : null),
         drive_folder_created: false, drive_folder_name: null,
       }).select('id').single()
       newTask = res.data; lastError = res.error
@@ -15749,12 +15777,17 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }}>
       <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>＋ Thêm task vào dự án</h3>
+          <h3 className="text-base font-bold" style={{ color: 'var(--text-primary)' }}>{parentTask ? '＋ Thêm task con' : '＋ Thêm task vào dự án'}</h3>
           <button type="button" onClick={onClose} style={{ color: 'var(--text-muted)' }}>✕</button>
         </div>
         <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
           <span className="font-mono">[{project.code}]</span> {project.name} · mã task sẽ là <b>TASK-{project.code}.số</b> (tự sinh khi lưu)
         </p>
+        {parentTask && (
+          <p className="text-xs mb-3 px-3 py-2 rounded-lg" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
+            Task con của <b style={{ color: 'var(--text-primary)' }}>{parentTask.title}</b> — không có SLA riêng, phải xong trước hạn task cha ({parentTask.dueDate ? new Date(parentTask.dueDate).toLocaleDateString('vi-VN') : 'chưa có hạn'}).
+          </p>
+        )}
         <div className="space-y-3">
           <div>
             <label className={lab} style={{ color: 'var(--text-muted)' }}>Tên task *</label>
@@ -15802,17 +15835,21 @@ function ProjectTaskForm({ project, users, currentUser, canAssign, onClose }: {
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={lab} style={{ color: 'var(--text-muted)' }}>Mức độ SLA</label>
-              <select value={slaLevel} onChange={e => changeSla(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inp}>
-                <option value="">-- Không áp dụng SLA --</option>
-                {Object.entries(SLA_LEVELS).map(([k, c]) => <option key={k} value={k}>{c.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className={lab} style={{ color: 'var(--text-muted)' }}>EXP ({range.min}–{range.max})</label>
-              <input type="number" value={exp} onChange={e => setExp(Number(e.target.value))} className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inp} />
-            </div>
+            {!parentTask && (
+              <>
+                <div>
+                  <label className={lab} style={{ color: 'var(--text-muted)' }}>Mức độ SLA</label>
+                  <select value={slaLevel} onChange={e => changeSla(e.target.value)} className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inp}>
+                    <option value="">-- Không áp dụng SLA --</option>
+                    {Object.entries(SLA_LEVELS).map(([k, c]) => <option key={k} value={k}>{c.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={lab} style={{ color: 'var(--text-muted)' }}>EXP ({range.min}–{range.max})</label>
+                  <input type="number" value={exp} onChange={e => setExp(Number(e.target.value))} className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={inp} />
+                </div>
+              </>
+            )}
             <div>
               <label className={lab} style={{ color: 'var(--text-muted)' }}>Ngày bắt đầu</label>
               <div className="flex gap-2">
@@ -16073,6 +16110,7 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
   focusTaskId?: string | null; onFocusTaskHandled?: () => void; onOpenPhieu?: () => void
 }) {
   const [showTaskForm, setShowTaskForm] = useState(false)
+  const [subtaskParent, setSubtaskParent] = useState<Task | null>(null)   // đang mở form thêm task con cho task cha nào
   const [viewTask, setViewTask] = useState<Task | null>(null)   // khung chi tiết task mở ngay trong dự án
   // Vừa sửa task xong: mở lại đúng khung chi tiết task đó
   useEffect(() => {
@@ -16093,6 +16131,22 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
   const isOverdue = (t: Task) => (t.status !== 'completed' && !!t.dueDate && t.dueDate < todayStr) || isProjectLateTask(t)
   const seq = (t: Task) => { const m = (t.taskCode ?? '').match(/\.(\d+)$/); return m ? parseInt(m[1], 10) : 0 }
   const list = tasks.filter(t => t.projectId === project.id).sort((a, b) => seq(a) - seq(b))
+  const mainTasks = list.filter(t => !parentTaskIdOf(t))
+  const subsOf = (mainId: string) => list.filter(t => parentTaskIdOf(t) === mainId)
+  const subTaskIds = list.filter(t => !!parentTaskIdOf(t)).map(t => t.id)
+  const [latestNoteByTask, setLatestNoteByTask] = useState<Record<string, string>>({})
+  useEffect(() => {
+    if (subTaskIds.length === 0) { setLatestNoteByTask({}); return }
+    let alive = true
+    supabase.from('task_work_notes').select('task_id, note, created_at').in('task_id', subTaskIds).order('created_at', { ascending: false })
+      .then(({ data }) => {
+        if (!alive || !data) return
+        const map: Record<string, string> = {}
+        for (const n of data) if (!map[n.task_id]) map[n.task_id] = n.note
+        setLatestNoteByTask(map)
+      })
+    return () => { alive = false }
+  }, [subTaskIds.join(',')])
   const done = list.filter(t => t.status === 'completed').length
   const waiting = list.filter(t => t.status === 'submitted').length
   const overdue = list.filter(isOverdue).length
@@ -16444,14 +16498,70 @@ function ProjectDetail({ project, users, tasks, proposals, currentUser, canEdit,
                   ))}
                 </div>
               )}
-              <TaskListTable tasks={shown} users={users} currentUser={currentUser} onOpen={t => setViewTask(t)} />
+              {taskFilter === 'all' ? (
+                <div className="space-y-3">
+                  {mainTasks.map(main => {
+                    const subs = subsOf(main.id)
+                    const doneSubs = subs.filter(s => s.status === 'completed').length
+                    const pct = subs.length > 0 ? Math.round((doneSubs / subs.length) * 100) : (main.status === 'completed' ? 100 : 0)
+                    const [mLabel, mColor] = stateOf(main)
+                    return (
+                      <div key={main.id} className="rounded-xl p-3" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)' }}>
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <button type="button" onClick={() => setViewTask(main)} className="text-sm font-bold text-left truncate" style={{ color: 'var(--text-primary)' }}>
+                            <span className="font-mono text-xs mr-1" style={{ color: 'var(--text-muted)' }}>{main.taskCode ?? ''}</span>{main.title}
+                          </button>
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-full shrink-0" style={{ background: `${mColor}22`, color: mColor }}>{mLabel}</span>
+                        </div>
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
+                            <div className="h-full rounded-full" style={{ width: `${pct}%`, background: 'linear-gradient(90deg,#7c3aed,#059669)' }} />
+                          </div>
+                          <span className="text-xs font-bold shrink-0" style={{ color: '#7c3aed' }}>{pct}%</span>
+                        </div>
+                        {subs.length > 0 ? (
+                          <>
+                            <p className="text-[11px] mb-1.5" style={{ color: 'var(--text-muted)' }}>{subs.length} task con · {doneSubs} xong</p>
+                            <div className="space-y-1.5 pl-3 border-l-2" style={{ borderColor: 'var(--border)' }}>
+                              {subs.map(s => {
+                                const [sLabel, sColor] = stateOf(s)
+                                const note = latestNoteByTask[s.id]
+                                return (
+                                  <button key={s.id} type="button" onClick={() => setViewTask(s)}
+                                    className="w-full text-left px-2 py-1.5 rounded-lg hover:brightness-95" style={{ background: 'var(--bg-panel)' }}>
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="text-xs truncate" style={{ color: 'var(--text-primary)' }}>{s.title}</span>
+                                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ background: `${sColor}22`, color: sColor }}>{sLabel}</span>
+                                    </div>
+                                    {note && <p className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>📝 {note}</p>}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </>
+                        ) : (
+                          <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Chưa có task con.</p>
+                        )}
+                        {canManageTasks && projectOpen && (
+                          <button type="button" onClick={() => setSubtaskParent(main)} className="text-xs font-bold mt-2" style={{ color: '#7c3aed' }}>＋ Thêm task con</button>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <TaskListTable tasks={shown} users={users} currentUser={currentUser} onOpen={t => setViewTask(t)} />
+              )}
             </>
           )}
         </section>
         <ProjectProposals project={project} proposals={proposals} users={users} currentUser={currentUser} canManage={canAssign} onOpenProposal={onOpenProposal} />
         <ProjectDiscussion project={project} currentUser={currentUser} users={users} />
       </div>
-      {showTaskForm && <ProjectTaskForm project={project} users={users} currentUser={currentUser} canAssign={canAssign} onClose={() => setShowTaskForm(false)} />}
+      {(showTaskForm || subtaskParent) && (
+        <ProjectTaskForm project={project} users={users} currentUser={currentUser} canAssign={canAssign} parentTask={subtaskParent}
+          onClose={() => { setShowTaskForm(false); setSubtaskParent(null) }} />
+      )}
       {viewTask && (
         <TaskViewFlow task={viewTask} tasks={tasks} users={users} currentUser={currentUser}
           readOnly={!canOpen(viewTask) && !canManageTasks} forceEdit={canManageTasks} onClose={() => setViewTask(null)}
