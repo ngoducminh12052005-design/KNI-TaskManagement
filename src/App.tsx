@@ -1229,17 +1229,38 @@ function suggestExp(priority: TaskPriority, startDate: string, dueDate: string, 
 
   return Math.round(range.min + (range.max - range.min) * ratio)
 }
-// EXP theo mức SLA: P1,P2 → 150–300 · P3 → 60–150 · P4,P5 → 20–60 (là mặc định, vẫn chỉnh tay được)
+// Điểm theo mức SLA (cố định): P1 100 · P2 80 · P3 60 · P4 40 · P5 20 · không áp dụng SLA 60
 const SLA_EXP: Record<string, { min: number; max: number; suggested: number }> = {
-  P1: { min: 150, max: 300, suggested: 250 },
-  P2: { min: 150, max: 300, suggested: 200 },
-  P3: { min: 60, max: 150, suggested: 100 },
-  P4: { min: 20, max: 60, suggested: 40 },
-  P5: { min: 20, max: 60, suggested: 30 },
+  P1: { min: 100, max: 100, suggested: 100 },
+  P2: { min: 80, max: 80, suggested: 80 },
+  P3: { min: 60, max: 60, suggested: 60 },
+  P4: { min: 40, max: 40, suggested: 40 },
+  P5: { min: 20, max: 20, suggested: 20 },
 }
-const SLA_EXP_NONE = { min: 60, max: 150, suggested: 80 }   // task không áp dụng SLA
+const SLA_EXP_NONE = { min: 60, max: 60, suggested: 60 }   // task không áp dụng SLA
 const slaExpRange = (sla?: string) => (sla && SLA_EXP[sla]) || SLA_EXP_NONE
 const SUPPORTER_EXP_PERCENT = 0.3
+
+// ===== Điểm thực nhận khi hoàn thành task =====
+// Nộp kết quả đúng hạn: 100% điểm · trễ tới 1 ngày: trừ 50% · trễ tới 2 ngày: trừ 75% · trễ từ 3 ngày trở lên: không có điểm
+const lateFactor = (lateSec: number): number => {
+  if (lateSec <= 0) return 1
+  const days = Math.ceil(lateSec / 86400)
+  return days <= 1 ? 0.5 : days === 2 ? 0.25 : 0
+}
+// Mốc hạn: task có SLA thì theo hạn SLA, không có SLA thì hết ngày hạn hoàn thành
+const taskDeadlineMs = (task: Task): number | null => {
+  const sla = getSlaDeadline(task)
+  if (sla) return sla.getTime()
+  return task.dueDate ? new Date(`${task.dueDate}T23:59:59`).getTime() : null
+}
+function taskEarnedExp(task: Task): number {
+  const base = slaExpRange(task.slaLevel).suggested
+  const dl = taskDeadlineMs(task)
+  if (dl === null) return base
+  const finished = task.submittedAt ? new Date(task.submittedAt).getTime() : Date.now()
+  return Math.round(base * lateFactor(Math.floor((finished - dl) / 1000)))
+}
 const STATUS_CONFIG = {
   open: { label: 'Chưa bắt đầu', color: '#6b7280' },
   'in-progress': { label: 'Đang làm', color: '#06b6d4' },
@@ -2560,13 +2581,13 @@ const hoursMs = (SLA_LEVELS as any)[form.slaLevel].hours * 3600000
             <tr>
               <td className={`${td} font-bold bg-gray-50`}>EXP thưởng</td>
               <td className={td} colSpan={3}>
-                <input type="number" value={form.expReward} onChange={e => patchForm({ expReward: parseInt(e.target.value) || 0 })}
-                  className={cell} style={{ color: expBad ? '#dc2626' : '#b45309', fontWeight: 700 }} />
+                <input type="number" value={slaExpRange(form.slaLevel).suggested} readOnly
+                  className={cell} style={{ color: '#b45309', fontWeight: 700 }} />
               </td>
             </tr>
           </tbody>
         </table>
-        <p className="text-[11px] mb-1" style={{ color: expBad ? '#dc2626' : '#6b7280' }}>💡 EXP gợi ý theo mức SLA ({form.slaLevel || 'chưa chọn'}): {range.min}–{range.max}, vẫn chỉnh tay được. Đồng hồ SLA tính từ lúc giao task.</p>
+        <p className="text-[11px] mb-1" style={{ color: '#6b7280' }}>💡 Điểm theo mức SLA ({form.slaLevel || 'không áp dụng SLA'}): {range.suggested} điểm. Nộp trễ tới 1 ngày trừ 50%, tới 2 ngày trừ 75%, từ 3 ngày trở lên không có điểm. Đồng hồ SLA tính từ lúc giao task.</p>
         {assigning && (
           <div className="space-y-1 mb-4 text-xs">
             <label className="flex items-center gap-2 cursor-pointer">
@@ -4350,6 +4371,8 @@ async function closeTask(
     alert('Không thể đóng task: ' + approveError.message)
     return false
   }
+    // Điểm thực nhận: theo mức SLA, nộp trễ thì giảm (≤1 ngày còn 75%, ≤2 ngày còn 50%, từ 3 ngày không có điểm)
+  task = { ...task, expReward: taskEarnedExp(task) }
 
   const isTeamwork = task.isTeamProject || task.assignedTo.length > 1 || task.supporters.length > 0
   const supportExp = Math.round(task.expReward * SUPPORTER_EXP_PERCENT)
@@ -6709,7 +6732,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         editChanges.push({ label: 'Phòng ban nhận', from: TEAMS.find(t => t.id === editingTask.targetTeamId)?.name ?? '—', to: TEAMS.find(t => t.id === crossTeamId)?.name ?? '—' })
       }
       const { error: updateError } = await supabase.from('tasks').update({
-        title: finalTitle, company: form.company || null, description: form.description, exp_reward: form.expReward,
+        title: finalTitle, company: form.company || null, description: form.description, exp_reward: slaExpRange(form.slaLevel).suggested,
         assigned_to: reCrossAssigned, ...(reCross ? { target_team_id: crossTeamId } : {}), project_manager: form.projectManager, supporters: form.supporters,
         start_date: form.startDate, due_date: form.dueDate,
         ...(resubmit ? { creation_approval: 'pending', creation_rejected_reason: null } : {}),
@@ -6787,7 +6810,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
 
       const taskCode = projectCtx ? await generateProjectTaskCode(projectCtx.id, projectCtx.code) : generateTaskCode(form.startDate, tasks)
       const { data: newTask } = await supabase.from('tasks').insert({
-        title: finalTitle, company: form.company || null, description: form.description, exp_reward: form.expReward,
+        title: finalTitle, company: form.company || null, description: form.description, exp_reward: slaExpRange(form.slaLevel).suggested,
         task_code: taskCode,
         project_id: projectCtx?.id ?? null,
         sla_level: form.slaLevel || null,
@@ -7876,13 +7899,45 @@ function BodLogView({ tasks, users }: { tasks: Task[]; users: User[] }) {
   )
 }
 
-
+// ===== Koin =====  100 điểm = 1 Koin (1.000 điểm = 10 Koin)
+const POINTS_PER_KOIN = 100
 function RewardsView({ currentUser, redemptions, users }: { currentUser: User; redemptions: { id: string; userId: string; rewardId: string; cost: number }[]; users: User[] }) {
   const myRedemptions = redemptions.filter(r => r.userId === currentUser.id)
   const spentPoints = myRedemptions.reduce((s, r) => s + r.cost, 0)
-  const availablePoints = currentUser.exp - spentPoints
-  const redeemed = myRedemptions.map(r => r.rewardId)
   const [notice, setNotice] = useState('')
+
+  // Đổi điểm ra Koin (bảng koin_exchanges)
+  const [koinRows, setKoinRows] = useState<{ points: number; koin: number }[]>([])
+  const [koinInput, setKoinInput] = useState('')
+  const [exchanging, setExchanging] = useState(false)
+  const loadKoin = async () => {
+    const { data } = await supabase.from('koin_exchanges').select('points, koin').eq('user_id', currentUser.id)
+    setKoinRows((data ?? []) as { points: number; koin: number }[])
+  }
+  useEffect(() => { loadKoin() }, [currentUser.id])
+  const koinBalance = koinRows.reduce((s, r) => s + r.koin, 0)
+  const koinSpentPoints = koinRows.reduce((s, r) => s + r.points, 0)
+
+  const availablePoints = currentUser.exp - spentPoints - koinSpentPoints
+  const redeemed = myRedemptions.map(r => r.rewardId)
+
+  const handleExchangeKoin = async () => {
+    const k = Math.floor(Number(koinInput))
+    if (!k || k <= 0) { setNotice('❌ Nhập số Koin muốn đổi (số nguyên lớn hơn 0)'); setTimeout(() => setNotice(''), 3500); return }
+    const pts = k * POINTS_PER_KOIN
+    if (pts > availablePoints) { setNotice(`❌ Không đủ điểm: đổi ${k} Koin cần ${pts.toLocaleString()} điểm`); setTimeout(() => setNotice(''), 3500); return }
+    setExchanging(true)
+    const { error } = await supabase.from('koin_exchanges').insert({ user_id: currentUser.id, points: pts, koin: k })
+    setExchanging(false)
+    if (error) { setNotice('❌ Lỗi: ' + error.message); setTimeout(() => setNotice(''), 3500); return }
+    await supabase.from('notifications').insert({
+      message: `🪙 ${currentUser.name} vừa đổi ${pts} điểm lấy ${k} Koin`,
+    })
+    setKoinInput('')
+    await loadKoin()
+    setNotice(`🎉 Đã đổi ${pts.toLocaleString()} điểm → ${k} Koin`)
+    setTimeout(() => setNotice(''), 3500)
+  }
 
   const handleRedeem = async (r: Reward) => {
     if (availablePoints < r.cost || redeemed.includes(r.id)) return
@@ -7916,7 +7971,27 @@ function RewardsView({ currentUser, redemptions, users }: { currentUser: User; r
         <div className="mb-5 p-3 rounded-xl text-center text-sm font-medium animate-slide-up"
           style={{ background: '#10b98114', border: '1px solid #10b98130', color: '#10b981' }}>{notice}</div>
       )}
-
+            <div className="mb-6 p-4 rounded-xl" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h3 className="font-bold" style={{ fontFamily: 'Rajdhani, sans-serif', color: 'var(--text-primary)' }}>🪙 Đổi điểm ra Koin</h3>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{POINTS_PER_KOIN} điểm = 1 Koin · {(10 * POINTS_PER_KOIN).toLocaleString()} điểm = 10 Koin</p>
+          </div>
+          <div className="text-right">
+            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Koin của bạn</div>
+            <div className="text-2xl font-black" style={{ fontFamily: 'Rajdhani, sans-serif', color: '#d97706' }}>{koinBalance.toLocaleString()} 🪙</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 mt-3 flex-wrap">
+          <input type="number" min={1} value={koinInput} onChange={e => setKoinInput(e.target.value)} placeholder="Số Koin muốn đổi"
+            className="px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)', width: 180 }} />
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>= {((Math.floor(Number(koinInput)) || 0) * POINTS_PER_KOIN).toLocaleString()} điểm</span>
+          <button type="button" onClick={handleExchangeKoin} disabled={exchanging}
+            className="px-4 py-2 rounded-lg font-bold text-sm text-white disabled:opacity-40" style={{ background: 'linear-gradient(135deg,#7c3aed,#f59e0b)' }}>Đổi sang Koin</button>
+          <button type="button" onClick={() => setKoinInput(String(Math.floor(availablePoints / POINTS_PER_KOIN)))}
+            className="px-3 py-2 rounded-lg text-xs font-semibold" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>Đổi tối đa</button>
+        </div>
+      </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {REWARDS.map(r => {
           const can = availablePoints >= r.cost
