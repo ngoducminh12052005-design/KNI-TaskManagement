@@ -3461,7 +3461,7 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
               {!task.description && canCu.length === 0 && rows.length === 0 && !f.yeuCau && !f.thongTinKhac && (
                 <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Chưa có mô tả.</p>
               )}
-              {task.description && <p className="text-sm whitespace-pre-wrap mb-3" style={{ color: 'var(--text-primary)' }}>{task.description}</p>}
+              {task.description && <div className="text-sm mb-3" style={{ color: 'var(--text-primary)' }}>{renderTaskDescription(task.description)}</div>}
               {canCu.length > 0 && (
                 <div className="mb-3">
                   <p className="text-xs font-semibold mb-1" style={{ color: 'var(--text-muted)' }}>Căn cứ</p>
@@ -13240,7 +13240,10 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
               <Row k="Thời gian cần" v={p.days ? `${p.days} ngày` : undefined} />
               <Row k="Hạn kết thúc" v={p.dueDate} />
               <Row k="Mô tả ngắn" v={p.brief} />
-              <Row k="Mô tả dài" v={p.description} />
+              <div className="grid grid-cols-3 gap-2 text-xs py-1">
+                <span style={{ color: 'var(--text-muted)' }}>Mô tả dài</span>
+                <div className="col-span-2" style={{ color: 'var(--text-primary)' }}>{p.description ? renderTaskDescription(p.description) : '—'}</div>
+              </div>
               {p.status === 'rejected' && p.rejectedReason && <Row k="Lý do từ chối" v={p.rejectedReason} />}
               <ProposalAttachments p={p} users={users} />
               {p.driveUrl && (
