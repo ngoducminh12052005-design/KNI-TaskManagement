@@ -3998,9 +3998,9 @@ function TaskRichTextEditor({
 
           if (!data?.signedUrl) return ''
 
-          return `<img data-image-path="${escapeHtml(path)}"
+          return `<span contenteditable="false" style="display:inline-block;width:320px;max-width:100%;resize:both;overflow:hidden;border-radius:8px;margin:10px 0;vertical-align:top;"><img data-image-path="${escapeHtml(path)}"
             src="${data.signedUrl}"
-            style="max-width:100%;height:auto;border-radius:8px;margin:10px 0;display:block;" />`
+            style="width:100%;height:100%;object-fit:contain;display:block;border-radius:8px;" /></span>`
         }
 
         return escapeHtml(part).replace(/\n/g, '<br>')
@@ -4062,16 +4062,22 @@ function TaskRichTextEditor({
 
       if (error || !data?.signedUrl) throw error
 
+      const wrap = document.createElement('span')
+      wrap.contentEditable = 'false'
+      wrap.style.cssText =
+        'display:inline-block;width:320px;max-width:100%;resize:both;overflow:hidden;border-radius:8px;margin:10px 0;vertical-align:top;'
+
       const img = document.createElement('img')
       img.src = data.signedUrl
       img.dataset.imagePath = uploaded.path
       img.style.cssText =
-        'max-width:100%;height:auto;border-radius:8px;margin:10px 0;display:block;'
+        'width:100%;height:100%;object-fit:contain;display:block;border-radius:8px;'
+      wrap.appendChild(img)
 
-      placeholder.replaceWith(img)
+      placeholder.replaceWith(wrap)
 
       const br = document.createElement('br')
-      img.after(br)
+      wrap.after(br)
 
       const nextRange = document.createRange()
       nextRange.setStartAfter(br)
