@@ -2340,23 +2340,7 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
       <button type="button" onClick={() => set([...list, ''])} className="text-xs text-blue-600">+ Thêm dòng</button>
     </div>
   )
-  const descRef = useRef<HTMLTextAreaElement>(null)
-  const handleDescPaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const file = Array.from(e.clipboardData.items).find(it => it.type.startsWith('image/'))?.getAsFile()
-    if (!file) return
-    e.preventDefault()
-    const ta = descRef.current
-    const start = ta?.selectionStart ?? form.description.length
-    const end = ta?.selectionEnd ?? form.description.length
-    const placeholder = '\n[📎 đang tải ảnh...]\n'
-    setForm((f: any) => ({ ...f, description: f.description.slice(0, start) + placeholder + f.description.slice(end) }))
-    try {
-      const [up] = await uploadTaskFiles(currentUser.id, [file])
-      setForm((f: any) => ({ ...f, description: f.description.replace(placeholder, `\n[[img:${up.path}]]\n`) }))
-    } catch {
-      setForm((f: any) => ({ ...f, description: f.description.replace(placeholder, '\n[⚠️ Dán ảnh thất bại]\n') }))
-    }
-  }
+
   const updateRow = (i: number, patch: Partial<TaskDocRow>) => setDoc({ rows: doc.rows.map((r, j) => (j === i ? { ...r, ...patch } : r)) })
   const updateCost = (i: number, patch: Partial<TaskCostRow>) => setDoc({ costRows: (doc.costRows ?? []).map((r, j) => (j === i ? { ...r, ...patch } : r)) })
   const costTotal = (doc.costRows ?? []).reduce((s, r) => s + taskCostAmount(r), 0)
@@ -2462,9 +2446,11 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
         </div>
 
         <p className="font-bold mb-1">NỘI DUNG CÔNG VIỆC <span className="font-normal text-gray-400">(dán ảnh được, Ctrl+V)</span></p>
-        <textarea ref={descRef} value={form.description} onChange={e => setForm((f: any) => ({ ...f, description: e.target.value }))} onPaste={handleDescPaste} rows={8}
-          placeholder={'Mô tả yêu cầu và mục tiêu cụ thể của task.\nVD: 1. Về máy tính xách tay & phần mềm bản quyền: ...\n2. Về thiết bị in ấn / copy / scan: ...'}
-          className={`${line} resize-none mb-4`} style={ink} />
+        <TaskRichTextEditor
+          value={form.description}
+          onChange={value => setForm((f: any) => ({ ...f, description: value }))}
+          userId={currentUser.id}
+        />
 
         <p className="font-bold mb-1">CÁC HẠNG MỤC CÔNG VIỆC</p>
         <div className="overflow-x-auto">
@@ -3948,6 +3934,174 @@ const TASK_MAX_FILE_MB = 25
 
 function fmtFileSize(n: number) {
   return n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`
+}
+
+
+function TaskRichTextEditor({
+  value,
+  onChange,
+  userId
+}: {
+  value: string
+  onChange: (value: string) => void
+  userId: string
+}) {
+  const editorRef = useRef<HTMLDivElement>(null)
+  const lastValue = useRef(value)
+
+  const serialize = (node: Node): string => {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent || ''
+
+    if (node instanceof HTMLImageElement && node.dataset.imagePath) {
+      return `\n[[img:${node.dataset.imagePath}]]\n`
+    }
+
+    if (node instanceof HTMLBRElement) return '\n'
+
+    let result = ''
+    node.childNodes.forEach(child => {
+      result += serialize(child)
+    })
+
+    if (
+      node instanceof HTMLDivElement ||
+      node instanceof HTMLParagraphElement
+    ) {
+      result += '\n'
+    }
+
+    return result
+  }
+
+  const escapeHtml = (s: string) =>
+    s.replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+
+  useEffect(() => {
+    let alive = true
+
+    const render = async () => {
+      const el = editorRef.current
+      if (!el || value === lastValue.current) return
+
+      const parts = value.split(/(\[\[img:[^\]]+\]\])/g)
+      const html = await Promise.all(parts.map(async part => {
+        const match = part.match(/^\[\[img:([^\]]+)\]\]$/)
+
+        if (match) {
+          const path = match[1]
+          const { data } = await supabase.storage
+            .from('proposal-files')
+            .createSignedUrl(path, 3600)
+
+          if (!data?.signedUrl) return ''
+
+          return `<img data-image-path="${escapeHtml(path)}"
+            src="${data.signedUrl}"
+            style="max-width:100%;height:auto;border-radius:8px;margin:10px 0;display:block;" />`
+        }
+
+        return escapeHtml(part).replace(/\n/g, '<br>')
+      }))
+
+      if (alive && editorRef.current) {
+        editorRef.current.innerHTML = html.join('')
+        lastValue.current = value
+      }
+    }
+
+    render()
+    return () => { alive = false }
+  }, [value])
+
+  const handleInput = () => {
+    const el = editorRef.current
+    if (!el) return
+
+    const next = serialize(el)
+    lastValue.current = next
+    onChange(next)
+  }
+
+  const handlePaste = async (e: React.ClipboardEvent<HTMLDivElement>) => {
+    const file = Array.from(e.clipboardData.items)
+      .find(item => item.type.startsWith('image/'))
+      ?.getAsFile()
+
+    if (!file) return
+
+    e.preventDefault()
+
+    const el = editorRef.current
+    const selection = window.getSelection()
+
+    if (!el || !selection) return
+
+    const range = selection.rangeCount
+      ? selection.getRangeAt(0).cloneRange()
+      : null
+
+    if (range && !el.contains(range.commonAncestorContainer)) return
+
+    const placeholder = document.createTextNode('Đang tải ảnh...')
+    if (range) {
+      range.deleteContents()
+      range.insertNode(placeholder)
+    } else {
+      el.appendChild(placeholder)
+    }
+
+    try {
+      const [uploaded] = await uploadTaskFiles(userId, [file])
+
+      const { data, error } = await supabase.storage
+        .from('proposal-files')
+        .createSignedUrl(uploaded.path, 3600)
+
+      if (error || !data?.signedUrl) throw error
+
+      const img = document.createElement('img')
+      img.src = data.signedUrl
+      img.dataset.imagePath = uploaded.path
+      img.style.cssText =
+        'max-width:100%;height:auto;border-radius:8px;margin:10px 0;display:block;'
+
+      placeholder.replaceWith(img)
+
+      const br = document.createElement('br')
+      img.after(br)
+
+      const nextRange = document.createRange()
+      nextRange.setStartAfter(br)
+      nextRange.collapse(true)
+
+      selection.removeAllRanges()
+      selection.addRange(nextRange)
+
+      handleInput()
+    } catch (error) {
+      placeholder.textContent = '[Dán ảnh thất bại]'
+      console.error('Upload image error:', error)
+    }
+  }
+
+  return (
+    <div
+      ref={editorRef}
+      contentEditable
+      suppressContentEditableWarning
+      onInput={handleInput}
+      onPaste={handlePaste}
+      data-placeholder="Nhập nội dung công việc hoặc Ctrl + V để dán ảnh..."
+      className="w-full min-h-[200px] px-3 py-3 rounded-md
+        border border-gray-300 bg-white text-gray-900
+        text-sm outline-none focus:ring-2 focus:ring-blue-400
+        whitespace-pre-wrap break-words overflow-y-auto"
+      style={{ lineHeight: 1.7 }}
+    />
+  )
 }
 
 // Hiện ảnh đã dán vào "Nội dung công việc" — tự tạo lại link xem (vì bucket riêng tư) mỗi lần mở trang
