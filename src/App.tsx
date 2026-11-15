@@ -4108,7 +4108,7 @@ function TaskRichTextEditor({
   userId: string
 }) {
   const editorRef = useRef<HTMLDivElement>(null)
-  const lastValue = useRef(value)
+  const lastValue = useRef<string | null>(null)
 
   const serialize = (node: Node): string => {
     if (node.nodeType === Node.TEXT_NODE) return node.textContent || ''
