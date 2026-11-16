@@ -4186,25 +4186,34 @@ function TaskRichTextEditor({
     onChange(next)
   }
 
-  const handlePaste = async (e: React.ClipboardEvent<HTMLDivElement>) => {
-    const file = Array.from(e.clipboardData.items)
-      .find(item => item.type.startsWith('image/'))
-      ?.getAsFile()
+    const handlePaste = async (e: React.ClipboardEvent<HTMLDivElement>) => {
+    // Đọc hết dữ liệu clipboard NGAY (sau khi await thì không đọc lại được)
+    const cd = e.clipboardData
+    const clipFile: File | null =
+      Array.from(cd.files).find(f => f.type.startsWith('image/')) ??
+      Array.from(cd.items).find(it => it.kind === 'file' && it.type.startsWith('image/'))?.getAsFile() ??
+      null
+    const html = cd.getData('text/html')
+    const imgSrc = html.match(/<img[^>]+src=["']([^"']+)["']/i)?.[1]?.replace(/&amp;/g, '&') ?? ''
+    const text = cd.getData('text/plain')
 
-    if (!file) return
-
+    // Luôn tự xử lý để không bị dính HTML / dữ liệu ẩn của Figma, Word, web...
     e.preventDefault()
+
+    // Không có ảnh: chỉ dán chữ thường
+    if (!clipFile && !imgSrc) {
+      if (text) document.execCommand('insertText', false, text)
+      return
+    }
 
     const el = editorRef.current
     const selection = window.getSelection()
-
     if (!el || !selection) return
 
-    const range = selection.rangeCount
+    // Chỗ chèn: tại con trỏ nếu con trỏ đang trong ô, không thì cuối ô
+    const range = selection.rangeCount && el.contains(selection.getRangeAt(0).commonAncestorContainer)
       ? selection.getRangeAt(0).cloneRange()
       : null
-
-    if (range && !el.contains(range.commonAncestorContainer)) return
 
     const placeholder = document.createTextNode('Đang tải ảnh...')
     if (range) {
@@ -4215,6 +4224,13 @@ function TaskRichTextEditor({
     }
 
     try {
+      let file = clipFile
+      if (!file) {
+        // Ảnh nhúng trong HTML (data:image/... hoặc link ảnh): tải về thành file rồi upload
+        const blob = await (await fetch(imgSrc)).blob()
+        if (!blob.type.startsWith('image/')) throw new Error('Không phải ảnh')
+        file = new File([blob], `anh_${Date.now()}.${blob.type.split('/')[1] || 'png'}`, { type: blob.type })
+      }
       const [uploaded] = await uploadTaskFiles(userId, [file])
 
       const { data, error } = await supabase.storage
@@ -4251,6 +4267,7 @@ function TaskRichTextEditor({
     } catch (error) {
       placeholder.textContent = '[Dán ảnh thất bại]'
       console.error('Upload image error:', error)
+      handleInput()
     }
   }
 
