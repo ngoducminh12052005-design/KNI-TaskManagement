@@ -9928,6 +9928,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
         const r = roles[i] ?? ''
         if (r === 'Trưởng bộ phận') setRecipientId(st.approver_id)
         else if (r === 'Kế toán trưởng') setKttId(st.approver_id)
+        else if (r.startsWith('Bên liên quan')) { setGdId(st.approver_id); setGdCompany(r.replace('Bên liên quan', '').trim()) }
         else if (r.startsWith('Giám đốc công ty')) { setGdId(st.approver_id); setGdCompany(r.replace('Giám đốc công ty', '').trim()) }
         else if (r === 'Ban Giám đốc Tập đoàn') bgd.push(st.approver_id)
         else if (i === 0) setRecipientId(st.approver_id)
@@ -9950,8 +9951,8 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
   // Các ô ký cố định theo thứ tự duyệt. Ô nào chưa chọn người thì bỏ qua, trùng người thì giữ lần đầu.
   const slots = [
     { role: 'Trưởng bộ phận', id: recipientId },
+    { role: gdCompany.trim() ? `Bên liên quan ${gdCompany.trim()}` : 'Bên liên quan', id: gdId },
     { role: 'Kế toán trưởng', id: kttId },
-    { role: gdCompany.trim() ? `Giám đốc công ty ${gdCompany.trim()}` : 'Giám đốc công ty', id: gdId },
     ...bgdIds.map(id => ({ role: 'Ban Giám đốc Tập đoàn', id })),
   ].filter((s, i, arr) => s.id && arr.findIndex(x => x.id === s.id) === i)
   const approverIds = slots.map(s => s.id)
@@ -10129,7 +10130,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
         <p className="font-bold text-gray-500">TẬP ĐOÀN KHÔI NGUYÊN INVESTMENT (KNI)</p>
         <div className="flex items-center gap-2 font-bold text-gray-500 flex-wrap">
           <span>CÔNG TY</span>
-          <select value={company} onChange={e => { setCompany(e.target.value); setGdCompany(e.target.value) }} className="border-b border-dashed border-gray-300 bg-transparent outline-none font-bold" style={ink}>
+          <select value={company} onChange={e => setCompany(e.target.value)} className="border-b border-dashed border-gray-300 bg-transparent outline-none font-bold" style={ink}>
             <option value="">-- chọn --</option>
             {COMPANIES.map(c => <option key={c} value={c}>{c.toUpperCase()}</option>)}
           </select>
@@ -10246,16 +10247,9 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
 
           <div className="flex flex-col">
             <div style={{ minHeight: 96 }}>
-              <p className="font-bold">Kế toán trưởng</p>
-              <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
-            </div>
-            <DeptUserSelect users={users} excludeId={currentUser.id} value={kttId} onChange={setKttId} />
-          </div>
-          <div className="flex flex-col">
-            <div style={{ minHeight: 96 }}>
-              <p className="font-bold">Giám đốc công ty</p>
+              <p className="font-bold">Bên liên quan</p>
               <input list="gd-companies" value={gdCompany} onChange={e => setGdCompany(e.target.value)}
-                placeholder="Chọn tên công ty"
+                placeholder="Nhập / chọn tên bên liên quan"
                 className="mt-1 w-full border-b border-dashed border-gray-300 bg-transparent outline-none text-center text-xs" style={ink} />
               <datalist id="gd-companies">
                 {COMPANIES.map(c => <option key={c} value={c} />)}
@@ -10263,6 +10257,13 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
               <p className="font-bold text-xs mt-1">(Ký, ghi rõ họ tên)</p>
             </div>
             <DeptUserSelect users={users} excludeId={currentUser.id} value={gdId} onChange={setGdId} />
+          </div>
+          <div className="flex flex-col">
+            <div style={{ minHeight: 96 }}>
+              <p className="font-bold">Kế toán trưởng</p>
+              <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+            </div>
+            <DeptUserSelect users={users} excludeId={currentUser.id} value={kttId} onChange={setKttId} />
           </div>
           <div className="flex flex-col">
             <div style={{ minHeight: 96 }}>
@@ -13579,21 +13580,137 @@ async function uploadProposalFiles(userId: string, files: File[]) {
   return out
 }
 
-// Xem nhanh file vừa chọn (chưa tải lên): ảnh / PDF / txt mở ở tab mới, file Word / Excel thì tải về để mở xem
-function previewLocalFile(f: File) {
-  const url = URL.createObjectURL(f)
-  const viewable = /^(image\/(?!svg)|application\/pdf|text\/plain)/.test(f.type || '')
-  const a = document.createElement('a')
-  a.href = url
-  if (viewable) { a.target = '_blank'; a.rel = 'noopener' } else { a.download = f.name }
-  document.body.appendChild(a); a.click(); a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 120000)
+// ===== Xem file ngay trong cửa sổ popup (không tải về), có nút "Tải về" =====
+type PreviewSrc = { name: string; file?: File; path?: string }
+const PREVIEW_EVENT = 'kni-file-preview'
+function openFilePreview(src: PreviewSrc) {
+  window.dispatchEvent(new CustomEvent(PREVIEW_EVENT, { detail: src }))
 }
-async function openProposalFile(path: string) {
+const PREVIEW_MIME: Record<string, string> = {
+  pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+  txt: 'text/plain', csv: 'text/csv', json: 'application/json',
+}
+function FilePreviewHost() {
+  const [src, setSrc] = useState<PreviewSrc | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [url, setUrl] = useState('')   // blob URL dùng cho ảnh, PDF và nút Tải về
+  const [kind, setKind] = useState<'image' | 'pdf' | 'text' | 'html' | 'none'>('none')
+  const [text, setText] = useState('')
+  const [html, setHtml] = useState('')
+  const [sheets, setSheets] = useState<{ name: string; html: string }[]>([])
+  const [sheetIdx, setSheetIdx] = useState(0)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    const on = (e: Event) => setSrc((e as CustomEvent<PreviewSrc>).detail)
+    window.addEventListener(PREVIEW_EVENT, on)
+    return () => window.removeEventListener(PREVIEW_EVENT, on)
+  }, [])
+  useEffect(() => {
+    if (!src) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSrc(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [src])
+
+  useEffect(() => {
+    if (!src) return
+    let alive = true
+    let objUrl = ''
+    setLoading(true); setErr(''); setKind('none'); setText(''); setHtml(''); setSheets([]); setSheetIdx(0); setUrl('')
+    ;(async () => {
+      try {
+        let blob: Blob
+        if (src.file) blob = src.file
+        else {
+          const { data, error } = await supabase.storage.from('proposal-files').createSignedUrl(src.path ?? '', 3600)
+          if (error || !data) throw new Error(error?.message ?? 'Không lấy được file')
+          const res = await fetch(data.signedUrl)
+          if (!res.ok) throw new Error('Không tải được file')
+          blob = await res.blob()
+        }
+        const ext = (src.name.split('.').pop() ?? '').toLowerCase()
+        const mime = PREVIEW_MIME[ext] ?? (blob.type || 'application/octet-stream')
+        const typed = blob.type === mime ? blob : new Blob([blob], { type: mime })
+        objUrl = URL.createObjectURL(typed)
+        if (!alive) { URL.revokeObjectURL(objUrl); return }
+        setUrl(objUrl)
+        if (mime.startsWith('image/')) setKind('image')
+        else if (mime === 'application/pdf') setKind('pdf')
+        else if (['txt', 'csv', 'json', 'md', 'log'].includes(ext)) { setText(await typed.text()); setKind('text') }
+        else if (ext === 'xlsx' || ext === 'xls') {
+          const wb = XLSX.read(await typed.arrayBuffer(), { type: 'array' })
+          setSheets(wb.SheetNames.slice(0, 10).map(n => ({ name: n, html: XLSX.utils.sheet_to_html(wb.Sheets[n]) })))
+          setKind('html')
+        } else if (ext === 'docx') {
+          const mod: any = await import('mammoth/mammoth.browser')
+          const mammoth = mod.default ?? mod
+          const r = await mammoth.convertToHtml({ arrayBuffer: await typed.arrayBuffer() })
+          setHtml(r.value)
+          setKind('html')
+        } else setKind('none')
+      } catch (e: any) {
+        if (alive) setErr(e?.message ?? 'Không xem trước được file này. Bấm Tải về để mở.')
+      } finally {
+        if (alive) setLoading(false)
+      }
+    })()
+    return () => { alive = false; if (objUrl) URL.revokeObjectURL(objUrl) }
+  }, [src])
+
+  if (!src) return null
+  const download = () => {
+    if (!url) return
+    const a = document.createElement('a')
+    a.href = url; a.download = src.name
+    document.body.appendChild(a); a.click(); a.remove()
+  }
+  const shownHtml = sheets.length > 0 ? (sheets[sheetIdx]?.html ?? '') : html
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-6" style={{ background: 'rgba(0,0,0,0.65)' }} onClick={() => setSrc(null)}>
+      <div className="flex flex-col w-full max-w-5xl rounded-xl overflow-hidden" style={{ background: '#fff', height: '88vh' }} onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-2 px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+          <span className="flex-1 truncate text-sm font-bold" style={{ color: '#111827' }}>📄 {src.name}</span>
+          <button type="button" onClick={download} disabled={!url} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white disabled:opacity-40" style={{ background: '#2563eb' }}>⬇ Tải về</button>
+          <button type="button" onClick={() => setSrc(null)} className="text-lg px-2" style={{ color: '#6b7280' }}>✕</button>
+        </div>
+        <div className="flex-1 overflow-auto" style={{ background: '#e5e7eb' }}>
+          {loading && <p className="text-sm text-center py-10" style={{ color: '#6b7280' }}>Đang mở file...</p>}
+          {!loading && err && <p className="text-sm text-center py-10 px-4" style={{ color: '#dc2626' }}>{err}</p>}
+          {!loading && !err && kind === 'image' && <img src={url} alt={src.name} className="mx-auto max-w-full p-2" style={{ maxHeight: '100%', objectFit: 'contain' }} />}
+          {!loading && !err && kind === 'pdf' && <iframe src={url} title={src.name} className="w-full h-full border-0" />}
+          {!loading && !err && kind === 'text' && <pre className="p-4 text-xs whitespace-pre-wrap" style={{ color: '#111827', background: '#fff', minHeight: '100%' }}>{text}</pre>}
+          {!loading && !err && kind === 'html' && (
+            <div style={{ background: '#fff', minHeight: '100%' }}>
+              {sheets.length > 1 && (
+                <div className="flex gap-1 flex-wrap p-2" style={{ borderBottom: '1px solid #e5e7eb' }}>
+                  {sheets.map((sh, i) => (
+                    <button key={sh.name} type="button" onClick={() => setSheetIdx(i)} className="px-2.5 py-1 rounded text-xs font-semibold"
+                      style={{ background: i === sheetIdx ? '#2563eb' : '#f3f4f6', color: i === sheetIdx ? '#fff' : '#374151' }}>{sh.name}</button>
+                  ))}
+                </div>
+              )}
+              <style>{'.kni-preview{color:#111827;font-size:13px;line-height:1.5}.kni-preview table{border-collapse:collapse}.kni-preview td,.kni-preview th{border:1px solid #9ca3af;padding:2px 6px}.kni-preview img{max-width:100%}'}</style>
+              <div className="kni-preview p-5 overflow-auto" dangerouslySetInnerHTML={{ __html: shownHtml }} />
+            </div>
+          )}
+          {!loading && !err && kind === 'none' && (
+            <p className="text-sm text-center py-10 px-4" style={{ color: '#374151' }}>Định dạng này chưa xem trước được trong app.<br />Bấm <b>⬇ Tải về</b> để mở bằng Word, PowerPoint...</p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Xem file vừa chọn (chưa tải lên): mở popup xem ngay trong app, có nút Tải về
+function previewLocalFile(f: File) {
+  openFilePreview({ name: f.name, file: f })
+}
+// Xem file đã tải lên: cũng mở popup. Link http(s) (Google Drive...) thì mở tab mới như cũ
+async function openProposalFile(path: string, name?: string) {
   if (/^https?:\/\//i.test(path)) { window.open(path, '_blank', 'noopener'); return }
-  const { data, error } = await supabase.storage.from('proposal-files').createSignedUrl(path, 3600)
-  if (error || !data) { alert('Không mở được file: ' + (error?.message ?? '')); return }
-  window.open(data.signedUrl, '_blank', 'noopener')
+  openFilePreview({ name: name ?? ((path.split('/').pop() ?? 'file').replace(/^\d{10,}_/, '')), path })
 }
 
 const PROPOSAL_GROUPS = ['Mua sắm', 'Nghỉ phép', 'Đi công tác', 'Đề nghị thanh toán', 'Khác']
@@ -18862,6 +18979,7 @@ useEffect(() => {
   if (currentProfile.mustChangePassword) return <ForcePasswordScreen user={currentProfile} onDone={() => setCurrentProfile({ ...currentProfile, mustChangePassword: false })} />
 
   return (
+    <>
     <AppShell
       currentUser={currentProfile}
       setCurrentUser={setCurrentProfile}
@@ -18877,5 +18995,7 @@ useEffect(() => {
       proposalApprovals={proposalApprovals}
       proposalRevisions={proposalRevisions}
     />
+    <FilePreviewHost />
+    </>
   )
 }
