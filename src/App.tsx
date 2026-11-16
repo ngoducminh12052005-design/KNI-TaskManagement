@@ -4322,77 +4322,105 @@ function FileButton({ accept, count = 0, onChange }: { accept?: string; count?: 
   )
 }
 
-function FilePicker({ files, setFiles }: { files: File[]; setFiles: (f: File[]) => void }) {
-  const inputRef = useRef<HTMLInputElement>(null)
+// Khung chọn tệp dùng chung cho cả app: nút "Chọn tệp", danh sách file có Xem / Đổi / ✕, ô dán link Google Drive (nếu có)
+function AttachBox({ files, setFiles, accept = 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx', maxFiles = MAX_FILES, maxMb = MAX_FILE_MB, driveUrl, setDriveUrl, pasteDrop = false, dark = false }: {
+  files: File[]; setFiles: (f: File[]) => void; accept?: string; maxFiles?: number; maxMb?: number
+  driveUrl?: string; setDriveUrl?: (v: string) => void
+  pasteDrop?: boolean   // cho phép kéo thả và dán ảnh (Ctrl+V)
+  dark?: boolean        // dùng trong cửa sổ nền tối của app (form giấy trắng thì để mặc định)
+}) {
+  const pickRef = useRef<HTMLInputElement>(null)
+  const swapRef = useRef<HTMLInputElement>(null)
+  const swapIdx = useRef(-1)
   const filesRef = useRef(files)
   filesRef.current = files
-  const [drag, setDrag] = useState(false)
   const [warn, setWarn] = useState('')
-  const urls = useMemo(() => files.map(f => (f.type.startsWith('image/') ? URL.createObjectURL(f) : '')), [files])
-  useEffect(() => () => { urls.forEach(u => u && URL.revokeObjectURL(u)) }, [urls])
+  const [drag, setDrag] = useState(false)
+  const limit = maxMb * 1024 * 1024
+  const txt = dark ? 'var(--text-primary)' : '#111827'
+  const muted = dark ? 'var(--text-muted)' : '#6b7280'
 
   const add = (list: FileList | File[] | null) => {
     if (!list) return
     const cur = filesRef.current
-    const limit = TASK_MAX_FILE_MB * 1024 * 1024
     const incoming = Array.from(list)
     const tooBig = incoming.filter(f => f.size > limit)
     const fresh = incoming.filter(f => f.size <= limit && !cur.some(x => x.name === f.name && x.size === f.size))
-    const take = fresh.slice(0, Math.max(0, TASK_MAX_FILES - cur.length))
+    const take = fresh.slice(0, Math.max(0, maxFiles - cur.length))
     const msgs: string[] = []
-    if (tooBig.length) msgs.push(`${tooBig.length} file vượt ${TASK_MAX_FILE_MB}MB nên bị bỏ qua. File lớn thì nén lại hoặc chia nhỏ`)
-    if (fresh.length > take.length) msgs.push(`Tối đa ${TASK_MAX_FILES} file, ${fresh.length - take.length} file bị bỏ qua. Nhiều file hơn thì bỏ vào thư mục, nén thành file .zip rồi đính kèm`)
+    if (tooBig.length) msgs.push(`${tooBig.length} file lớn hơn ${maxMb}MB nên bị bỏ qua. File lớn thì nén lại, chia nhỏ hoặc dán link Google Drive`)
+    if (fresh.length > take.length) msgs.push(`Tối đa ${maxFiles} file, ${fresh.length - take.length} file bị bỏ qua. Nhiều file hơn thì nén thành file .zip rồi đính kèm`)
     setWarn(msgs.join('. '))
     if (take.length > 0) setFiles([...cur, ...take])
   }
-
-  // Dán ảnh từ clipboard (Ctrl+V, chụp màn hình) cũng vào được
+  const swap = (e: { target: HTMLInputElement }) => {
+    const nf = e.target.files?.[0]
+    e.target.value = ''
+    const i = swapIdx.current
+    swapIdx.current = -1
+    if (!nf || i < 0) return
+    if (nf.size > limit) { setWarn(`File "${nf.name}" lớn hơn ${maxMb}MB. Hãy nén hoặc chia nhỏ file rồi chọn lại.`); return }
+    setWarn('')
+    setFiles(filesRef.current.map((x, j) => (j === i ? nf : x)))
+  }
   useEffect(() => {
+    if (!pasteDrop) return
     const onPaste = (e: ClipboardEvent) => {
       const fs = Array.from(e.clipboardData?.files ?? [])
       if (fs.length > 0) { e.preventDefault(); add(fs) }
     }
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
-  }, [])
+  }, [pasteDrop])
 
+  return (
+    <div
+      onDragOver={pasteDrop ? (e => { e.preventDefault(); setDrag(true) }) : undefined}
+      onDragLeave={pasteDrop ? (() => setDrag(false)) : undefined}
+      onDrop={pasteDrop ? (e => { e.preventDefault(); setDrag(false); add(e.dataTransfer.files) }) : undefined}
+      style={drag ? { outline: '2px dashed #7c3aed', outlineOffset: 4, borderRadius: 8 } : undefined}>
+      <div className="flex items-center gap-3">
+        <input ref={pickRef} type="file" multiple accept={accept} className="hidden" onChange={e => { add(e.target.files); e.target.value = '' }} />
+        <button type="button" onClick={() => pickRef.current?.click()}
+          className="px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors hover:bg-blue-50"
+          style={{ border: '2px solid #2563eb', color: '#1d4ed8', background: '#fff' }}>
+          📎 Chọn tệp
+        </button>
+        <span className="text-xs" style={{ color: muted }}>{files.length > 0 ? `Đã chọn ${files.length} tệp` : 'Chưa chọn tệp nào'}</span>
+      </div>
+      <input ref={swapRef} type="file" accept={accept} className="hidden" onChange={swap} />
+      {files.length > 0 && (
+        <ul className="mt-1 space-y-0.5">
+          {files.map((x, i) => (
+            <li key={`${x.name}-${x.size}-${i}`} className="flex items-center justify-between gap-2 text-xs" style={{ color: txt }}>
+              <span className="truncate">☑ {x.name} ({(x.size / 1024 / 1024).toFixed(1)}MB)</span>
+              <span className="flex-shrink-0">
+                <button type="button" onClick={() => previewLocalFile(x)} title="Mở file để kiểm tra đã chọn đúng chưa" className="text-blue-600 px-1.5 font-semibold">👁 Xem</button>
+                <button type="button" onClick={() => { swapIdx.current = i; swapRef.current?.click() }} title="Chọn file khác thay cho file này" className="text-amber-700 px-1.5">🔄 Đổi</button>
+                <button type="button" onClick={() => setFiles(files.filter((_, j) => j !== i))} className="text-red-500 px-1">✕</button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {warn && <p className="text-[11px] mt-1" style={{ color: '#dc2626' }}>{warn}</p>}
+      {setDriveUrl && (
+        <input value={driveUrl ?? ''} onChange={e => setDriveUrl(e.target.value)} placeholder="Hoặc dán link Google Drive (file lớn)"
+          className="w-full bg-transparent outline-none border-b border-dashed focus:border-blue-500 py-0.5 mt-2 text-xs"
+          style={{ color: txt, borderColor: dark ? 'var(--border)' : '#d1d5db' }} />
+      )}
+    </div>
+  )
+}
+
+function FilePicker({ files, setFiles }: { files: File[]; setFiles: (f: File[]) => void }) {
   return (
     <div className="mb-4">
       <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>
         Ảnh / file đính kèm{files.length > 0 ? ` (${files.length}/${TASK_MAX_FILES})` : ''}
       </label>
-      <div onClick={() => inputRef.current?.click()}
-        onDragOver={e => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)}
-        onDrop={e => { e.preventDefault(); setDrag(false); add(e.dataTransfer.files) }}
-        className="rounded-lg p-3 text-center text-xs cursor-pointer"
-        style={{ border: `1.5px dashed ${drag ? '#7c3aed' : 'var(--border)'}`, background: drag ? '#7c3aed11' : 'var(--bg-card-alt)', color: 'var(--text-muted)' }}>
-        📎 Bấm để chọn nhiều ảnh / file, hoặc kéo thả, hoặc dán (Ctrl+V) vào đây
-      </div>
-      <input ref={inputRef} type="file" multiple className="hidden"
-        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.zip,.rar,.7z"
-        onChange={e => { add(e.target.files); e.target.value = '' }} />
-      {warn && <p className="text-[11px] mt-1" style={{ color: '#dc2626' }}>{warn}</p>}
-
-      {files.length > 0 && (
-        <div className="mt-2">
-          <div className="flex flex-wrap gap-2">
-            {files.map((f, i) => urls[i] ? (
-              <div key={`${f.name}-${f.size}-${i}`} className="relative">
-                <img src={urls[i]} alt={f.name} title={f.name} className="w-16 h-16 object-cover rounded-lg" style={{ border: '1px solid var(--border)' }} />
-                <button type="button" onClick={() => setFiles(files.filter((_, j) => j !== i))}
-                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full text-[10px] font-bold text-white" style={{ background: '#dc2626' }}>✕</button>
-              </div>
-            ) : null)}
-          </div>
-          {files.map((f, i) => urls[i] ? null : (
-            <div key={`${f.name}-${f.size}-${i}`} className="flex items-center justify-between text-xs mt-1.5" style={{ color: 'var(--text-primary)' }}>
-              <span className="truncate">📎 {f.name} <span style={{ color: 'var(--text-muted)' }}>({fmtFileSize(f.size)})</span></span>
-              <button type="button" onClick={() => setFiles(files.filter((_, j) => j !== i))} style={{ color: '#dc2626' }}>✕</button>
-            </div>
-          ))}
-          <button type="button" onClick={() => setFiles([])} className="text-[11px] mt-2 underline" style={{ color: '#dc2626' }}>Xoá tất cả</button>
-        </div>
-      )}
+      <AttachBox files={files} setFiles={setFiles} maxFiles={TASK_MAX_FILES} maxMb={TASK_MAX_FILE_MB}
+        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.zip,.rar,.7z" pasteDrop dark />
     </div>
   )
 }
@@ -9616,18 +9644,7 @@ if (!note.trim() && files.length === 0 && !link) { setMsg('Hãy nhập nội dun
       <input value={driveLink} onChange={e => setDriveLink(e.target.value)}
         placeholder="Link Drive chứa báo giá / tài liệu (https://drive.google.com/...)"
         className="w-full px-2 py-1.5 rounded-lg text-xs outline-none mb-2" style={inputStyle} />
-      <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" onChange={pick}
-        className="w-full text-xs" style={{ color: 'var(--text-muted)' }} />
-      {files.length > 0 && (
-        <ul className="mt-2 space-y-1">
-          {files.map((f, i) => (
-            <li key={i} className="flex items-center justify-between text-xs rounded-lg px-2 py-1" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-primary)' }}>
-              <span className="truncate">{f.name} ({(f.size / 1024 / 1024).toFixed(1)}MB)</span>
-              <button type="button" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} style={{ color: '#dc2626' }}>✕</button>
-            </li>
-          ))}
-        </ul>
-      )}
+        <AttachBox dark files={files} setFiles={setFiles} />
       {msg && <p className="text-xs mt-2" style={{ color: msg.startsWith('✅') ? '#059669' : '#dc2626' }}>{msg}</p>}
       <button type="button" onClick={submit} disabled={saving}
         className="mt-3 px-4 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40"
@@ -10204,18 +10221,8 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
           className={`${area} mb-4`} style={ink} />
 
         <p className="font-bold mb-1">Tài liệu đính kèm theo Tờ trình:</p>
-        <FileButton accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" count={files.length} onChange={pickFiles} />
-        {files.length > 0 && (
-          <ul className="mt-1 space-y-0.5">
-            {files.map((f, i) => (
-              <li key={i} className="flex items-center justify-between text-xs">
-                <span className="truncate">☐ {f.name} ({(f.size / 1024 / 1024).toFixed(1)}MB)</span>
-                <button type="button" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} className="text-red-500 px-1">✕</button>
-              </li>
-            ))}
-          </ul>
-        )}
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-8 text-center">
+          <AttachBox files={files} setFiles={setFiles} />
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-8 text-center">
           <div className="flex flex-col">
             <div style={{ minHeight: 96 }}>
               <p className="font-bold">Người lập tờ trình</p>
@@ -10781,18 +10788,7 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: {
 
           <div className="mt-4">
             <p className="font-bold text-xs mb-1">Chứng từ đính kèm (hóa đơn, báo giá, ủy nhiệm chi...):</p>
-            <FileButton accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" count={files.length} onChange={pickFiles} />
-            {files.length > 0 && (
-              <ul className="mt-1 space-y-0.5">
-                {files.map((f, i) => (
-                  <li key={i} className="flex items-center justify-between text-xs">
-                    <span className="truncate">☐ {f.name} ({(f.size / 1024 / 1024).toFixed(1)}MB)</span>
-                    <button type="button" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} className="text-red-500 px-1">✕</button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <input value={driveUrl} onChange={e => setDriveUrl(e.target.value)} placeholder="Hoặc dán link Google Drive (file lớn)" className={`${line} mt-2 text-xs`} style={ink} />
+              <AttachBox files={files} setFiles={setFiles} accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" driveUrl={driveUrl} setDriveUrl={setDriveUrl} />
           </div>
 
           <div className="grid gap-3 mt-8 text-center text-xs" style={{ gridTemplateColumns: `repeat(${Math.min(4, 1 + Math.max(approverIds.length, 1))}, minmax(0, 1fr))` }}>
@@ -11476,17 +11472,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
 
           <div className="mt-4">
             <p className="font-bold text-xs mb-1">Tài liệu đính kèm (giấy xác nhận y tế, báo giá, lịch trình...):</p>
-            <FileButton accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" count={files.length} onChange={pickFiles} />
-            {files.length > 0 && (
-              <ul className="mt-1 space-y-0.5">
-                {files.map((x, i) => (
-                  <li key={i} className="flex items-center justify-between text-xs">
-                    <span className="truncate">☐ {x.name} ({(x.size / 1024 / 1024).toFixed(1)}MB)</span>
-                    <button type="button" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} className="text-red-500 px-1">✕</button>
-                  </li>
-                ))}
-              </ul>
-            )}
+              <AttachBox files={files} setFiles={setFiles} accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" />
           </div>
 
           {(isMua || tpl === 'nghiphep') ? (
@@ -13826,43 +13812,26 @@ function ProposalModal({ currentUser, users, editingProposal, onClose, onCreated
               style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
           </div>
 
-                    {!editingProposal && (
+                      {!editingProposal ? (
             <div>
-              <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Tải file / hình ảnh lên (tối đa 5 file, mỗi file ≤ 10MB)</label>
-              <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
-                onChange={e => {
-                  const picked = Array.from(e.target.files ?? [])
-                  const tooBig = picked.find(f => f.size > MAX_FILE_MB * 1024 * 1024)
-                  if (tooBig) { setError(`File "${tooBig.name}" lớn hơn ${MAX_FILE_MB}MB. Hãy nén hoặc chia nhỏ file rồi chọn lại.`); e.target.value = ''; return }
-                  if (files.length + picked.length > MAX_FILES) { setError(`Tối đa ${MAX_FILES} file.`); e.target.value = ''; return }
-                  setError('')
-                  setFiles(prev => [...prev, ...picked])
-                  e.target.value = ''
-                }}
-                className="w-full text-xs" style={{ color: 'var(--text-muted)' }} />
-              {files.length > 0 && (
-                <ul className="mt-2 space-y-1">
-                  {files.map((f, i) => (
-                    <li key={i} className="flex items-center justify-between text-xs rounded-lg px-2 py-1" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-primary)' }}>
-                      <span className="truncate">{f.name} ({(f.size / 1024 / 1024).toFixed(1)}MB)</span>
-                      <button type="button" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} style={{ color: '#dc2626' }}>✕</button>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Tệp đính kèm (tối đa {MAX_FILES} file, mỗi file ≤ {MAX_FILE_MB}MB)</label>
+              <AttachBox dark files={files} setFiles={setFiles} driveUrl={driveUrl} setDriveUrl={setDriveUrl} />
+              <p className="text-[10px] mt-1.5 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+                💡 Dán link Google Drive thì nhớ bật chia sẻ "Bất kỳ ai có link đều xem được".
+              </p>
+            </div>
+          ) : (
+            <div>
+              <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Hoặc dán link Google Drive (file lớn)</label>
+              <input value={driveUrl} onChange={e => setDriveUrl(e.target.value)}
+                placeholder="https://drive.google.com/file/d/..."
+                className="w-full px-3 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
+                style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+              <p className="text-[10px] mt-1.5 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+                💡 Nhớ bật chia sẻ "Bất kỳ ai có link đều xem được" trước khi dán vào đây.
+              </p>
             </div>
           )}
-
-          <div>
-            <label className="text-xs uppercase tracking-wider mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Hoặc dán link Google Drive (file lớn)</label>
-            <input value={driveUrl} onChange={e => setDriveUrl(e.target.value)}
-              placeholder="https://drive.google.com/file/d/..."
-              className="w-full px-3 py-2.5 rounded-lg text-sm outline-none placeholder-[color:var(--text-muted)]"
-              style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
-            <p className="text-[10px] mt-1.5 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-              💡 Nhớ bật chia sẻ "Bất kỳ ai có link đều xem được" trước khi dán vào đây.
-            </p>
-          </div>
 
           {editingProposal && (
             <div>
