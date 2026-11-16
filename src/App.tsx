@@ -10915,7 +10915,7 @@ const moneyVN = (n: number) => Number(n || 0).toLocaleString('vi-VN')
 const rowAmt = (r: any) => (Number(r.qty) || 0) * (Number(r.price) || 0)
 
 function initFormData(tpl: FormTpl, u: User): Record<string, any> {
-  const base = { tpl, dept: u.department ?? '', position: '', empCode: '' }
+  const base = { tpl, dept: u.department ?? '', company: u.company ?? '', position: '', empCode: '' }
   if (tpl === 'nghiphep') {
     return { ...base, company: u.company ?? '', joinDate: '', leaveType: 'phep', leaveOther: '', fromDate: '', toDate: '', totalDays: '', session: 'full', reason: '',
       handoverId: '', handoverPosition: '', handoverDept: '', handoverContent: '', phone: '', email: '' }
@@ -11017,7 +11017,17 @@ function FormDocBody({ tpl, f, set, ro, users, requester, code, dateText }: {
   ) : (
     <>
       <p className="font-bold text-gray-500">TẬP ĐOÀN KHÔI NGUYÊN INVESTMENT (KNI)</p>
-      <p className="font-bold text-gray-500">CÔNG TY {(requester?.company || '').toUpperCase()} – {(f.dept || requester?.department || '').toUpperCase()}</p>
+      <div className="flex items-center gap-2 font-bold text-gray-500 flex-wrap">
+        <span>CÔNG TY</span>
+        {ro ? <span>{(f.company || requester?.company || '').toUpperCase()}</span> : (
+          <select value={f.company ?? ''} onChange={e => set({ company: e.target.value })} className="border-b border-dashed border-gray-300 bg-transparent outline-none font-bold" style={ink}>
+            <option value="">-- chọn --</option>
+            {f.company && !COMPANIES.includes(f.company) && <option value={f.company}>{String(f.company).toUpperCase()}</option>}
+            {COMPANIES.map(c => <option key={c} value={c}>{c.toUpperCase()}</option>)}
+          </select>
+        )}
+        <span>– {(f.dept || requester?.department || '').toUpperCase()}</span>
+      </div>
       <div className="grid grid-cols-3 border border-black my-5">
         <div className="p-3 text-xs border-r border-black flex items-center">Số/No: <span className="ml-1 font-mono text-gray-500">{code ?? 'RTASK… (tự sinh khi gửi)'}</span></div>
         <div className="col-span-2 p-3 text-center">
@@ -11288,6 +11298,13 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
   const [kttId, setKttId] = draft.useS('kttId', '')
   const [gdId, setGdId] = draft.useS('gdId', '')
   const [gdCompany, setGdCompany] = draft.useS('gdCompany', '')
+    // Chọn công ty ở đầu form thì "Giám đốc công ty" bên dưới tự theo công ty đó (giống Tờ trình)
+  const gdSynced = useRef(false)
+  useEffect(() => {
+    if (!gdSynced.current) { gdSynced.current = true; if (!gdCompany && f.company) setGdCompany(f.company); return }
+    if (f.company) setGdCompany(f.company)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [f.company])
   useEffect(() => {
     setRecipientId(prev => prev || defaultHeadOf(users, currentUser))
     setKttId(prev => prev || defaultChiefAccountant(users, currentUser.id))
