@@ -13594,12 +13594,14 @@ function FilePreviewHost() {
   const [src, setSrc] = useState<PreviewSrc | null>(null)
   const [loading, setLoading] = useState(false)
   const [url, setUrl] = useState('')   // blob URL dùng cho ảnh, PDF và nút Tải về
-  const [kind, setKind] = useState<'image' | 'pdf' | 'text' | 'html' | 'none'>('none')
+  const [kind, setKind] = useState<'image' | 'pdf' | 'text' | 'html' | 'docx' | 'none'>('none')
   const [text, setText] = useState('')
   const [html, setHtml] = useState('')
   const [sheets, setSheets] = useState<{ name: string; html: string }[]>([])
   const [sheetIdx, setSheetIdx] = useState(0)
   const [err, setErr] = useState('')
+  const [docxBlob, setDocxBlob] = useState<Blob | null>(null)
+  const docxRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const on = (e: Event) => setSrc((e as CustomEvent<PreviewSrc>).detail)
@@ -13617,7 +13619,7 @@ function FilePreviewHost() {
     if (!src) return
     let alive = true
     let objUrl = ''
-    setLoading(true); setErr(''); setKind('none'); setText(''); setHtml(''); setSheets([]); setSheetIdx(0); setUrl('')
+    setLoading(true); setErr(''); setKind('none'); setText(''); setHtml(''); setSheets([]); setSheetIdx(0); setUrl(''); setDocxBlob(null)
     ;(async () => {
       try {
         let blob: Blob
@@ -13643,11 +13645,8 @@ function FilePreviewHost() {
           setSheets(wb.SheetNames.slice(0, 10).map(n => ({ name: n, html: XLSX.utils.sheet_to_html(wb.Sheets[n]) })))
           setKind('html')
         } else if (ext === 'docx') {
-          const mod: any = await import('mammoth/mammoth.browser')
-          const mammoth = mod.default ?? mod
-          const r = await mammoth.convertToHtml({ arrayBuffer: await typed.arrayBuffer() })
-          setHtml(r.value)
-          setKind('html')
+          setDocxBlob(typed)
+          setKind('docx')
         } else setKind('none')
       } catch (e: any) {
         if (alive) setErr(e?.message ?? 'Không xem trước được file này. Bấm Tải về để mở.')
@@ -13657,6 +13656,19 @@ function FilePreviewHost() {
     })()
     return () => { alive = false; if (objUrl) URL.revokeObjectURL(objUrl) }
   }, [src])
+  
+    // File Word: dựng lại đúng định dạng gốc (font, cỡ chữ, in đậm, màu, bảng, ảnh, từng trang)
+  useEffect(() => {
+    if (kind !== 'docx' || !docxBlob || loading) return
+    const box = docxRef.current
+    if (!box) return
+    let alive = true
+    box.innerHTML = ''
+    import('docx-preview')
+      .then(m => m.renderAsync(docxBlob, box, undefined, { className: 'docx', inWrapper: true, breakPages: true, useBase64URL: true } as any))
+      .catch(e => { if (alive) setErr('Không hiển thị được file Word này: ' + (e?.message ?? '') + '. Bấm Tải về để mở.') })
+    return () => { alive = false }
+  }, [kind, docxBlob, loading])
 
   if (!src) return null
   const download = () => {
@@ -13679,7 +13691,7 @@ function FilePreviewHost() {
           {!loading && err && <p className="text-sm text-center py-10 px-4" style={{ color: '#dc2626' }}>{err}</p>}
           {!loading && !err && kind === 'image' && <img src={url} alt={src.name} className="mx-auto max-w-full p-2" style={{ maxHeight: '100%', objectFit: 'contain' }} />}
           {!loading && !err && kind === 'pdf' && <iframe src={url} title={src.name} className="w-full h-full border-0" />}
-          {!loading && !err && kind === 'text' && <pre className="p-4 text-xs whitespace-pre-wrap" style={{ color: '#111827', background: '#fff', minHeight: '100%' }}>{text}</pre>}
+          {!loading && !err && kind === 'docx' && <div ref={docxRef} className="p-3 overflow-auto" />}
           {!loading && !err && kind === 'html' && (
             <div style={{ background: '#fff', minHeight: '100%' }}>
               {sheets.length > 1 && (
