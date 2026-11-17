@@ -10665,7 +10665,6 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: {
   const [account, setAccount] = draft.useS('account', '')
   const [bankName, setBankName] = draft.useS('bankName', '')
   const [branch, setBranch] = draft.useS('branch', '')
-  const [thongTinKhac, setThongTinKhac] = draft.useS('thongTinKhac', '')
   const [files, setFiles] = useState<File[]>([])
   const [driveUrl, setDriveUrl] = draft.useS('driveUrl', '')
   const [recipientId, setRecipientId] = draft.useS('recipientId', '')
@@ -10749,7 +10748,6 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: {
     const formData = {
       dept, payMethod, dateText, rows: cleanRows,
       bank: payMethod === 'bank' ? { owner: owner.trim(), account: account.trim(), bankName: bankName.trim(), branch: branch.trim() } : null,
-      thongTinKhac: thongTinKhac.trim(),
       bangChu: vnMoneyWords(total), total, relatedCodes,
     }
 
@@ -12848,20 +12846,13 @@ function ProposalDnttView({ p, users, currentUserId, onClose, canAct, onApprove,
                 ))}
                 {f.payMethod === 'bank' && f.bank && (
                   <tr>
-                    <td className={td} colSpan={7}>
+                    <td className={td}></td>
+                    <td className={td} colSpan={6}>
                       <p className="font-bold underline">THÔNG TIN CHUYỂN KHOẢN:</p>
                       <p>- Tên chủ tài khoản: {f.bank.owner}</p>
                       <p>- Số tài khoản: {f.bank.account}</p>
                       <p>- Tên ngân hàng: {f.bank.bankName}</p>
                       <p>- Tại chi nhánh: {f.bank.branch}</p>
-                    </td>
-                  </tr>
-                )}
-                {f.thongTinKhac && (
-                  <tr>
-                    <td className={td} colSpan={7}>
-                      <p className="font-bold underline">THÔNG TIN KHÁC:</p>
-                      <p className="whitespace-pre-wrap">{f.thongTinKhac}</p>
                     </td>
                   </tr>
                 )}
