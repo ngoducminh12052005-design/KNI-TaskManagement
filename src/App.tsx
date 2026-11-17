@@ -2685,8 +2685,8 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
               <td className={td}>
                 <div className="flex gap-2">
                   <input type="date" value={form.startDate} onChange={e => patchForm({ startDate: e.target.value }, { startDate: e.target.value })} className={cell} style={ink} />
-                  <input type="time" value={form.startTime ?? ''} onChange={e => patchForm({ startTime: e.target.value })} className={cell}
-                    style={{ ...ink, maxWidth: 110 }} title="Giờ bắt đầu (để trống = tính ngay khi giao)" />
+                  <input type="time" value={form.startTime || new Date(Date.now() + VN_OFFSET_MS).toISOString().slice(11, 16)} onChange={e => patchForm({ startTime: e.target.value })} className={cell}
+                    style={{ ...ink, maxWidth: 110 }} title="Giờ bắt đầu (để trống = tự chạy theo giờ hiện tại; chọn giờ khác thì đứng yên ở giờ đó)" />
                 </div>
                 {form.slaLevel && (SLA_LEVELS as any)[form.slaLevel] && (() => {
                   const from = slaStartAfterOffDays(Math.max(Date.now(), startMs(form.startDate, form.startTime)), form.company, !!form.startTime)
