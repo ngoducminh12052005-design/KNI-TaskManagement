@@ -10497,7 +10497,7 @@ function ProposalDocView({ p, users, currentUserId, onClose, canAct, onApprove, 
                     placeholder="Ý kiến của bạn (VD: chi phí quá cao, đề nghị xem xét lại...)"
                     className="mt-2 w-full text-xs border border-amber-300 rounded p-1.5 outline-none focus:border-amber-500 bg-amber-50" style={ink} />
                 ) : (
-                  s.note && <p className="mt-1 text-[11px] italic" style={{ color: s.status === 'revision' ? '#b45309' : '#374151' }}>“{s.note}”</p>
+                  s.note && <p className="mt-1 text-[11px] italic break-words" style={{ color: s.status === 'revision' ? '#b45309' : '#374151' }}>“{s.note}”</p>
                 )}
               </div>
             )
@@ -11765,7 +11765,7 @@ function ProposalFormDocView({ p, users, currentUserId, onClose, canAct, onAppro
                       placeholder="Ý kiến của bạn (VD: cần bổ sung báo giá...)"
                       className="mt-2 w-full text-xs border border-amber-300 rounded p-1.5 outline-none focus:border-amber-500 bg-amber-50" style={ink} />
                   ) : (
-                    s.note && <p className="mt-1 italic" style={{ color: s.status === 'revision' ? '#b45309' : '#374151' }}>“{s.note}”</p>
+                    s.note && <p className="mt-1 italic break-words" style={{ color: s.status === 'revision' ? '#b45309' : '#374151' }}>“{s.note}”</p>
                   )}
                 </div>
               )
@@ -12779,7 +12779,7 @@ function ProposalDnttView({ p, users, currentUserId, onClose, canAct, onApprove,
                       placeholder="Ý kiến của bạn (VD: số tiền chưa khớp hóa đơn...)"
                       className="mt-2 w-full text-xs border border-amber-300 rounded p-1.5 outline-none focus:border-amber-500 bg-amber-50" style={ink} />
                   ) : (
-                    s.note && <p className="mt-1 italic" style={{ color: s.status === 'revision' ? '#b45309' : '#374151' }}>“{s.note}”</p>
+                    s.note && <p className="mt-1 italic break-words" style={{ color: s.status === 'revision' ? '#b45309' : '#374151' }}>“{s.note}”</p>
                   )}
                 </div>
               )
@@ -13403,7 +13403,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
                           <Badge s={s.status} />
                           {s.decidedAt && <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{fmt(s.decidedAt)}</span>}
                         </div>
-                        {s.note && <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}><LinkifyCodes text={s.note.replace(HD_REMARK_TAG, '⚠️ Lưu ý:')} /></p>}
+                        {s.note && <p className="text-[11px] mt-0.5 break-words" style={{ color: 'var(--text-muted)' }}><LinkifyCodes text={s.note.replace(HD_REMARK_TAG, '⚠️ Lưu ý:')} /></p>}
                       </div>
                     </div>
                   ))}
@@ -13414,7 +13414,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
                 <div className="space-y-2">
                   {events.map((e, i) => (
                     <div key={i}>
-                      <p className="text-xs whitespace-pre-line" style={{ color: 'var(--text-primary)' }}>{e.text.replace(HD_REMARK_TAG, '⚠️ Lưu ý:')}</p>
+                      <p className="text-xs whitespace-pre-line break-words" style={{ color: 'var(--text-primary)' }}>{e.text.replace(HD_REMARK_TAG, '⚠️ Lưu ý:')}</p>
                       <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{fmt(e.at)}</p>
                     </div>
                   ))}
@@ -13522,7 +13522,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
                         <Badge s={s.status} />
                         {s.decidedAt && <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{fmt(s.decidedAt)}</span>}
                       </div>
-                      {s.note && <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}><LinkifyCodes text={s.note} /></p>}
+                      {s.note && <p className="text-[11px] mt-0.5 break-words" style={{ color: 'var(--text-muted)' }}><LinkifyCodes text={s.note} /></p>}
                     </div>
                   </div>
                 ))}
@@ -13534,7 +13534,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
               <div className="space-y-2">
                 {events.map((e, i) => (
                   <div key={i}>
-                    <p className="text-xs whitespace-pre-line" style={{ color: 'var(--text-primary)' }}>{e.text}</p>
+                    <p className="text-xs whitespace-pre-line break-words" style={{ color: 'var(--text-primary)' }}>{e.text}</p>
                     <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{fmt(e.at)}</p>
                   </div>
                 ))}
@@ -18060,6 +18060,48 @@ function UserAdminView({ currentUser, users }: { currentUser: User; users: User[
   )
 }
 
+// ===== Cảnh báo task sắp hết hạn SLA (còn ≤30 phút): chữ chạy ở đầu trang, báo trình duyệt khi còn 30p và 15p =====
+function SlaWarningBar({ tasks, currentUser }: { tasks: Task[]; currentUser: User }) {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 20000); return () => clearInterval(t) }, [])
+  const notifiedRef = useRef<Set<string>>(new Set())
+
+  const near = useMemo(() => {
+    return tasks
+      .filter(t => t.assignedTo.includes(currentUser.id) && t.status !== 'completed' && t.workStatus !== 'complete' && t.workStatus !== 'pending')
+      .map(t => {
+        const dl = getSlaDeadline(t)
+        if (!dl) return null
+        const minutesLeft = Math.round((dl.getTime() - now) / 60000)
+        return { t, minutesLeft }
+      })
+      .filter((x): x is { t: Task; minutesLeft: number } => !!x && x.minutesLeft >= 0 && x.minutesLeft <= 30)
+      .sort((a, b) => a.minutesLeft - b.minutesLeft)
+  }, [tasks, currentUser.id, now])
+
+  // Mỗi task chỉ báo trình duyệt 1 lần lúc chạm mốc 30 phút và 1 lần lúc chạm mốc 15 phút
+  useEffect(() => {
+    for (const { t, minutesLeft } of near) {
+      const mark = minutesLeft <= 15 ? `${t.id}-15` : `${t.id}-30`
+      if (!notifiedRef.current.has(mark)) {
+        notifiedRef.current.add(mark)
+        showBrowserNotification(`⏰ Task [${t.taskCode ?? t.title}] còn ${minutesLeft} phút nữa hết hạn SLA!`)
+      }
+    }
+  }, [near])
+
+  if (near.length === 0) return null
+  const text = near.map(({ t, minutesLeft }) => `⏰ [${t.taskCode ?? t.title}] ${t.title} — còn ${minutesLeft} phút nữa hết hạn SLA`).join('     •     ')
+  return (
+    <div className="flex-shrink-0 overflow-hidden" style={{ height: 30, background: '#dc2626' }}>
+      <style>{'@keyframes kniSlaMarquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}'}</style>
+      <div className="flex items-center h-full whitespace-nowrap text-white text-xs font-bold" style={{ width: 'max-content', animation: 'kniSlaMarquee 22s linear infinite' }}>
+        <span className="px-6">{text}</span>
+        <span className="px-6">{text}</span>
+      </div>
+    </div>
+  )
+}
 
 // ==================== APP SHELL ====================
 
@@ -18560,6 +18602,8 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
             </button>
           </div>
         </div>
+
+        <SlaWarningBar tasks={tasks} currentUser={currentUser} />
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto" style={{ background: 'var(--bg-app)' }}>{renderView()}</div>
