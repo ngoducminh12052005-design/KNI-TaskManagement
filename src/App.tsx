@@ -10577,6 +10577,7 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: {
   const [content, setContent] = draft.useS('content', '')
   const [relatedInput, setRelatedInput] = draft.useS('relatedInput', '')
   const [payMethod, setPayMethod] = draft.useS<'cash' | 'bank' | ''>('payMethod', '')
+  const [payDeadline, setPayDeadline] = draft.useS('payDeadline', '')   // Thời hạn thanh toán (YYYY-MM-DD)
   const [rows, setRows] = draft.useS<DnttRow[]>('rows', [{ desc: '', unit: '', qty: '1', price: '', invoice: '' }])
   const [owner, setOwner] = draft.useS('owner', '')
   const [account, setAccount] = draft.useS('account', '')
@@ -10663,7 +10664,7 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: {
       amount: rowAmount(r),
     }))
     const formData = {
-      dept, payMethod, dateText, rows: cleanRows,
+      dept, payMethod, payDeadline, dateText, rows: cleanRows,
       bank: payMethod === 'bank' ? { owner: owner.trim(), account: account.trim(), bankName: bankName.trim(), branch: branch.trim() } : null,
       bangChu: vnMoneyWords(total), total, relatedCodes,
     }
@@ -10741,6 +10742,11 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: {
               <input value={relatedInput} onChange={e => setRelatedInput(e.target.value)}
                 placeholder="VD: RTASK181026-01 (nhiều số thì cách nhau bằng dấu phẩy)"
                 className={line} style={ink} />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="shrink-0">Thời hạn thanh toán <i className="text-blue-600">(Payment due date)</i>:</span>
+              <input type="date" value={payDeadline} min={new Date().toLocaleDateString('en-CA')} onChange={e => setPayDeadline(e.target.value)}
+                className={`${line} max-w-[180px]`} style={ink} />
             </div>
             <div>
               <p>Hình thức thanh toán <i className="text-blue-600">(Payment method)</i>:</p>
@@ -12713,6 +12719,9 @@ function ProposalDnttView({ p, users, currentUserId, onClose, canAct, onApprove,
                   <span key={c}>{i > 0 && ', '}<ProposalCodeLink code={c} /></span>
                 ))}
               </p>
+            )}
+            {f.payDeadline && (
+              <p>Thời hạn thanh toán <i className="text-blue-600">(Payment due date)</i>: <b>{new Date(f.payDeadline + 'T00:00:00').toLocaleDateString('vi-VN')}</b></p>
             )}
             <div>
               <p>Hình thức thanh toán <i className="text-blue-600">(Payment method)</i>:</p>
