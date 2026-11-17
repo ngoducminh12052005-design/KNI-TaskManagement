@@ -10665,6 +10665,7 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: {
   const [account, setAccount] = draft.useS('account', '')
   const [bankName, setBankName] = draft.useS('bankName', '')
   const [branch, setBranch] = draft.useS('branch', '')
+  const [thongTinKhac, setThongTinKhac] = draft.useS('thongTinKhac', '')
   const [files, setFiles] = useState<File[]>([])
   const [driveUrl, setDriveUrl] = draft.useS('driveUrl', '')
   const [recipientId, setRecipientId] = draft.useS('recipientId', '')
@@ -10746,8 +10747,9 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: {
       amount: rowAmount(r),
     }))
     const formData = {
-      dept, payMethod, payDeadline, dateText, rows: cleanRows,
+      dept, payMethod, dateText, rows: cleanRows,
       bank: payMethod === 'bank' ? { owner: owner.trim(), account: account.trim(), bankName: bankName.trim(), branch: branch.trim() } : null,
+      thongTinKhac: thongTinKhac.trim(),
       bangChu: vnMoneyWords(total), total, relatedCodes,
     }
 
@@ -10873,20 +10875,26 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: {
                 ))}
                 {payMethod === 'bank' && (
                   <tr>
-                    <td className={td}></td>
-                    <td className={td} colSpan={6}>
+                    <td className={td} colSpan={8}>
                       <p className="font-bold underline mb-1">THÔNG TIN CHUYỂN KHOẢN:</p>
                       <div className="space-y-1">
-                        <div className="flex gap-2 items-center"><span className="shrink-0">- Tên chủ tài khoản:</span><input value={owner} onChange={e => setOwner(e.target.value)} className={line} style={ink} /></div>
-                        <div className="flex gap-2 items-center"><span className="shrink-0">- Số tài khoản:</span><input value={account} onChange={e => setAccount(e.target.value)} className={line} style={ink} /></div>
-                        <div className="flex gap-2 items-center"><span className="shrink-0">- Tên ngân hàng:</span><input value={bankName} onChange={e => setBankName(e.target.value)} className={line} style={ink} /></div>
-                        <div className="flex gap-2 items-center"><span className="shrink-0">- Tại chi nhánh:</span><input value={branch} onChange={e => setBranch(e.target.value)} className={line} style={ink} /></div>
+                        <div className="flex gap-1 items-baseline"><span className="shrink-0">- Tên chủ tài khoản:</span><input value={owner} onChange={e => setOwner(e.target.value)} className={line} style={{ ...ink, maxWidth: 320 }} /></div>
+                        <div className="flex gap-1 items-baseline"><span className="shrink-0">- Số tài khoản:</span><input value={account} onChange={e => setAccount(e.target.value)} className={line} style={{ ...ink, maxWidth: 220 }} /></div>
+                        <div className="flex gap-1 items-baseline"><span className="shrink-0">- Tên ngân hàng:</span><input value={bankName} onChange={e => setBankName(e.target.value)} className={line} style={{ ...ink, maxWidth: 280 }} /></div>
+                        <div className="flex gap-1 items-baseline"><span className="shrink-0">- Tại chi nhánh:</span><input value={branch} onChange={e => setBranch(e.target.value)} className={line} style={{ ...ink, maxWidth: 320 }} /></div>
                       </div>
                     </td>
                   </tr>
                 )}
                 <tr>
-                  <td className={`${td} font-bold text-center`} colSpan={5}>TỔNG CỘNG (TOTAL)</td>
+                  <td className={td} colSpan={8}>
+                    <p className="font-bold underline mb-1">THÔNG TIN KHÁC:</p>
+                    <textarea value={thongTinKhac} onChange={e => setThongTinKhac(e.target.value)} rows={3}
+                      placeholder="Điều khoản thanh toán, tiến độ, bảo hành, phạt chậm... (nếu có)" className="w-full bg-transparent outline-none resize-none" style={ink} />
+                  </td>
+                </tr>
+                <tr>
+                  <td className={`${td} font-bold text-center`} colSpan={6}>TỔNG CỘNG (TOTAL)</td>
                   <td className={`${td} font-bold text-right`}>{money(total)}</td>
                   <td className={td}></td>
                 </tr>
@@ -12835,13 +12843,20 @@ function ProposalDnttView({ p, users, currentUserId, onClose, canAct, onApprove,
                 ))}
                 {f.payMethod === 'bank' && f.bank && (
                   <tr>
-                    <td className={td}></td>
-                    <td className={td} colSpan={6}>
+                    <td className={td} colSpan={7}>
                       <p className="font-bold underline">THÔNG TIN CHUYỂN KHOẢN:</p>
                       <p>- Tên chủ tài khoản: {f.bank.owner}</p>
                       <p>- Số tài khoản: {f.bank.account}</p>
                       <p>- Tên ngân hàng: {f.bank.bankName}</p>
                       <p>- Tại chi nhánh: {f.bank.branch}</p>
+                    </td>
+                  </tr>
+                )}
+                {f.thongTinKhac && (
+                  <tr>
+                    <td className={td} colSpan={7}>
+                      <p className="font-bold underline">THÔNG TIN KHÁC:</p>
+                      <p className="whitespace-pre-wrap">{f.thongTinKhac}</p>
                     </td>
                   </tr>
                 )}
