@@ -14519,6 +14519,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   const [docProposal, setDocProposal] = useState<Proposal | null>(null)
   // Mở một tờ trình từ link RTASK trong trang khác: nhớ trang đang xem để đóng xong thì quay lại đúng trang đó
   const [backTo, setBackTo] = useState<{ p: Proposal; mode: 'detail' | 'doc' } | null>(null)
+  const [popupDoc, setPopupDoc] = useState<Proposal | null>(null)   // tờ trình / phiếu mở dạng popup ngay trên phiếu đang xem
   const goBack = () => {
     if (!backTo) return
     const b = backTo
@@ -14585,6 +14586,9 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   const code = raw.trim().toUpperCase()
   const target = proposals.find(x => (x.code ?? '').toUpperCase() === code)
   if (!target) { alert(`Không tìm thấy tờ trình ${code}, hoặc bạn không có quyền xem.`); return }
+  // Đang mở một phiếu (VD phiếu hợp đồng) mà bấm mã tờ trình: hiện tờ trình dạng popup ngay trên phiếu đó, đóng popup là về lại phiếu cũ
+  const targetIsDoc = target.kind === 'totrinh' || target.kind === 'dntt' || isFormDoc(target)
+  if ((detailProposal || docProposal) && targetIsDoc && (detailProposal?.id ?? docProposal?.id) !== target.id) { setPopupDoc(target); return }
   if (detailProposal && detailProposal.id !== target.id) setBackTo({ p: detailProposal, mode: 'detail' })
   else if (docProposal && docProposal.id !== target.id) setBackTo({ p: docProposal, mode: 'doc' })
   if (target.kind === 'totrinh' || target.kind === 'dntt' || isFormDoc(target)) { setDetailProposal(null); setDocProposal(target) }
@@ -15142,6 +15146,23 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
           onRequestReview: async (note: string) => { await handleRequestReview(cur, note) },
         }
         return cur.kind === 'dntt' ? <ProposalDnttView {...common} /> : isFormDoc(cur) ? (cur.formData?.tpl === 'hopdong' ? <ProposalHopDongView {...common} /> : <ProposalFormDocView {...common} />) : <ProposalDocView {...common} onEdit={cur.kind === 'totrinh' ? () => { setDocProposal(null); setEditingDoc(cur) } : undefined} />
+      })()}
+            {popupDoc && (() => {
+        const cur = proposals.find(x => x.id === popupDoc.id) ?? popupDoc
+        const common = {
+          p: cur, users, currentUserId: currentUser.id, onClose: () => setPopupDoc(null),
+          canAct: isMyTurn(cur) && cur.status === 'pending',
+          onApprove: async (note: string) => { await handleApprove(cur, note) },
+          onReject: async (note: string) => { await handleReject(cur, note) },
+          onRequestReview: async (note: string) => { await handleRequestReview(cur, note) },
+        }
+        return (
+          <div className="kni-popup-doc">
+            <style>{'.kni-popup-doc > .fixed:not(.kni-backdrop){top:4vh!important;bottom:4vh!important;left:50%!important;right:auto!important;width:min(1000px,94vw)!important;transform:translateX(-50%);border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.5)}'}</style>
+            <div className="kni-backdrop fixed inset-0 z-50" style={{ background: 'rgba(0,0,0,0.55)' }} onClick={() => setPopupDoc(null)} />
+            {cur.kind === 'dntt' ? <ProposalDnttView {...common} /> : isFormDoc(cur) ? (cur.formData?.tpl === 'hopdong' ? <ProposalHopDongView {...common} /> : <ProposalFormDocView {...common} />) : <ProposalDocView {...common} />}
+          </div>
+        )
       })()}
       {editingDoc && (
         <ProposalDocForm currentUser={currentUser} users={users} editing={editingDoc} onClose={() => { const id = editingDoc.id; setEditingDoc(null); setOpenNewId(id) }} />
