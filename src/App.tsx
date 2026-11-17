@@ -10876,8 +10876,8 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: {
                 {payMethod === 'bank' && (
                   <tr>
                     <td className={td} colSpan={8}>
-                      <p className="font-bold underline mb-1">THÔNG TIN CHUYỂN KHOẢN:</p>
-                      <div className="space-y-1">
+                      <p className="font-bold underline mb-0.5">THÔNG TIN CHUYỂN KHOẢN:</p>
+                      <div className="space-y-0.5">
                         <div className="flex gap-1 items-baseline"><span className="shrink-0">- Tên chủ tài khoản:</span><input value={owner} onChange={e => setOwner(e.target.value)} className={line} style={{ ...ink, maxWidth: 320 }} /></div>
                         <div className="flex gap-1 items-baseline"><span className="shrink-0">- Số tài khoản:</span><input value={account} onChange={e => setAccount(e.target.value)} className={line} style={{ ...ink, maxWidth: 220 }} /></div>
                         <div className="flex gap-1 items-baseline"><span className="shrink-0">- Tên ngân hàng:</span><input value={bankName} onChange={e => setBankName(e.target.value)} className={line} style={{ ...ink, maxWidth: 280 }} /></div>
@@ -10886,13 +10886,15 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: {
                     </td>
                   </tr>
                 )}
-                <tr>
-                  <td className={td} colSpan={8}>
-                    <p className="font-bold underline mb-1">THÔNG TIN KHÁC:</p>
-                    <textarea value={thongTinKhac} onChange={e => setThongTinKhac(e.target.value)} rows={3}
-                      placeholder="Điều khoản thanh toán, tiến độ, bảo hành, phạt chậm... (nếu có)" className="w-full bg-transparent outline-none resize-none" style={ink} />
-                  </td>
-                </tr>
+                {!!payMethod && (
+                  <tr>
+                    <td className={td} colSpan={8}>
+                      <p className="font-bold underline mb-0.5">THÔNG TIN KHÁC:</p>
+                      <textarea value={thongTinKhac} onChange={e => setThongTinKhac(e.target.value)} rows={2}
+                        placeholder="Điều khoản thanh toán, tiến độ, bảo hành, phạt chậm... (nếu có, có thể để trống)" className="w-full bg-transparent outline-none resize-none" style={ink} />
+                    </td>
+                  </tr>
+                )}
                 <tr>
                   <td className={`${td} font-bold text-center`} colSpan={6}>TỔNG CỘNG (TOTAL)</td>
                   <td className={`${td} font-bold text-right`}>{money(total)}</td>
