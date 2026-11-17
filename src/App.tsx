@@ -10566,6 +10566,92 @@ function vnMoneyWords(input: number): string {
 type DnttRow = { desc: string; unit: string; qty: string; price: string; invoice: string }
 const DNTT_ROLES = ['Trưởng bộ phận/ OM/ Quản lý đơn vị', 'Kế toán trưởng', 'Ban Giám đốc/ Ban Giám Hiệu']
 
+// ===== Chọn "Tờ trình liên quan" cho Đề nghị thanh toán =====
+// Bấm ô để chọn trong danh sách tờ trình hiện có (tick nhiều tờ). Tờ đã chọn hiện "MÃ: tên", bấm vào thì mở popup xem tờ trình.
+type RelatedRow = { id: string; code: string; title: string; status: string; submittedBy: string; createdAt: string }
+function RelatedProposalPicker({ value, onChange, users }: { value: string; onChange: (v: string) => void; users: User[] }) {
+  const openCode = useContext(ProposalLinkContext)   // bấm mã -> trang Tờ trình mở popup xem
+  const selected = Array.from(new Set((value.match(/\bR-?TASK\d{6}-\d{2,}/gi) ?? []).map(c => c.toUpperCase())))
+  const [rows, setRows] = useState<RelatedRow[]>([])
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const [pick, setPick] = useState<string[]>([])
+  const nameOf = (id: string) => users.find(u => u.id === id)?.name ?? ''
+  useEffect(() => {
+    let alive = true
+    supabase.from('proposals').select('id, code, title, status, submitted_by, created_at')
+      .eq('kind', 'totrinh').not('code', 'is', null).order('created_at', { ascending: false }).limit(500)
+      .then(({ data }) => {
+        if (!alive || !data) return
+        setRows(data.map((p: any) => ({ id: p.id, code: String(p.code).toUpperCase(), title: p.title ?? '', status: p.status, submittedBy: p.submitted_by, createdAt: p.created_at })))
+      })
+    return () => { alive = false }
+  }, [])
+  const titleOf = (c: string) => rows.find(r => r.code === c)?.title ?? ''
+  const openPicker = () => { setPick(selected); setQ(''); setOpen(true) }
+  const toggle = (c: string) => setPick(p => (p.includes(c) ? p.filter(x => x !== c) : [...p, c]))
+  const confirm = () => { onChange(pick.join(', ')); setOpen(false) }
+  const statusText = (s: string) => (s === 'approved' ? '✅ Đã duyệt' : s === 'rejected' ? '❌ Từ chối' : s === 'revision' ? '🔁 Xem xét lại' : '⏳ Chờ duyệt')
+  const shown = rows.filter(r => {
+    const t = q.trim().toLowerCase()
+    return !t || r.code.toLowerCase().includes(t) || r.title.toLowerCase().includes(t) || nameOf(r.submittedBy).toLowerCase().includes(t)
+  })
+
+  return (
+    <div className="flex-1 min-w-0" onClick={e => e.stopPropagation()}>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {selected.map(c => (
+          <span key={c} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full" style={{ background: '#ede9fe' }}>
+            <button type="button" onClick={() => openCode(c)} title="Bấm để xem tờ trình" className="underline font-semibold text-left" style={{ color: '#2563eb' }}>
+              <span className="font-mono">{c}</span>{titleOf(c) ? `: ${titleOf(c).slice(0, 60)}` : ''}
+            </button>
+            <button type="button" onClick={() => onChange(selected.filter(x => x !== c).join(', '))} className="text-red-500" title="Bỏ chọn">✕</button>
+          </span>
+        ))}
+        <button type="button" onClick={openPicker}
+          className="flex-1 min-w-[180px] text-left text-xs py-0.5 border-b border-dashed border-gray-300 hover:text-blue-600"
+          style={{ color: '#9ca3af' }}>
+          {selected.length === 0 ? 'Bấm để chọn tờ trình liên quan...' : '＋ Chọn thêm / đổi tờ trình'}
+        </button>
+      </div>
+
+      {open && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={() => setOpen(false)}>
+          <div className="w-full max-w-xl rounded-xl flex flex-col" style={{ background: '#fff', color: '#111827', maxHeight: '80vh', fontFamily: 'Inter, sans-serif' }} onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #e5e7eb' }}>
+              <h3 className="text-sm font-bold">📜 Chọn tờ trình liên quan</h3>
+              <button type="button" onClick={() => setOpen(false)} className="text-lg px-2" style={{ color: '#6b7280' }}>✕</button>
+            </div>
+            <div className="px-4 pt-3">
+              <input value={q} onChange={e => setQ(e.target.value)} autoFocus placeholder="Tìm theo mã, tên tờ trình hoặc người lập..."
+                className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={{ border: '1px solid #d1d5db', color: '#111827' }} />
+            </div>
+            <div className="px-4 py-2 overflow-y-auto flex-1">
+              {shown.length === 0 && <p className="text-xs text-center py-6" style={{ color: '#6b7280' }}>{rows.length === 0 ? 'Chưa có tờ trình nào.' : 'Không có tờ trình khớp.'}</p>}
+              {shown.map(r => (
+                <div key={r.id} className="flex items-start gap-2 py-2" style={{ borderBottom: '1px solid #f3f4f6' }}>
+                  <input type="checkbox" checked={pick.includes(r.code)} onChange={() => toggle(r.code)} className="mt-1 cursor-pointer" />
+                  <button type="button" onClick={() => toggle(r.code)} className="flex-1 min-w-0 text-left">
+                    <p className="text-sm font-semibold truncate"><span className="font-mono text-xs mr-1.5" style={{ color: '#2563eb' }}>{r.code}</span>{r.title || '(chưa có tên)'}</p>
+                    <p className="text-[11px]" style={{ color: '#6b7280' }}>{nameOf(r.submittedBy) || '—'} · {new Date(r.createdAt).toLocaleDateString('vi-VN')} · {statusText(r.status)}</p>
+                  </button>
+                  <button type="button" onClick={() => openCode(r.code)} className="text-xs font-semibold shrink-0 px-1.5" style={{ color: '#2563eb' }}>👁 Xem</button>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-between gap-2 px-4 py-3" style={{ borderTop: '1px solid #e5e7eb' }}>
+              <span className="text-xs" style={{ color: '#6b7280' }}>Đã chọn {pick.length} tờ trình</span>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setOpen(false)} className="px-3 py-1.5 rounded-lg text-xs" style={{ color: '#6b7280' }}>Hủy</button>
+                <button type="button" onClick={confirm} className="px-4 py-1.5 rounded-lg text-xs font-bold text-white" style={{ background: '#7c3aed' }}>Xong</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: { draftId?: string; currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void }) {
   useBackToClose(onClose)
   const now = new Date()
@@ -10737,11 +10823,9 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: {
                 placeholder="VD: Thanh toán cước truy cập internet băng rộng tháng 08/2026"
                 className={`${line} resize-none`} style={ink} />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-start gap-2">
               <span className="shrink-0">Tờ trình liên quan <i className="text-blue-600">(Related proposal)</i>:</span>
-              <input value={relatedInput} onChange={e => setRelatedInput(e.target.value)}
-                placeholder="VD: RTASK181026-01 (nhiều số thì cách nhau bằng dấu phẩy)"
-                className={line} style={ink} />
+              <RelatedProposalPicker value={relatedInput} onChange={setRelatedInput} users={users} />
             </div>
             <div className="flex items-center gap-2">
               <span className="shrink-0">Thời hạn thanh toán <i className="text-blue-600">(Payment due date)</i>:</span>
@@ -14617,7 +14701,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   if (!target) { alert(`Không tìm thấy tờ trình ${code}, hoặc bạn không có quyền xem.`); return }
   // Đang mở một phiếu (VD phiếu hợp đồng) mà bấm mã tờ trình: hiện tờ trình dạng popup ngay trên phiếu đó, đóng popup là về lại phiếu cũ
   const targetIsDoc = target.kind === 'totrinh' || target.kind === 'dntt' || isFormDoc(target)
-  if ((detailProposal || docProposal) && targetIsDoc && (detailProposal?.id ?? docProposal?.id) !== target.id) { setPopupDoc(target); return }
+  if ((detailProposal || docProposal || showModal || resumeDraft) && targetIsDoc && (detailProposal?.id ?? docProposal?.id) !== target.id) { setPopupDoc(target); return }
   if (detailProposal && detailProposal.id !== target.id) setBackTo({ p: detailProposal, mode: 'detail' })
   else if (docProposal && docProposal.id !== target.id) setBackTo({ p: docProposal, mode: 'doc' })
   if (target.kind === 'totrinh' || target.kind === 'dntt' || isFormDoc(target)) { setDetailProposal(null); setDocProposal(target) }
@@ -15187,7 +15271,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
         }
         return (
           <div className="kni-popup-doc">
-            <style>{'.kni-popup-doc > .fixed:not(.kni-backdrop){top:4vh!important;bottom:4vh!important;left:50%!important;right:auto!important;width:min(1000px,94vw)!important;transform:translateX(-50%);border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.5)}'}</style>
+            <style>{'.kni-popup-doc > .fixed:not(.kni-backdrop){top:4vh!important;bottom:4vh!important;left:50%!important;right:auto!important;width:min(1000px,94vw)!important;transform:translateX(-50%);border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.5);z-index:301!important}.kni-popup-doc > .kni-backdrop{z-index:300!important}'}</style>
             <div className="kni-backdrop fixed inset-0 z-50" style={{ background: 'rgba(0,0,0,0.55)' }} onClick={() => setPopupDoc(null)} />
             {cur.kind === 'dntt' ? <ProposalDnttView {...common} /> : isFormDoc(cur) ? (cur.formData?.tpl === 'hopdong' ? <ProposalHopDongView {...common} /> : <ProposalFormDocView {...common} />) : <ProposalDocView {...common} />}
           </div>
