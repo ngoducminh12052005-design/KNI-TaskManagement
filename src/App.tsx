@@ -2476,13 +2476,16 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
     })
 
   // Ngày + giờ hoàn thành tự tính từ ngày bắt đầu, giờ bắt đầu và mức SLA
+  // Cứ 30 giây tính lại 1 lần: nếu giờ bắt đầu đã chọn trôi qua rồi thì Hạn hoàn thành tự cập nhật theo giờ thực tế, không bị đứng yên
+  const [slaTick, setSlaTick] = useState(0)
+  useEffect(() => { const t = setInterval(() => setSlaTick(x => x + 1), 30000); return () => clearInterval(t) }, [])
   const slaDue = useMemo(() => {
     const cfg = form.slaLevel ? (SLA_LEVELS as any)[form.slaLevel] : null
     if (!cfg || !form.startDate) return null
     const from = slaStartAfterOffDays(Math.max(Date.now(), startMs(form.startDate, form.startTime)), form.company, !!form.startTime)
     const end = addSlaSkipOffDays(from, cfg.hours * 3600000, form.company)
     return { date: vnDateKey(end), time: new Date(end + VN_OFFSET_MS).toISOString().slice(11, 16) }
-  }, [form.slaLevel, form.startDate, form.startTime, form.company])
+  }, [form.slaLevel, form.startDate, form.startTime, form.company, slaTick])
   const slaInitRef = useRef(true)
   useEffect(() => {
     if (slaInitRef.current) { slaInitRef.current = false; if (editingTask) return }   // mở sửa task cũ: giữ hạn đang có
