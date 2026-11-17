@@ -10585,7 +10585,14 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: {
   const [files, setFiles] = useState<File[]>([])
   const [driveUrl, setDriveUrl] = draft.useS('driveUrl', '')
   const [recipientId, setRecipientId] = draft.useS('recipientId', '')
-  const [extraApprovers, setExtraApprovers] = draft.useS<string[]>('extraApprovers', [])
+  const [kttId, setKttId] = draft.useS('kttId', '')                 // Kế toán trưởng
+  const [bgdIds, setBgdIds] = draft.useS<string[]>('bgdIds', [])     // Ban Giám đốc Tập đoàn (chọn 1 hoặc nhiều người)
+  // Tạo mới: để sẵn Trưởng bộ phận (của người lập) và Kế toán trưởng, muốn chọn người khác thì đổi sau
+  useEffect(() => {
+    setRecipientId(prev => prev || defaultHeadOf(users, currentUser))
+    setKttId(prev => prev || defaultChiefAccountant(users, currentUser.id))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [users.length, currentUser.id, currentUser.teamId])
   const [approvalMode, setApprovalMode] = draft.useS<'seq' | 'par'>('approvalMode', 'seq')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -10594,8 +10601,20 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: {
   const money = (n: number) => Number(n || 0).toLocaleString('vi-VN')
   const rowAmount = (r: DnttRow) => (Number(r.qty) || 0) * (Number(r.price) || 0)
   const total = rows.reduce((s, r) => s + rowAmount(r), 0)
-  const approverIds = [recipientId, ...extraApprovers.filter(id => id !== recipientId)].filter(Boolean)
-  const roleOf = (i: number) => DNTT_ROLES[i] ?? `Người duyệt ${i + 1}`
+  const approverIds = [recipientId, kttId, ...bgdIds].filter((id, i, arr) => id && arr.indexOf(id) === i)   // thứ tự duyệt: Trưởng bộ phận → Kế toán trưởng → Ban Giám đốc
+  const userOptions = () => (
+    <>
+      {TEAMS.map(t => {
+        const m = users.filter(u => u.id !== currentUser.id && u.teamId === t.id)
+        return m.length === 0 ? null : (
+          <optgroup key={t.id} label={`${t.emoji} ${t.name}`}>
+            {m.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
+          </optgroup>
+        )
+      })}
+      {users.filter(u => u.id !== currentUser.id && !TEAMS.some(t => t.id === u.teamId)).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+    </>
+  )
 
   const line = 'w-full bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500 py-0.5'
   const ink = { color: '#111827' }
@@ -10621,7 +10640,8 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: {
     if (cleanRows.length === 0 || total <= 0) { setError('Vui lòng nhập ít nhất một dòng chi tiết có số tiền.'); return }
     if (!payMethod) { setError('Vui lòng chọn hình thức thanh toán.'); return }
     if (payMethod === 'bank' && (!owner.trim() || !account.trim())) { setError('Vui lòng nhập tên chủ tài khoản và số tài khoản.'); return }
-    if (!recipientId) { setError('Vui lòng chọn người duyệt đầu tiên.'); return }
+    if (!recipientId) { setError('Vui lòng chọn Trưởng bộ phận.'); return }
+    if (!kttId) { setError('Vui lòng chọn Kế toán trưởng.'); return }
 
     const relatedCodes = Array.from(new Set((relatedInput.match(/\bR-?TASK\d{6}-\d{2,}/gi) ?? []).map(c => c.toUpperCase())))
     if (relatedInput.trim() && relatedCodes.length === 0) { setError('Số tờ trình liên quan phải có dạng RTASKddmmyy-NN.'); return }
@@ -10795,59 +10815,56 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: {
               <AttachBox files={files} setFiles={setFiles} accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" driveUrl={driveUrl} setDriveUrl={setDriveUrl} />
           </div>
 
-          <div className="grid gap-3 mt-8 text-center text-xs" style={{ gridTemplateColumns: `repeat(${Math.min(4, 1 + Math.max(approverIds.length, 1))}, minmax(0, 1fr))` }}>
-            <div>
-              <p className="font-bold">Người đề nghị</p>
-              <p className="italic text-blue-600">(Requested by)</p>
-              <p className="mt-8 font-semibold">{currentUser.name}</p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-8 text-center text-xs">
+            <div className="flex flex-col">
+              <div style={{ minHeight: 96 }}>
+                <p className="font-bold">Người đề nghị</p>
+                <p className="italic text-blue-600">(Requested by)</p>
+              </div>
+              <p className="mt-2 font-semibold">{currentUser.name}</p>
               <p className="text-gray-500">Ngày/ Date {dateText}</p>
             </div>
-            {(approverIds.length > 0 ? approverIds : ['']).map((id, i) => (
-              <div key={i}>
-                <p className="font-bold">{roleOf(i)}</p>
-                <p className="italic text-blue-600">&nbsp;</p>
-                <p className="mt-8 font-semibold">{id ? nameOf(id) : '…………'}</p>
-                <p className="text-gray-500">Ngày/ Date ……/……/……</p>
+            <div className="flex flex-col">
+              <div style={{ minHeight: 96 }}>
+                <p className="font-bold">Trưởng bộ phận/ OM/ Quản lý đơn vị</p>
               </div>
-            ))}
+              <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className="w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white" style={ink}>
+                <option value="">-- Chọn người ký --</option>
+                {(myManagers.length > 0 ? myManagers : users.filter(u => u.id !== currentUser.id)).map(u => (
+                  <option key={u.id} value={u.id}>{u.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-col">
+              <div style={{ minHeight: 96 }}>
+                <p className="font-bold">Kế toán trưởng</p>
+              </div>
+              <DeptUserSelect users={users} excludeId={currentUser.id} value={kttId} onChange={setKttId} />
+            </div>
+            <div className="flex flex-col">
+              <div style={{ minHeight: 96 }}>
+                <p className="font-bold">Ban Giám đốc Tập đoàn</p>
+              </div>
+              <div className="space-y-1.5">
+                <select value="" onChange={e => { if (e.target.value) setBgdIds(prev => [...prev, e.target.value]) }}
+                  className="w-full border border-gray-300 rounded px-1 py-1 text-xs bg-white" style={ink}>
+                  <option value="">+ Chọn thêm người</option>
+                  {userOptions()}
+                </select>
+                {bgdIds.map(id => (
+                  <div key={id} className="flex items-center justify-between gap-1 text-xs text-gray-700">
+                    <span className="truncate">{nameOf(id)}</span>
+                    <button type="button" onClick={() => setBgdIds(prev => prev.filter(x => x !== id))} className="text-red-500">✕</button>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
 
         <div className="max-w-[860px] mx-auto mb-4 bg-white shadow-xl p-6 text-[13px] space-y-4" style={ink}>
           <p className="font-bold">Luồng phê duyệt</p>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">1. Trưởng bộ phận / Quản lý đơn vị {myManagers.length > 0 ? '(quản lý phòng ban của bạn)' : ''} *</label>
-            <select value={recipientId} onChange={e => setRecipientId(e.target.value)} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
-              <option value="">-- Chọn người duyệt --</option>
-              {myManagers.length > 0
-                ? myManagers.map(u => <option key={u.id} value={u.id}>{u.name} — {u.department}</option>)
-                : (
-                  <>
-                    {TEAMS.map(t => {
-                      const members = users.filter(u => u.id !== currentUser.id && u.teamId === t.id)
-                      return members.length === 0 ? null : (
-                        <optgroup key={t.id} label={`${t.emoji} ${t.name}`}>
-                          {members.map(u => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (Quản lý)' : ''}</option>)}
-                        </optgroup>
-                      )
-                    })}
-                    {users.some(u => u.id !== currentUser.id && !TEAMS.some(t => t.id === u.teamId)) && (
-                      <optgroup label="Khác">
-                        {users.filter(u => u.id !== currentUser.id && !TEAMS.some(t => t.id === u.teamId)).map(u => (
-                          <option key={u.id} value={u.id}>{u.name}</option>
-                        ))}
-                      </optgroup>
-                    )}
-                  </>
-                )}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Người duyệt tiếp theo: chọn phòng ban rồi chọn lần lượt <b>Kế toán trưởng</b>, <b>Ban Giám đốc</b> (duyệt theo thứ tự trong danh sách)</label>
-            <ApproverPicker users={users} excludeIds={[currentUser.id, recipientId]} value={extraApprovers} onChange={setExtraApprovers} />
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Luồng phê duyệt</label>
             <select value={approvalMode} onChange={e => setApprovalMode(e.target.value as 'seq' | 'par')} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
               <option value="seq">Nối tiếp (lần lượt)</option>
               <option value="par">Song song (Trưởng bộ phận trước, rồi cùng lúc)</option>
