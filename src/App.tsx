@@ -4651,32 +4651,28 @@ function SubmitTaskModal({ task, currentUser, users, onClose }: { task: Task; cu
 
 // ===== Xác nhận mật khẩu khi duyệt (BOD và quản lý) =====
 // Kiểm tra mật khẩu bằng một kết nối tạm riêng, KHÔNG đăng nhập lại và không làm đổi phiên đang dùng
-type PwReq = { label: string; email: string; resolve: (ok: boolean) => void }
-let pwHost: ((r: PwReq) => void) | null = null
+type PinReq = { label: string; resolve: (ok: boolean) => void }
+let pinHost: ((r: PinReq) => void) | null = null
 const needsPasswordToSign = (u: User) => u.role === 'manager' || !!u.isDirector
 async function confirmSign(u: User, label: string): Promise<boolean> {
   if (!needsPasswordToSign(u)) return true
-  if (!pwHost) { alert('Chưa mở được hộp xác nhận mật khẩu, vui lòng tải lại trang.'); return false }
-  if (!u.email) { alert('Tài khoản chưa có email nên không xác nhận mật khẩu được.'); return false }
-  return new Promise<boolean>(resolve => pwHost!({ label, email: u.email!, resolve }))
+  if (!pinHost) { alert('Chưa mở được hộp xác nhận mã PIN, vui lòng tải lại trang.'); return false }
+  return new Promise<boolean>(resolve => pinHost!({ label, resolve }))
 }
 function PasswordConfirmHost() {
-  const [req, setReq] = useState<PwReq | null>(null)
-  const [pw, setPw] = useState('')
+  const [req, setReq] = useState<PinReq | null>(null)
+  const [pin, setPin] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
-  useEffect(() => { pwHost = r => { setPw(''); setErr(''); setReq(r) }; return () => { pwHost = null } }, [])
+  useEffect(() => { pinHost = r => { setPin(''); setErr(''); setReq(r) }; return () => { pinHost = null } }, [])
   if (!req) return null
-  const finish = (ok: boolean) => { const r = req; setReq(null); setPw(''); r.resolve(ok) }
+  const finish = (ok: boolean) => { const r = req; setReq(null); setPin(''); r.resolve(ok) }
+  const onlyDigits = (v: string) => v.replace(/\D/g, '').slice(0, 5)
   const submit = async () => {
-    if (!pw) { setErr('Vui lòng nhập mật khẩu.'); return }
+    if (pin.length !== 5) { setErr('Vui lòng nhập đủ 5 số.'); return }
     setBusy(true); setErr('')
-    try {
-      const tmp = createClient((supabase as any).supabaseUrl, (supabase as any).supabaseKey,
-        { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'kni-pw-check' } })
-      const { error } = await tmp.auth.signInWithPassword({ email: req.email, password: pw })
-      if (error) { setErr('Mật khẩu không đúng. Vui lòng thử lại.'); setBusy(false); return }
-    } catch { setErr('Không kiểm tra được mật khẩu, vui lòng thử lại.'); setBusy(false); return }
+    const { data, error } = await supabase.rpc('verify_sign_pin', { p_pin: pin })
+    if (error || !data) { setErr('Mã PIN không đúng. Vui lòng thử lại.'); setBusy(false); return }
     setBusy(false)
     finish(true)
   }
@@ -4685,10 +4681,10 @@ function PasswordConfirmHost() {
       <div className="w-full max-w-sm rounded-2xl p-5" style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
         <p className="text-base font-bold mb-1" style={{ color: 'var(--text-primary)' }}>🔐 Xác nhận duyệt</p>
         <p className="text-sm mb-3 font-semibold" style={{ color: '#b45309' }}>{req.label}</p>
-        <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Nhập lại mật khẩu của bạn để xác nhận đúng là bạn đang duyệt.</p>
-        <input type="password" autoFocus value={pw} onChange={e => setPw(e.target.value)} placeholder="Mật khẩu"
+        <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Nhập mã PIN 5 số của bạn để xác nhận đúng là bạn đang duyệt.</p>
+        <input inputMode="numeric" type="password" maxLength={5} autoFocus value={pin} onChange={e => setPin(onlyDigits(e.target.value))} placeholder="•••••"
           onKeyDown={e => { if (e.key === 'Enter' && !busy) submit() }}
-          className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+          className="w-full px-3 py-2 rounded-lg text-sm outline-none text-center tracking-[0.6em] text-lg font-bold" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
         {err && <p className="text-xs mt-2 font-semibold" style={{ color: '#dc2626' }}>{err}</p>}
         <div className="flex justify-end gap-2 mt-4">
           <button type="button" disabled={busy} onClick={() => finish(false)} className="px-3 py-2 rounded-lg text-sm font-semibold" style={{ background: 'var(--bg-card-alt)', color: 'var(--text-primary)' }}>Hủy</button>
@@ -17718,6 +17714,41 @@ function ForcePasswordScreen({ user, onDone }: { user: User; onDone: () => void 
   )
 }
 
+function ForcePinScreen({ user, onDone }: { user: User; onDone: () => void }) {
+  const [pin, setPin] = useState('')
+  const [pin2, setPin2] = useState('')
+  const [err, setErr] = useState('')
+  const [saving, setSaving] = useState(false)
+  const onlyDigits = (v: string) => v.replace(/\D/g, '').slice(0, 5)
+  const submit = async () => {
+    if (pin.length !== 5) { setErr('Mã PIN phải gồm đúng 5 chữ số.'); return }
+    if (pin !== pin2) { setErr('Hai mã PIN chưa giống nhau.'); return }
+    setSaving(true); setErr('')
+    const { error } = await supabase.rpc('set_sign_pin', { p_pin: pin })
+    setSaving(false)
+    if (error) { setErr(error.message); return }
+    onDone()
+  }
+  const inp = 'w-full rounded-lg px-3 py-2.5 text-sm outline-none text-center tracking-[0.6em] text-lg font-bold'
+  const st = { background: '#14143a', border: '1px solid #2a2a5a', color: '#e2e8f0' }
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'linear-gradient(160deg, #0a0a16 0%, #050509 100%)', fontFamily: 'Inter, sans-serif' }}>
+      <div className="w-full max-w-md rounded-2xl p-6 space-y-4" style={{ background: '#0f0f2a', border: '1px solid #2a2a5a' }}>
+        <div>
+          <h1 className="text-xl font-black tracking-wide" style={{ fontFamily: 'Rajdhani, sans-serif', color: '#e2e8f0' }}>🔢 Đặt mã PIN duyệt</h1>
+          <p className="text-sm mt-1" style={{ color: '#9ca3af' }}>Xin chào {user.name}. Hãy đặt mã PIN gồm 5 số, dùng để xác nhận mỗi khi bạn duyệt task, tờ trình, hợp đồng... Nhớ kỹ, không chia sẻ mã này cho ai.</p>
+        </div>
+        <input inputMode="numeric" type="password" maxLength={5} autoFocus value={pin} onChange={e => setPin(onlyDigits(e.target.value))} placeholder="•••••" className={inp} style={st} />
+        <input inputMode="numeric" type="password" maxLength={5} value={pin2} onChange={e => setPin2(onlyDigits(e.target.value))} onKeyDown={e => { if (e.key === 'Enter') submit() }} placeholder="Nhập lại mã PIN" className={inp} style={st} />
+        {err && <p className="text-xs" style={{ color: '#f87171' }}>{err}</p>}
+        <button type="button" onClick={submit} disabled={saving || pin.length !== 5 || pin2.length !== 5} className="w-full py-2.5 rounded-lg font-bold text-white text-sm disabled:opacity-50"
+          style={{ background: 'linear-gradient(135deg,#7c3aed,#f59e0b)' }}>{saving ? 'Đang lưu...' : 'Lưu mã PIN và vào hệ thống'}</button>
+        <button type="button" onClick={() => supabase.auth.signOut()} className="w-full text-xs" style={{ color: '#6b7280' }}>Đăng xuất</button>
+      </div>
+    </div>
+  )
+}
+
 type UserFormState = {
   userId?: string; name: string; email: string; password: string; company: string; empCode: string
   position: string; line: string; role: Role; teamId: string; extra: string[]
@@ -18757,6 +18788,7 @@ export default function App() {
   const [checkingSession, setCheckingSession] = useState(true)
   const [mfaPending, setMfaPending] = useState(false)
   const [mfaChecked, setMfaChecked] = useState(false)
+  const [hasSignPin, setHasSignPin] = useState<boolean | null>(null)   // null = đang kiểm tra, false = chưa đặt PIN
   const checkMfa = async () => {
     const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
     setMfaPending(!!data && data.nextLevel === 'aal2' && data.currentLevel !== 'aal2')
@@ -18979,6 +19011,13 @@ useEffect(() => {
       .then(({ data }) => { if (data) setCurrentProfile(mapProfileToUser(data)) })
   }, [session])
 
+  // Kiểm tra đã đặt mã PIN duyệt chưa (bảng riêng, không ai xem được PIN của người khác)
+  useEffect(() => {
+    if (!session) { setHasSignPin(null); return }
+    supabase.from('user_pins').select('user_id').eq('user_id', session.user.id).maybeSingle()
+      .then(({ data }) => setHasSignPin(!!data))
+  }, [session])
+
   // Nạp toàn bộ user + lắng nghe realtime
   useEffect(() => {
     if (!session) return
@@ -19167,6 +19206,8 @@ useEffect(() => {
   if (session && mfaPending) return <MfaChallengeScreen onDone={checkMfa} />
   if (!session || !currentProfile) return <LoginScreen onLoggedIn={() => {}} />
   if (currentProfile.mustChangePassword) return <ForcePasswordScreen user={currentProfile} onDone={() => setCurrentProfile({ ...currentProfile, mustChangePassword: false })} />
+  if (hasSignPin === null) return <div style={{ background: '#060610', minHeight: '100vh' }} />
+  if (hasSignPin === false) return <ForcePinScreen user={currentProfile} onDone={() => setHasSignPin(true)} />
 
   return (
     <>
