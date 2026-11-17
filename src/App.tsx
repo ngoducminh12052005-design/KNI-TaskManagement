@@ -2659,7 +2659,7 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
                     <td className={td}><input value={r.item} onChange={e => updateCost(i, { item: e.target.value })} className={cell} style={ink} /></td>
                     <td className={td}><input value={r.unit} onChange={e => updateCost(i, { unit: e.target.value })} className={cell} style={ink} /></td>
                     <td className={td}><input type="number" min="0" value={r.qty} onChange={e => updateCost(i, { qty: e.target.value })} className={`${cell} text-right`} style={ink} /></td>
-                    <td className={td}><input type="number" min="0" value={r.price} onChange={e => updateCost(i, { price: e.target.value })} className={`${cell} text-right`} style={ink} /></td>
+                    <td className={td}><MoneyInput value={r.price} onChange={v => updateCost(i, { price: v })} className={`${cell} text-right`} style={ink} /></td>
                     <td className={`${td} text-right`}>{fmtTaskMoney(taskCostAmount(r))}</td>
                     <td className={td}><input value={r.note} onChange={e => updateCost(i, { note: e.target.value })} className={cell} style={ink} /></td>
                     <td className="text-center"><button type="button" onClick={() => setDoc({ costRows: (doc.costRows ?? []).filter((_, j) => j !== i) })} className="text-red-500 text-xs">✕</button></td>
@@ -10191,7 +10191,7 @@ function ProposalDocForm({ currentUser, users, onClose, onCreated, editing, proj
                   <td className={td}><input value={r.item} onChange={e => updateRow(i, { item: e.target.value })} className={cell} style={ink} /></td>
                   <td className={td}><input value={r.unit} onChange={e => updateRow(i, { unit: e.target.value })} className={cell} style={ink} /></td>
                   <td className={td}><input type="number" min="0" value={r.qty} onChange={e => updateRow(i, { qty: e.target.value })} className={cell} style={ink} /></td>
-                  <td className={td}><input type="number" min="0" value={r.price} onChange={e => updateRow(i, { price: e.target.value })} className={cell} style={ink} /></td>
+                  <td className={td}><MoneyInput value={r.price} onChange={v => updateRow(i, { price: v })} className={cell} style={ink} /></td>
                   <td className={`${td} text-right`}>{money(rowAmount(r))}</td>
                   <td className={td}><input value={r.note} onChange={e => updateRow(i, { note: e.target.value })} className={cell} style={ink} /></td>
                   <td className="text-center">
@@ -10865,7 +10865,7 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: {
                     <td className={td}><textarea value={r.desc} onChange={e => updateRow(i, { desc: e.target.value })} rows={3} className={`${cell} resize-none`} style={ink} placeholder="Diễn giải khoản thanh toán..." /></td>
                     <td className={td}><input value={r.unit} onChange={e => updateRow(i, { unit: e.target.value })} className={cell} style={ink} /></td>
                     <td className={td}><input type="number" min="0" value={r.qty} onChange={e => updateRow(i, { qty: e.target.value })} className={cell} style={ink} /></td>
-                    <td className={td}><input type="number" min="0" value={r.price} onChange={e => updateRow(i, { price: e.target.value })} className={cell} style={ink} /></td>
+                    <td className={td}><MoneyInput value={r.price} onChange={v => updateRow(i, { price: v })} className={cell} style={ink} /></td>
                     <td className={`${td} text-right`}>{money(rowAmount(r))}</td>
                     <td className={td}><input value={r.invoice} onChange={e => updateRow(i, { invoice: e.target.value })} className={cell} style={ink} /></td>
                     <td className="text-center">
@@ -11027,6 +11027,17 @@ const calcDays = (from?: string, to?: string) => {
   return n > 0 ? String(n) : ''
 }
 const moneyVN = (n: number) => Number(n || 0).toLocaleString('vi-VN')
+
+// Ô nhập tiền dùng chung: gõ tới đâu tự hiện dấu chấm ngăn cách hàng nghìn tới đó (gõ 1000 → hiện 1.000), giá trị gốc (không dấu chấm) vẫn được lưu lại như cũ
+function MoneyInput({ value, onChange, className, style, placeholder }: { value: string | number; onChange: (v: string) => void; className?: string; style?: React.CSSProperties; placeholder?: string }) {
+  const digits = String(value ?? '').replace(/[^\d]/g, '')
+  const display = digits ? Number(digits).toLocaleString('vi-VN') : ''
+  return (
+    <input type="text" inputMode="numeric" value={display} placeholder={placeholder}
+      onChange={e => onChange(e.target.value.replace(/[^\d]/g, ''))}
+      className={className} style={style} />
+  )
+}
 const rowAmt = (r: any) => (Number(r.qty) || 0) * (Number(r.price) || 0)
 
 function initFormData(tpl: FormTpl, u: User): Record<string, any> {
@@ -11285,7 +11296,7 @@ function FormDocBody({ tpl, f, set, ro, users, requester, code, dateText }: {
           {f.advance === 'yes' && (
             <div className="pl-8 space-y-1">
               <p className="flex items-center gap-2">Số tiền bằng số:{' '}
-                {ro ? <b>{moneyVN(Number(f.advanceAmount))}</b> : <input type="number" min="0" value={f.advanceAmount ?? ''} onChange={e => set({ advanceAmount: e.target.value })} className="w-40 bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500" style={ink} />} VNĐ
+                {ro ? <b>{moneyVN(Number(f.advanceAmount))}</b> : <MoneyInput value={f.advanceAmount ?? ''} onChange={v => set({ advanceAmount: v })} className="w-40 bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500" style={ink} />} VNĐ
               </p>
               <p>Số tiền bằng chữ: <i>{vnMoneyWords(Number(f.advanceAmount) || 0)}</i></p>
             </div>
@@ -13160,7 +13171,7 @@ function ProposalCostSection({ p, canEdit }: { p: Proposal; canEdit: boolean }) 
               className="w-20 px-2 py-1.5 rounded-lg text-xs outline-none" style={inputStyle} />
             <input type="number" min="0" value={qty} onChange={e => setQty(e.target.value)} placeholder="SL"
               className="w-16 px-2 py-1.5 rounded-lg text-xs outline-none" style={inputStyle} />
-            <input type="number" min="0" value={price} onChange={e => setPrice(e.target.value)} placeholder="Đơn giá (VNĐ)"
+            <MoneyInput value={price} onChange={v => setPrice(v)} placeholder="Đơn giá (VNĐ)"
               className="w-32 px-2 py-1.5 rounded-lg text-xs outline-none" style={inputStyle} />
           </div>
           <div className="flex gap-2 flex-wrap mt-2 items-center">
@@ -14138,7 +14149,7 @@ function ProposalModal({ currentUser, users, editingProposal, onClose, onCreated
                 <input value={ciCost} onChange={e => setCiCost(e.target.value)} placeholder="Chi phí (loại / ghi chú)"
                   className="flex-1 min-w-[100px] px-2 py-2 rounded-lg text-xs outline-none"
                   style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
-                <input type="number" min="0" value={ciAmount} onChange={e => setCiAmount(e.target.value)} placeholder="Số tiền (VNĐ)"
+                <MoneyInput value={ciAmount} onChange={v => setCiAmount(v)} placeholder="Số tiền (VNĐ)"
                   className="w-24 px-2 py-2 rounded-lg text-xs outline-none"
                   style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
                 <button type="button"
@@ -16038,7 +16049,7 @@ function ProjectForm({ currentUser, users, proposals, onClose, onCreated, draftI
             </div>
             <div>
               <label className={label}>Ngân sách (VNĐ)</label>
-              <input type="number" min="0" value={budget} onChange={e => setBudget(e.target.value)} className={box} style={ink} />
+              <MoneyInput value={budget} onChange={v => setBudget(v)} className={box} style={ink} />
             </div>
             <div>
               <label className={label}>Mức rủi ro</label>
