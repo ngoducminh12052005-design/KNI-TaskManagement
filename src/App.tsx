@@ -11038,8 +11038,7 @@ function MoneyInput({ value, onChange, className, style, placeholder }: { value:
 const moneyVN = (n: number) => Number(n || 0).toLocaleString('vi-VN')
 const rowAmt = (r: any) => (Number(r.qty) || 0) * (Number(r.price) || 0)
 const dailyAllowance = (company?: string) => (company && COMPANIES.includes(company)) ? 50000 : 100000
-function congTacPayPrefill(src: Proposal): Record<string, any> {
-  const sf: Record<string, any> = src.formData ?? {}
+function congTacPayPrefill(code: string, sf: Record<string, any>): Record<string, any> {
   const staff: any[] = Array.isArray(sf.staff) ? sf.staff : []
   const rate = String(dailyAllowance(sf.company))
   const mk = (s: any = {}) => ({
@@ -11050,9 +11049,66 @@ function congTacPayPrefill(src: Proposal): Record<string, any> {
   return {
     destination: sf.destination ?? '', purpose: sf.purpose ?? '',
     fromDate: sf.fromDate ?? '', toDate: sf.toDate ?? '',
-    srcCode: src.code ?? '',
+    srcCode: code,
     travelers: staff.length > 0 ? staff.map(mk) : [mk()],
   }
+}
+// ===== Chọn "Phiếu đề xuất đi công tác" đã duyệt, cho Bảng thanh toán công tác phí =====
+type CongTacSrcRow = { id: string; code: string; title: string; createdAt: string; formData: Record<string, any> }
+function CongTacSourcePicker({ value, onPick }: { value: string; onPick: (p: { code: string; formData: Record<string, any> }) => void }) {
+  const [rows, setRows] = useState<CongTacSrcRow[]>([])
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  useEffect(() => {
+    let alive = true
+    supabase.from('proposals').select('id, code, title, created_at, form_data')
+      .eq('kind', 'dexuat').eq('status', 'approved').not('code', 'is', null).order('created_at', { ascending: false }).limit(500)
+      .then(({ data }) => {
+        if (!alive || !data) return
+        setRows((data as any[]).filter(p => p.form_data?.tpl === 'congtac')
+          .map(p => ({ id: p.id, code: String(p.code).toUpperCase(), title: p.title ?? '', createdAt: p.created_at, formData: p.form_data ?? {} })))
+      })
+    return () => { alive = false }
+  }, [])
+  const shown = rows.filter(r => {
+    const t = q.trim().toLowerCase()
+    return !t || r.code.toLowerCase().includes(t) || r.title.toLowerCase().includes(t)
+  })
+  const pickRow = (r: CongTacSrcRow) => { onPick({ code: r.code, formData: r.formData }); setOpen(false) }
+  return (
+    <div className="flex-1 min-w-0">
+      <button type="button" onClick={() => { setQ(''); setOpen(true) }}
+        className="text-left text-xs py-0.5 border-b border-dashed border-gray-300 hover:text-blue-600"
+        style={{ color: value ? '#2563eb' : '#9ca3af' }}>
+        {value ? `📜 ${value} — bấm để đổi` : 'Bấm để chọn phiếu đề xuất đi công tác đã duyệt...'}
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={() => setOpen(false)}>
+          <div className="w-full max-w-xl rounded-xl flex flex-col" style={{ background: '#fff', color: '#111827', maxHeight: '80vh', fontFamily: 'Inter, sans-serif' }} onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #e5e7eb' }}>
+              <h3 className="text-sm font-bold">✈️ Chọn phiếu đề xuất đi công tác đã duyệt</h3>
+              <button type="button" onClick={() => setOpen(false)} className="text-lg px-2" style={{ color: '#6b7280' }}>✕</button>
+            </div>
+            <div className="px-4 pt-3">
+              <input value={q} onChange={e => setQ(e.target.value)} autoFocus placeholder="Tìm theo mã hoặc tên..."
+                className="w-full px-3 py-2 rounded-lg text-sm outline-none" style={{ border: '1px solid #d1d5db', color: '#111827' }} />
+            </div>
+            <div className="px-4 py-2 overflow-y-auto flex-1">
+              {shown.length === 0 && <p className="text-xs text-center py-6" style={{ color: '#6b7280' }}>{rows.length === 0 ? 'Chưa có phiếu đề xuất đi công tác nào đã duyệt.' : 'Không có phiếu khớp.'}</p>}
+              {shown.map(r => (
+                <button key={r.id} type="button" onClick={() => pickRow(r)} className="w-full flex items-start gap-2 py-2 text-left" style={{ borderBottom: '1px solid #f3f4f6' }}>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold truncate"><span className="font-mono text-xs mr-1.5" style={{ color: '#2563eb' }}>{r.code}</span>{r.title || '(chưa có tên)'}</p>
+                    <p className="text-[11px]" style={{ color: '#6b7280' }}>{new Date(r.createdAt).toLocaleDateString('vi-VN')}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function initFormData(tpl: FormTpl, u: User): Record<string, any> {
@@ -11337,7 +11393,12 @@ function FormDocBody({ tpl, f, set, ro, users, requester, code, dateText }: {
         <div className="space-y-1.5 mb-3">
           <p>Ngày lập: {dateText}</p>
           <p>Người lập: <b>{requester?.name}</b></p>
-          {f.srcCode && <p className="text-xs text-gray-500">Theo giấy đề xuất đi công tác: <b className="text-blue-600">{f.srcCode}</b></p>}
+          <p className="flex flex-wrap items-center gap-2">
+            <span className="shrink-0">Theo phiếu đề xuất đi công tác:</span>
+            {ro
+              ? (f.srcCode ? <b className="text-blue-600">{f.srcCode}</b> : <span className="text-gray-400">—</span>)
+              : <CongTacSourcePicker value={f.srcCode ?? ''} onPick={({ code, formData }) => set(congTacPayPrefill(code, formData))} />}
+          </p>
         </div>
         {sec('I. THÔNG TIN CHI TIẾT')}
         <div className="space-y-1.5 pl-4">
@@ -15437,7 +15498,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
       )}
       {payFromProposal && (
         <ProposalFormDocForm tpl="congtacpay" currentUser={currentUser} users={users} onCreated={setOpenNewId}
-          prefill={congTacPayPrefill(payFromProposal)} onClose={() => setPayFromProposal(null)} />
+          prefill={congTacPayPrefill(payFromProposal.code ?? '', payFromProposal.formData ?? {})} onClose={() => setPayFromProposal(null)} />
       )}
       {editingContract && (
         <ProposalHopDongForm currentUser={currentUser} users={users} proposals={proposals} editing={editingContract}
