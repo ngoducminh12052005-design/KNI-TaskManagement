@@ -11293,7 +11293,7 @@ function FormDocBody({ tpl, f, set, ro, users, requester, code, dateText }: {
                   <td className={td}>{cellIn('costs', i, 'cat')}</td>
                   <td className={td}>{cellIn('costs', i, 'unit')}</td>
                   <td className={td}>{cellIn('costs', i, 'qty', { type: 'number', min: '0' })}</td>
-                  <td className={`${td} ${ro ? 'text-right' : ''}`}>{ro ? (r.price ? moneyVN(Number(r.price)) : '') : cellIn('costs', i, 'price', { type: 'number', min: '0' })}</td>
+                  <td className={`${td} ${ro ? 'text-right' : ''}`}>{ro ? (r.price ? moneyVN(Number(r.price)) : '') : <MoneyInput value={r.price} onChange={v => setRow('costs', i, { price: v })} className={cell} style={ink} />}</td>
                   <td className={`${td} text-right`}>{moneyVN(rowAmt(r))}</td>
                   <td className={td}>{cellIn('costs', i, 'note')}</td>
                   {!ro && <td className="text-center">{delBtn('costs', i)}</td>}
@@ -11371,7 +11371,7 @@ function FormDocBody({ tpl, f, set, ro, users, requester, code, dateText }: {
                     )}
                   </td>
                   <td className={`${td} text-center`}>{dayCalc(r)}</td>
-                  <td className={`${td} ${ro ? 'text-right' : ''}`}>{ro ? moneyVN(Number(r.rate)) : cellIn('travelers', i, 'rate', { type: 'number', min: '0' })}</td>
+                  <td className={`${td} ${ro ? 'text-right' : ''}`}>{ro ? moneyVN(Number(r.rate)) : <MoneyInput value={r.rate} onChange={v => setRow('travelers', i, { rate: v })} className={cell} style={ink} />}</td>
                   <td className={`${td} text-right`}>{moneyVN(rowTotal(r))}</td>
                   <td className={td}>{cellIn('travelers', i, 'note')}</td>
                   {!ro && <td className="text-center">{delBtn('travelers', i)}</td>}
@@ -11433,7 +11433,7 @@ function FormDocBody({ tpl, f, set, ro, users, requester, code, dateText }: {
                 <td className={td}>{cellIn('items', i, 'spec')}</td>
                 <td className={td}>{cellIn('items', i, 'unit')}</td>
                 <td className={td}>{cellIn('items', i, 'qty', { type: 'number', min: '0' })}</td>
-                <td className={`${td} ${ro ? 'text-right' : ''}`}>{ro ? (r.price ? moneyVN(Number(r.price)) : '') : cellIn('items', i, 'price', { type: 'number', min: '0' })}</td>
+                <td className={`${td} ${ro ? 'text-right' : ''}`}>{ro ? (r.price ? moneyVN(Number(r.price)) : '') : <MoneyInput value={r.price} onChange={v => setRow('items', i, { price: v })} className={cell} style={ink} />}</td>
                 <td className={`${td} text-right`}>{moneyVN(rowAmt(r))}</td>
                 <td className={td}>{cellIn('items', i, 'need')}</td>
                 {!ro && <td className="text-center">{delBtn('items', i)}</td>}
@@ -11732,7 +11732,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
           {(isMua || tpl === 'nghiphep' || tpl === 'congtacpay') ? (
             <>
               <p className="mt-8 mb-1 font-bold text-center">XÁC NHẬN & PHÊ DUYỆT</p>
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4 text-center text-xs">
+              <div className={tpl === 'congtacpay' ? 'grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-center text-xs' : 'grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4 text-center text-xs'}>
                 <div className="flex flex-col">
                   <div style={{ minHeight: 96 }}>
                     <p className="font-bold text-[13px]">{tpl === 'nghiphep' ? 'Người làm đơn' : 'Người lập'}</p>
@@ -11876,7 +11876,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
               </p>
             </div>
           </div>
-        ) : tpl === 'nghiphep' ? null : (
+        ) : (tpl === 'nghiphep' || tpl === 'congtacpay') ? null : (
           <div className="max-w-[860px] mx-auto mb-4 bg-white shadow-xl p-6 text-[13px] space-y-4" style={ink}>
             <p className="font-bold">Luồng phê duyệt</p>
             <div>
