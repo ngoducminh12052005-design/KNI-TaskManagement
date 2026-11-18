@@ -15096,11 +15096,14 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   const inMode = (p: Proposal) => (p.formData?.tpl === 'hopdong') === contractsMode
   const receivedAll = proposals.filter(p => inMode(p) && isMyTurn(p))
   const sentAll = proposals.filter(p => inMode(p) && p.submittedBy === currentUser.id)
-    const processedAll = proposals.filter(p =>
+  // Trợ lý BOD xem được mọi tờ trình / đề xuất có Ban Giám đốc trong luồng duyệt (chỉ xem, không duyệt thay)
+  const bodAssistantSees = (p: Proposal) => !!currentUser.isBodAssistant && !currentUser.isDirector
+    && p.participants.some(id => users.find(u => u.id === id)?.isDirector)
+  const processedAll = proposals.filter(p =>
     inMode(p) &&
     !isMyTurn(p) &&
     p.submittedBy !== currentUser.id &&
-    proposalApprovals.some(a => a.proposalId === p.id && a.approverId === currentUser.id)
+    (proposalApprovals.some(a => a.proposalId === p.id && a.approverId === currentUser.id) || bodAssistantSees(p))
   )
 
     type StepRow = { id: string; approver_id: string; step_order: number; status: string }
