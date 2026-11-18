@@ -1639,6 +1639,57 @@ function StatusStatCard({ icon, label, color, total, subs, active, onClick }: {
 }
 
 // ===== Tờ trình / đề xuất của tôi =====
+// ===== Số đỏ trên nút Work Note của Tờ trình / Dự án (giống bên Task) =====
+function getNoteSeen(table: string, uid: string): Record<string, string> {
+  try { return JSON.parse(localStorage.getItem(`noteSeen:${table}:${uid}`) || '{}') } catch { return {} }
+}
+function markNoteSeen(table: string, uid: string, id: string) {
+  try {
+    const m = getNoteSeen(table, uid)
+    m[id] = new Date().toISOString()
+    localStorage.setItem(`noteSeen:${table}:${uid}`, JSON.stringify(m))
+    window.dispatchEvent(new Event('noteSeen'))
+  } catch {}
+}
+function useNoteBadges(table: string, fkCol: string, ids: string[], uid: string): Record<string, number> {
+  const [rows, setRows] = useState<{ fk: string; userId: string; at: string }[]>([])
+  const [rev, setRev] = useState(0)
+  const key = ids.join(',')
+  useEffect(() => {
+    if (ids.length === 0) { setRows([]); return }
+    let alive = true
+    const load = async () => {
+      const chunks: string[][] = []
+      for (let i = 0; i < ids.length; i += 80) chunks.push(ids.slice(i, i + 80))
+      const res = await Promise.all(chunks.map(c => (supabase as any).from(table).select(`id, ${fkCol}, user_id, created_at`).in(fkCol, c)))
+      if (!alive) return
+      setRows(res.flatMap((r: any) => (r.data ?? []) as any[]).map((x: any) => ({ fk: x[fkCol] as string, userId: x.user_id as string, at: x.created_at as string })))
+    }
+    load()
+    const ch = supabase.channel(`note-badge-${table}-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table }, () => { load() })
+      .subscribe()
+    const onSeen = () => setRev(r => r + 1)
+    window.addEventListener('noteSeen', onSeen)
+    return () => { alive = false; supabase.removeChannel(ch); window.removeEventListener('noteSeen', onSeen) }
+  }, [key, table])
+  return useMemo(() => {
+    const bk = `noteBase:${table}:${uid}`
+    let base = ''
+    try { base = localStorage.getItem(bk) || '' } catch {}
+    if (!base) {
+      base = new Date().toISOString()
+      try { localStorage.setItem(bk, base) } catch {}
+    }
+    const seen = getNoteSeen(table, uid)
+    const out: Record<string, number> = {}
+    for (const r of rows) {
+      if (r.userId === uid) continue
+      if (Date.parse(r.at) > Date.parse(seen[r.fk] ?? base)) out[r.fk] = (out[r.fk] ?? 0) + 1
+    }
+    return out
+  }, [rows, rev, uid, table])
+}
 // ===== Khung Work Note dùng chung cho Tờ trình / Dự án =====
 function NoteDrawer({ title, subtitle, table, fkCol, fkId, textCol, users, currentUser, canWrite, onClose }: {
   title: string; subtitle: string; table: string; fkCol: string; fkId: string; textCol: string
@@ -1668,6 +1719,8 @@ function NoteDrawer({ title, subtitle, table, fkCol, fkId, textCol, users, curre
   useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight
   }, [notes.length])
+    // Mở Work Note là đã xem: tắt số đỏ trên nút
+  useEffect(() => { markNoteSeen(table, currentUser.id, fkId) }, [fkId, notes.length])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -1974,6 +2027,7 @@ function DashboardProposals({ proposals, currentUser, users, onOpen, onViewAll, 
   const th = 'px-2 py-2.5 text-[10px] font-bold uppercase tracking-wide text-left'
   const td = 'px-2 py-3 text-xs align-middle'
   const cols = [4, 14, 6, 26, 12, 14, 7, 7, 10]
+  const noteBadges = useNoteBadges('proposal_work_notes', 'proposal_id', list.map(p => p.id), currentUser.id)
 
    return (
     <div className="rounded-xl p-5" style={sectionFrame('#7c3aed')}>
@@ -2039,9 +2093,10 @@ function DashboardProposals({ proposals, currentUser, users, onOpen, onViewAll, 
                     <td className={td}>{fmtShort(p.dueDate)}</td>
                     <td className={td}>
                       <button type="button" onClick={e => { e.stopPropagation(); setNoteFor(p) }}
-                        className="px-2 py-1.5 rounded-lg text-[11px] font-bold leading-tight"
+                        className="relative px-2 py-1.5 rounded-lg text-[11px] font-bold leading-tight"
                         style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>
                         📝 Work Note
+                        <WorkNoteBadge count={noteBadges[p.id] ?? 0} />
                       </button>
                     </td>
                   </tr>
@@ -2112,7 +2167,7 @@ setProjects((p.data ?? []).map((x: any) => mapDbProject(x, byProject[x.id] ?? []
   const th = 'px-2 py-2.5 text-[10px] font-bold uppercase tracking-wide text-left'
   const td = 'px-2 py-3 text-xs align-middle'
   const cols = [4, 13, 6, 22, 11, 9, 12, 7, 7, 9]
-
+  const noteBadges = useNoteBadges('project_comments', 'project_id', rowsToShow.map(p => p.id), currentUser.id)
   return (
     <div className="rounded-xl p-5" style={sectionFrame('#0d9488')}>
       <div className="flex items-center justify-between mb-3">
@@ -2172,9 +2227,10 @@ setProjects((p.data ?? []).map((x: any) => mapDbProject(x, byProject[x.id] ?? []
                     <td className={td}>{fmtShort(p.plannedEnd)}{isProjectLate(p) && <div className="text-[10px] font-bold" style={{ color: '#dc2626' }}>⚠️ Trễ tiến độ</div>}</td>
                     <td className={td}>
                       <button type="button" onClick={e => { e.stopPropagation(); setNoteFor(p) }}
-                        className="px-2 py-1.5 rounded-lg text-[11px] font-bold leading-tight"
+                        className="relative px-2 py-1.5 rounded-lg text-[11px] font-bold leading-tight"
                         style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>
                         📝 Work Note
+                        <WorkNoteBadge count={noteBadges[p.id] ?? 0} />
                       </button>
                     </td>
                   </tr>
@@ -13532,6 +13588,8 @@ function ProposalCommentsSection({ p, users, currentUser }: { p: Proposal; users
     const timer = window.setInterval(() => { if (!document.hidden) load() }, 15000)
     return () => { supabase.removeChannel(ch); window.removeEventListener('proposal-worknotes-changed', onNote); window.clearInterval(timer) }
   }, [p.id])
+    // Đang xem mục Trao đổi (có cả Work Note) thì coi như đã đọc
+  useEffect(() => { markNoteSeen('proposal_work_notes', currentUser.id, p.id) }, [p.id, comments.length])
   const send = async () => {
     const t = text.trim()
     if (!t) return
@@ -14888,6 +14946,7 @@ function ProposalListTable({ proposals, users, currentUser, isMyTurn, onOpen }: 
   const th = 'px-2 py-2.5 text-[10px] font-bold uppercase tracking-wide text-left'
   const td = 'px-2 py-3 text-xs align-middle'
   const cols = [4, 11, 5, 24, 11, 13, 13, 6, 6, 10]
+  const noteBadges = useNoteBadges('proposal_work_notes', 'proposal_id', proposals.map(p => p.id), currentUser.id)
   const person = (u?: User) => u
     ? <div className="flex items-center gap-1.5"><CharAvatar user={u} size={20} /><span className="truncate">{u.name}</span></div>
     : <span>—</span>
@@ -14924,8 +14983,8 @@ function ProposalListTable({ proposals, users, currentUser, isMyTurn, onOpen }: 
               </div>
               <div className="mt-2">
                 <button type="button" onClick={e => { e.stopPropagation(); setNoteFor(p) }}
-                  className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold"
-                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>📝 Work Note</button>
+                  className="relative px-2.5 py-1.5 rounded-lg text-[11px] font-bold"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>📝 Work Note<WorkNoteBadge count={noteBadges[p.id] ?? 0} /></button>
               </div>
             </div>
           )
@@ -14972,7 +15031,7 @@ function ProposalListTable({ proposals, users, currentUser, isMyTurn, onOpen }: 
                 <td className={td}>{fmtShort(p.dueDate)}</td>
                 <td className={td}>
                   <button type="button" onClick={e => { e.stopPropagation(); setNoteFor(p) }}
-                    className="px-2 py-1.5 rounded-lg text-[11px] font-bold leading-tight"
+                    className="relative px-2 py-1.5 rounded-lg text-[11px] font-bold leading-tight"
                     style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>
                     📝 Work Note
                   </button>
@@ -17674,6 +17733,7 @@ function ProjectListTable({ projects, tasks, users, currentUser, canSee, onOpen 
   const th = 'px-2 py-2.5 text-[10px] font-bold uppercase tracking-wide text-left'
   const td = 'px-2 py-3 text-xs align-middle'
   const cols = [3, 9, 5, 21, 12, 8, 12, 6, 6, 8, 10]
+  const noteBadges = useNoteBadges('project_comments', 'project_id', projects.map(p => p.id), currentUser.id) 
   const today = localToday()
 
   return (
@@ -17726,8 +17786,8 @@ function ProjectListTable({ projects, tasks, users, currentUser, canSee, onOpen 
               </div>
               <div className="mt-2">
                 <button type="button" onClick={e => { e.stopPropagation(); setNoteFor(p) }}
-                  className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold"
-                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>📝 Work Note</button>
+                  className="relative px-2.5 py-1.5 rounded-lg text-[11px] font-bold"
+                  style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>📝 Work Note<WorkNoteBadge count={noteBadges[p.id] ?? 0} /></button>
               </div>
             </div>
           )
@@ -17796,9 +17856,10 @@ function ProjectListTable({ projects, tasks, users, currentUser, canSee, onOpen 
                 </td>
                 <td className={td}>
                   <button type="button" onClick={e => { e.stopPropagation(); setNoteFor(p) }}
-                    className="px-2 py-1.5 rounded-lg text-[11px] font-bold leading-tight"
+                    className="relative px-2 py-1.5 rounded-lg text-[11px] font-bold leading-tight"
                     style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>
                     📝 Work Note
+                    <WorkNoteBadge count={noteBadges[p.id] ?? 0} />
                   </button>
                 </td>
               </tr>
