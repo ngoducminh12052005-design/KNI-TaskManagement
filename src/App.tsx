@@ -12413,7 +12413,7 @@ function HopDongOpinions({ rows, myNote, setMyNote, pick, choice = '', setChoice
 }
 
 // ---------- Form tạo phiếu phê duyệt hợp đồng ----------
-function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated, editing, draftId }: { draftId?: string;
+function ProposalHopDongForm({ currentUser, users, onClose, onCreated, editing, draftId }: { draftId?: string;
   currentUser: User; users: User[]; proposals?: Proposal[]; onClose: () => void; onCreated?: (id: string) => void; editing?: Proposal | null
 }) {
   useBackToClose(onClose)
@@ -12431,8 +12431,6 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
   const [files, setFiles] = useState<File[]>([])
   const [driveUrl, setDriveUrl] = draft.useS('driveUrl', editing?.driveUrl ?? '')
   const [codes, setCodes] = draft.useS<string[]>('codes', Array.isArray(efd.relatedCodes) ? efd.relatedCodes : [])
-  const [codeInput, setCodeInput] = useState('')
-  const [codeMsg, setCodeMsg] = useState('')
   const [approvers, setApprovers] = draft.useS<string[]>('approvers', () => [myManagers.length === 1 ? myManagers[0].id : '', '', '', ''])
   const [approvalMode, setApprovalMode] = draft.useS<'seq' | 'par'>('approvalMode', 'seq')
   const [saving, setSaving] = useState(false)
@@ -12465,8 +12463,6 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
       disabled: approvers.some((x, k) => k !== idx && x === u.id),
     }))
   }
-  const candidates = (proposals ?? []).filter(p => p.kind === 'totrinh' && p.code
-    && (currentUser.isDirector || p.submittedBy === currentUser.id || p.participants.includes(currentUser.id)))
 
   const swapRef = useRef<HTMLInputElement>(null)
   const [swapIdx, setSwapIdx] = useState(-1)
@@ -12491,18 +12487,7 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
     e.target.value = ''
   }
 
-  const addCode = async () => {
-    const c = codeInput.trim().toUpperCase().replace(/^R-TASK/, 'RTASK')
-    if (!c) return
-    setCodeMsg('')
-    if (!/^RTASK\d{6}-\d{2,}$/.test(c)) { setCodeMsg('Mã tờ trình phải có dạng RTASKddmmyy-NN.'); return }
-    if (codes.includes(c)) { setCodeMsg('Tờ trình này đã được gắn rồi.'); return }
-    const { data } = await supabase.from('proposals').select('code, kind').eq('code', c).maybeSingle()
-    if (!data) { setCodeMsg(`Không tìm thấy tờ trình ${c}.`); return }
-    if (data.kind !== 'totrinh') { setCodeMsg(`${c} không phải tờ trình.`); return }
-    setCodes(prev => [...prev, c])
-    setCodeInput('')
-  }
+
 
   const submit = async () => {
     if (!String(f.partner).trim()) { setError('Vui lòng nhập tên đối tác.'); return }
@@ -12510,7 +12495,6 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
     if (!String(f.contractNo).trim()) { setError('Vui lòng nhập số hợp đồng và ngày hợp đồng.'); return }
     if (!String(f.purpose).trim()) { setError('Vui lòng nhập mục đích hợp đồng.'); return }
     if (files.length === 0 && !driveUrl.trim() && oldKept.length === 0) { setError('Bắt buộc đính kèm hợp đồng (chọn file).'); return }
-    if (codeInput.trim()) { setError('Bạn đã gõ mã tờ trình nhưng chưa bấm "＋ Gắn tờ trình".'); return }
     if (codes.length === 0) { setError('Bắt buộc đính kèm tờ trình (gắn mã tờ trình RTASK).'); return }
     const missing = approvers.findIndex(x => !x)
     if (missing >= 0) { setError(`Vui lòng chọn người duyệt cho dòng ${missing + 2}: ${HD_ROLES[missing][0]}.`); return }
@@ -12689,28 +12673,10 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
             <input value={driveUrl} onChange={e => setDriveUrl(e.target.value)} placeholder="Hoặc dán link Google Drive (file lớn)"
               className="w-full bg-transparent outline-none border-b border-dashed border-gray-300 focus:border-blue-500 py-0.5 mt-2 text-xs" style={ink} />
 
-            <p className="font-bold text-xs mt-4 mb-1">📜 2. Tờ trình đính kèm <span className="text-red-600">(bắt buộc)</span></p>
-            {codes.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-1.5">
-                {codes.map(c => (
-                  <span key={c} className="text-xs font-mono px-2 py-0.5 rounded-full" style={{ background: '#ede9fe', color: '#5b21b6' }}>
-                    {c} <button type="button" onClick={() => setCodes(prev => prev.filter(x => x !== c))} className="text-red-500 ml-1">✕</button>
-                  </span>
-                ))}
-              </div>
-            )}
-            <div className="flex gap-1.5">
-              <input list="hd-proposal-codes" value={codeInput} onChange={e => setCodeInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCode() } }}
-                placeholder="Chọn hoặc dán mã tờ trình (VD: RTASK201026-01)"
-                className="flex-1 min-w-0 px-2 py-1.5 rounded text-xs outline-none border border-gray-300 bg-white" style={ink} />
-              <datalist id="hd-proposal-codes">
-                {candidates.map(p => <option key={p.id} value={p.code}>{p.title}</option>)}
-              </datalist>
-              <button type="button" onClick={addCode} disabled={!codeInput.trim()}
-                className="px-3 py-1.5 rounded text-xs font-bold text-white disabled:opacity-40 shrink-0" style={{ background: '#7c3aed' }}>＋ Gắn tờ trình</button>
+                        <p className="font-bold text-xs mt-4 mb-1">📜 2. Tờ trình đính kèm <span className="text-red-600">(bắt buộc)</span></p>
+            <div className="flex">
+              <RelatedProposalPicker value={codes.join(', ')} onChange={v => setCodes(Array.from(new Set((v.match(/\bR-?TASK\d{6}-\d{2,}/gi) ?? []).map(c => c.toUpperCase()))))} users={users} />
             </div>
-            {codeMsg && <p className="text-[11px] mt-1 text-red-600">{codeMsg}</p>}
           </div>
 
           <HopDongOpinions rows={rows} myNote="" setMyNote={() => {}} pick={{ values: approvers, onChange: setApprover, optionsFor }} />
@@ -12737,6 +12703,43 @@ function ProposalHopDongForm({ currentUser, users, proposals, onClose, onCreated
           {saving ? 'Đang gửi...' : editing ? 'Gửi lại để duyệt' : 'Gửi phê duyệt'}
         </button>
       </div>
+    </div>
+  )
+}
+// Danh sách "Tờ trình đính kèm" ở màn xem: mã + TÊN tờ trình + trạng thái. Bấm vào thì mở popup xem tờ trình.
+function AttachedProposalList({ codes }: { codes: string[] }) {
+  const openCode = useContext(ProposalLinkContext)
+  const key = codes.join(',')
+  const [rows, setRows] = useState<{ code: string; title: string; status: string }[]>([])
+  useEffect(() => {
+    if (codes.length === 0) { setRows([]); return }
+    let alive = true
+    supabase.from('proposals').select('code, title, status').in('code', codes).then(({ data }) => {
+      if (alive) setRows((data ?? []) as any[])
+    })
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  if (codes.length === 0) return <span className="text-xs text-gray-500">—</span>
+  return (
+    <div className="flex flex-col gap-1.5 items-start">
+      {codes.map(c => {
+        const r = rows.find(x => x.code === c)
+        return (
+          <button key={c} type="button" onClick={() => openCode(c)} title="Bấm để xem tờ trình"
+            className="text-left flex items-center gap-2 flex-wrap rounded-lg px-2.5 py-1.5 text-xs hover:opacity-80" style={{ background: '#ede9fe' }}>
+            <span className="font-mono font-semibold underline" style={{ color: '#2563eb' }}>{c}</span>
+            <span className="font-semibold" style={{ color: '#111827' }}>{r ? (r.title || '(chưa có tên)') : 'Đang tải…'}</span>
+            {r && (() => {
+              const st = r.status === 'approved' ? ['Đã duyệt', '#34d39922', '#059669']
+                : r.status === 'rejected' ? ['Từ chối', '#ef444422', '#dc2626']
+                : r.status === 'revision' ? ['Xem xét lại', '#f59e0b22', '#b45309']
+                : ['Chờ duyệt', '#64748b22', '#64748b']
+              return <span className="px-1.5 py-0.5 rounded-md text-[10px] font-semibold" style={{ background: st[1], color: st[2] }}>{st[0]}</span>
+            })()}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -12835,11 +12838,7 @@ function ProposalHopDongView({ p, users, currentUserId, onClose, canAct, onAppro
               {(p.attachments ?? []).length === 0 && !p.driveUrl && <span className="text-xs text-gray-500">—</span>}
             </div>
             <p className="font-bold text-xs mt-3 mb-1">Tờ trình đính kèm:</p>
-            <p className="text-xs">
-              {Array.isArray(f.relatedCodes) && f.relatedCodes.length > 0
-                ? f.relatedCodes.map((c: string, i: number) => <span key={c}>{i > 0 && ', '}<ProposalCodeLink code={c} /></span>)
-                : '—'}
-            </p>
+            <AttachedProposalList codes={Array.isArray(f.relatedCodes) ? f.relatedCodes : []} />
           </div>
 
           <HopDongOpinions rows={rows} myNote={myNote} setMyNote={setMyNote} choice={choice} setChoice={setChoice} />
@@ -12884,10 +12883,8 @@ function HopDongDetailLeft({ p, users, currentUser, flow, canAct, onApprove, onR
   // ----- Tờ trình đính kèm: gắn mã có sẵn hoặc tạo tờ trình mới -----
   const [codes, setCodes] = useState<string[]>(Array.isArray(f.relatedCodes) ? f.relatedCodes : [])
   useEffect(() => { setCodes(Array.isArray(p.formData?.relatedCodes) ? p.formData!.relatedCodes : []) }, [p.formData])
-  const [codeInput, setCodeInput] = useState('')
   const [codeMsg, setCodeMsg] = useState('')
   const [creating, setCreating] = useState(false)
-  const [busyCode, setBusyCode] = useState(false)
 
   const saveCodes = async (next: string[]) => {
     const { data } = await supabase.from('proposals').select('form_data').eq('id', p.id).single()
@@ -12897,23 +12894,14 @@ function HopDongDetailLeft({ p, users, currentUser, flow, canAct, onApprove, onR
     setCodes(next)
     return true
   }
-  const attachCode = async (raw: string) => {
-    const c = raw.trim().toUpperCase().replace(/^R-TASK/, 'RTASK')
-    if (!c) return
+  // Chọn / bỏ tờ trình bằng bộ chọn tick (giống Đề nghị thanh toán). Phiếu bắt buộc còn ít nhất 1 tờ trình.
+  const onPickCodes = async (v: string) => {
+    const next: string[] = Array.from(new Set((v.match(/\bR-?TASK\d{6}-\d{2,}/gi) ?? []).map(c => c.toUpperCase())))
     setCodeMsg('')
-    if (!/^RTASK\d{6}-\d{2,}$/.test(c)) { setCodeMsg('Mã tờ trình phải có dạng RTASKddmmyy-NN.'); return }
-    if (codes.includes(c)) { setCodeMsg('Tờ trình này đã được gắn rồi.'); return }
-    setBusyCode(true)
-    const { data } = await supabase.from('proposals').select('code, kind').eq('code', c).maybeSingle()
-    if (!data) { setBusyCode(false); setCodeMsg(`Không tìm thấy tờ trình ${c}.`); return }
-    if (data.kind !== 'totrinh') { setBusyCode(false); setCodeMsg(`${c} không phải tờ trình.`); return }
-    if (await saveCodes([...codes, c])) setCodeInput('')
-    setBusyCode(false)
-  }
-  const detach = async (c: string) => {
-    if (!window.confirm(`Gỡ tờ trình ${c} khỏi phiếu hợp đồng?`)) return
-    if (codes.length <= 1) { setCodeMsg('Phiếu hợp đồng bắt buộc có ít nhất 1 tờ trình, hãy gắn tờ trình khác trước rồi mới gỡ.'); return }
-    await saveCodes(codes.filter(x => x !== c))
+    if (next.length === 0) { setCodeMsg('Phiếu hợp đồng bắt buộc có ít nhất 1 tờ trình, hãy chọn tờ trình khác trước rồi mới bỏ.'); return }
+    const removed = codes.filter(c => !next.includes(c))
+    if (removed.length > 0 && !window.confirm(`Gỡ tờ trình ${removed.join(', ')} khỏi phiếu hợp đồng?`)) return
+    await saveCodes(next)
   }
   const onNewDocCreated = async (id: string) => {
     const { data } = await supabase.from('proposals').select('code').eq('id', id).single()
@@ -12986,30 +12974,18 @@ function HopDongDetailLeft({ p, users, currentUser, flow, canAct, onApprove, onR
       {/* 3. Tờ trình đính kèm */}
       <section className="rounded-xl p-4" style={card}>
         <h3 className="text-sm font-bold mb-2" style={head}>📜 Tờ trình đính kèm</h3>
-        {codes.length === 0 && <p className="text-xs mb-2" style={{ color: '#dc2626' }}>Chưa có tờ trình nào được gắn.</p>}
-        <div className="flex flex-wrap gap-2 mb-2">
-          {codes.map(c => (
-            <span key={c} className="text-xs px-2.5 py-1 rounded-full inline-flex items-center gap-1.5" style={{ background: '#ede9fe' }}>
-              <ProposalCodeLink code={c} />
-              {canEditAttach && <button type="button" onClick={() => detach(c)} className="text-red-500" title="Gỡ khỏi phiếu">✕</button>}
-            </span>
-          ))}
-        </div>
-        {canEditAttach && (
+                {codes.length === 0 && <p className="text-xs mb-2" style={{ color: '#dc2626' }}>Chưa có tờ trình nào được gắn.</p>}
+        {canEditAttach ? (
           <>
-            <div className="flex flex-wrap gap-2">
-              <input value={codeInput} onChange={e => setCodeInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); attachCode(codeInput) } }}
-                placeholder="Dán mã tờ trình có sẵn (VD: RTASK201026-01)"
-                className="flex-1 min-w-[200px] px-2 py-1.5 rounded text-xs outline-none"
-                style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
-              <button type="button" onClick={() => attachCode(codeInput)} disabled={!codeInput.trim() || busyCode}
-                className="px-3 py-1.5 rounded text-xs font-bold text-white disabled:opacity-40" style={{ background: '#7c3aed' }}>＋ Gắn tờ trình</button>
+            <RelatedProposalPicker value={codes.join(', ')} onChange={onPickCodes} users={users} />
+            <div className="mt-2">
               <button type="button" onClick={() => setCreating(true)}
                 className="px-3 py-1.5 rounded text-xs font-bold" style={{ background: '#05966922', color: '#059669', border: '1px solid #05966955' }}>📜 Tạo tờ trình mới</button>
             </div>
             {codeMsg && <p className="text-[11px] mt-1 text-red-600">{codeMsg}</p>}
           </>
+        ) : (
+          <AttachedProposalList codes={codes} />
         )}
       </section>
       {creating && (
