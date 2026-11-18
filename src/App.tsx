@@ -1695,6 +1695,7 @@ function NoteDrawer({ title, subtitle, table, fkCol, fkId, textCol, users, curre
     if (error) { alert('Không ghi được work note: ' + error.message); return }
     setDraft('')
     load()
+    if (table === 'proposal_work_notes') window.dispatchEvent(new CustomEvent('proposal-worknotes-changed', { detail: { proposalId: fkId } }))
   }
 
   return (
@@ -13506,19 +13507,30 @@ function ProposalRiskSection({ p, users, currentUser, canEdit }: { p: Proposal; 
 }
 
 function ProposalCommentsSection({ p, users, currentUser }: { p: Proposal; users: User[]; currentUser: User }) {
-  const [comments, setComments] = useState<{ id: string; userId: string; content: string; createdAt: string }[]>([])
+  const [comments, setComments] = useState<{ id: string; userId: string; content: string; createdAt: string; isNote?: boolean }[]>([])
   const [text, setText] = useState('')
+  // Trao đổi = bình luận + Work Note
   const load = async () => {
-    const { data } = await supabase.from('proposal_comments').select('*').eq('proposal_id', p.id).order('created_at')
-    setComments((data ?? []).map((c: any) => ({ id: c.id, userId: c.user_id, content: c.content, createdAt: c.created_at })))
+    const [cm, wn] = await Promise.all([
+      supabase.from('proposal_comments').select('*').eq('proposal_id', p.id).order('created_at'),
+      supabase.from('proposal_work_notes').select('*').eq('proposal_id', p.id).order('created_at'),
+    ])
+    const list = [
+      ...(cm.data ?? []).map((c: any) => ({ id: 'c' + c.id, userId: c.user_id, content: c.content as string, createdAt: c.created_at as string, isNote: false })),
+      ...(wn.data ?? []).map((n: any) => ({ id: 'n' + n.id, userId: n.user_id, content: n.note as string, createdAt: n.created_at as string, isNote: true })),
+    ].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    setComments(list)
   }
   useEffect(() => {
     load()
     const ch = supabase.channel(`proposal-comments-${p.id}-${Math.random().toString(36).slice(2)}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'proposal_comments', filter: `proposal_id=eq.${p.id}` }, () => { load() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'proposal_work_notes', filter: `proposal_id=eq.${p.id}` }, () => { load() })
       .subscribe()
+    const onNote = (e: Event) => { if ((e as CustomEvent).detail?.proposalId === p.id) load() }
+    window.addEventListener('proposal-worknotes-changed', onNote)
     const timer = window.setInterval(() => { if (!document.hidden) load() }, 15000)
-    return () => { supabase.removeChannel(ch); window.clearInterval(timer) }
+    return () => { supabase.removeChannel(ch); window.removeEventListener('proposal-worknotes-changed', onNote); window.clearInterval(timer) }
   }, [p.id])
   const send = async () => {
     const t = text.trim()
@@ -13539,7 +13551,10 @@ function ProposalCommentsSection({ p, users, currentUser }: { p: Proposal; users
           <div key={c.id} className="text-xs">
             <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{users.find(u => u.id === c.userId)?.name}</span>
             <span className="ml-2" style={{ color: 'var(--text-muted)' }}>{new Date(c.createdAt).toLocaleString('vi-VN')}</span>
-            <p style={{ color: 'var(--text-primary)' }}>{c.content}</p>
+            <p style={{ color: 'var(--text-primary)' }}>
+              {c.isNote && <span className="mr-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold" style={{ background: '#6d5ae61f', color: '#6d5ae6' }}>📝 Work Note</span>}
+              {c.content}
+            </p>
           </div>
         ))}
       </div>
@@ -13579,6 +13594,7 @@ function ProposalPlanSection({ p, users, currentUser, flow }: {
     if (error) { alert('Không ghi được worknote: ' + error.message); return }
     setNewNote('')
     loadNotes()
+    window.dispatchEvent(new CustomEvent('proposal-worknotes-changed', { detail: { proposalId: p.id } }))
   }
 
   const changeStatus = async (v: string) => {
@@ -13752,6 +13768,25 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
     const timer = window.setInterval(() => { if (!document.hidden) load() }, 15000)
     return () => { alive = false; supabase.removeChannel(ch); window.removeEventListener('proposal-comments-changed', onChanged); window.clearInterval(timer) }
   }, [p.id])
+  
+  // Work Note cũng được ghi vào Lịch sử
+  const [wnotes, setWnotes] = useState<{ id: string; userId: string; note: string; createdAt: string }[]>([])
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      const { data } = await supabase.from('proposal_work_notes').select('*').eq('proposal_id', p.id).order('created_at')
+      if (!alive) return
+      setWnotes((data ?? []).map((n: any) => ({ id: n.id, userId: n.user_id, note: n.note, createdAt: n.created_at })))
+    }
+    load()
+    const ch = supabase.channel(`proposal-history-wnotes-${p.id}-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'proposal_work_notes', filter: `proposal_id=eq.${p.id}` }, () => { load() })
+      .subscribe()
+    const onNote = (e: Event) => { if ((e as CustomEvent).detail?.proposalId === p.id) load() }
+    window.addEventListener('proposal-worknotes-changed', onNote)
+    const timer = window.setInterval(() => { if (!document.hidden) load() }, 15000)
+    return () => { alive = false; supabase.removeChannel(ch); window.removeEventListener('proposal-worknotes-changed', onNote); window.clearInterval(timer) }
+  }, [p.id])
 
   const flow = steps.length > 0 ? steps : [{
     id: 'legacy', approverId: p.recipientId, order: 1,
@@ -13784,7 +13819,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
 
   const events = [
     { at: p.createdAt, text: `${userOf(p.submittedBy)?.name ?? ''} đã gửi đề xuất` },
-    ...comments.map(c => ({ at: c.createdAt, text: `💬 ${userOf(c.userId)?.name ?? ''} đã trao đổi: ${c.content}` })),
+    ...wnotes.map(n => ({ at: n.createdAt, text: `📝 ${userOf(n.userId)?.name ?? ''} ghi Work Note: ${n.note}` })),
     ...approvals.filter(a => a.proposalId === p.id).map(a => ({
       at: a.createdAt,
       text: `${userOf(a.approverId)?.name ?? ''} ${a.action === 'approved' ? 'đã duyệt' : a.action === 'rejected' ? (a.note?.startsWith('[REVIEW]') ? 'yêu cầu xem xét lại' : 'đã từ chối') : 'đã chuyển tiếp'}${a.note ? `: ${a.note.replace('[REVIEW]', '').trim()}` : ''}`,
