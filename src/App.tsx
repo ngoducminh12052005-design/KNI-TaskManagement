@@ -11952,7 +11952,24 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
               </p>
             </div>
           </div>
-        ) : (tpl === 'nghiphep' || tpl === 'congtacpay' || tpl === 'congtac') ? null : (
+        ) : (tpl === 'nghiphep' || tpl === 'congtacpay') ? null : tpl === 'congtac' ? (
+          <div className="max-w-[860px] mx-auto mb-4 bg-white shadow-xl p-6 text-[13px] space-y-4" style={ink}>
+            <p className="font-bold">Luồng phê duyệt</p>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Cách duyệt</label>
+              <select value={approvalMode} onChange={e => setApprovalMode(e.target.value as 'seq' | 'par')} className="w-full border border-gray-300 rounded px-2 py-1.5 bg-white" style={ink}>
+                <option value="seq">Nối tiếp (lần lượt: Trưởng bộ phận → Các bên liên quan → Ban Giám đốc)</option>
+                <option value="par">Song song (Trưởng bộ phận trước, rồi Các bên liên quan và Ban Giám đốc cùng lúc)</option>
+              </select>
+              <p className="text-[11px] text-gray-500 mt-1">
+                {approvalMode === 'par' ? '⚡ Trưởng bộ phận duyệt trước, sau đó các người còn lại nhận cùng lúc (song song).' : '➡️ Duyệt lần lượt từng người (nối tiếp).'}
+              </p>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                🏛️ Ban Giám đốc Tập đoàn duyệt thì phiếu coi như đã được duyệt, những người còn lại không cần duyệt nữa.
+              </p>
+            </div>
+          </div>
+        ) : (
           <div className="max-w-[860px] mx-auto mb-4 bg-white shadow-xl p-6 text-[13px] space-y-4" style={ink}>
             <p className="font-bold">Luồng phê duyệt</p>
             <div>
