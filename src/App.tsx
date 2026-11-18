@@ -14962,6 +14962,13 @@ function ProposalListTable({ proposals, users, currentUser, isMyTurn, onOpen }: 
   )
 }
 
+// Tờ trình tới lượt Ban Giám đốc duyệt thì trợ lý BOD cũng nhận thông báo (chỉ xem, không duyệt thay)
+async function notifyBodAssistants(users: User[], approverId: string, message: string, proposalId: string) {
+  if (!users.find(u => u.id === approverId)?.isDirector) return
+  for (const a of users.filter(u => u.isBodAssistant && !u.isDirector && u.id !== approverId)) {
+    await supabase.from('notifications').insert({ message, target_user_id: a.id, link_proposal_id: proposalId })
+  }
+}
 function ProposalsView({ currentUser, users, proposals, proposalApprovals, proposalRevisions, onJoinDiscussion, highlightProposalId, clearHighlightProposalId, openProposalId, clearOpenProposalId, contractsMode = false }: {
   currentUser: User; users: User[]; proposals: Proposal[]; proposalApprovals: ProposalApproval[]
   proposalRevisions: ProposalRevision[]
@@ -15182,6 +15189,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
             target_user_id: s.approver_id,
             link_proposal_id: p.id,
           })
+          await notifyBodAssistants(users, s.approver_id, `📜 Tờ trình "${p.title}" của ${getUserById(p.submittedBy)?.name} đã tới lượt ${getUserById(s.approver_id)?.name} duyệt`, p.id)
         }
       }
     }
@@ -15215,6 +15223,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
             target_user_id: st.approver_id,
             link_proposal_id: p.id,
           })
+          await notifyBodAssistants(users, st.approver_id, `📜 Tờ trình "${p.title}" của ${getUserById(p.submittedBy)?.name} đã qua ${currentUser.name}, đến lượt ${getUserById(st.approver_id)?.name} duyệt`, p.id)
         }
       }
     } else if ((p.approvalMode ?? 'seq') === 'par') {
@@ -15242,6 +15251,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
         target_user_id: nextStep.approver_id,
         link_proposal_id: p.id,
       })
+      await notifyBodAssistants(users, nextStep.approver_id, `📜 Tờ trình "${p.title}" của ${getUserById(p.submittedBy)?.name} đã qua ${currentUser.name}, đến lượt ${getUserById(nextStep.approver_id)?.name} duyệt`, p.id)
       await supabase.from('notifications').insert({
         message: `✅ ${currentUser.name} đã duyệt tờ trình "${p.title}", đã chuyển cho ${getUserById(nextStep.approver_id)?.name}`,
         target_user_id: p.submittedBy,
