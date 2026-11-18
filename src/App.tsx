@@ -1239,6 +1239,12 @@ const SLA_EXP_NONE = { min: 60, max: 60, suggested: 60 }   // task không áp d�
 const slaExpRange = (sla?: string) => (sla && SLA_EXP[sla]) || SLA_EXP_NONE
 const SUPPORTER_EXP_PERCENT = 0.3
 
+// Người theo dõi: lưu chung trong cột supporters (cùng hưởng 30% EXP), id riêng lưu ở form_data._meta.followers
+const followerIdsOf = (t: { formData?: any; supporters: string[] }): string[] => {
+  const raw = t.formData?._meta?.followers
+  return Array.isArray(raw) ? raw.filter((id: string) => t.supporters.includes(id)) : []
+}
+
 // ===== Điểm thực nhận khi hoàn thành task =====
 // Nộp kết quả đúng hạn: 100% điểm · trễ tới 1 ngày: trừ 50% · trễ tới 2 ngày: trừ 75% · trễ từ 3 ngày trở lên: không có điểm
 const lateFactor = (lateSec: number): number => {
@@ -2519,12 +2525,8 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
             {isManager && !editingTask && (
         <div className="max-w-[860px] mx-auto mt-4 flex gap-1 p-1 rounded-xl bg-white shadow">
           {!(currentUser.isBodAssistant && !currentUser.isDirector) && (
-            <button type="button" onClick={() => { setSelfMode(false); setCrossMode(false); patchForm({ assignedTo: [], fromBod: false }) }} className="flex-1 py-2 rounded-lg text-xs font-semibold"
-              style={{ background: !selfMode && !crossMode && !form.fromBod ? '#7c3aed' : 'transparent', color: !selfMode && !crossMode && !form.fromBod ? '#fff' : '#6b7280' }}>📋 Giao nhân viên phòng ban</button>
-          )}
-          {!currentUser.isDirector && !currentUser.isBodAssistant && (
-            <button type="button" onClick={() => { setSelfMode(false); setCrossMode(true); patchForm({ assignedTo: [], fromBod: false }) }} className="flex-1 py-2 rounded-lg text-xs font-semibold"
-              style={{ background: !selfMode && crossMode ? '#7c3aed' : 'transparent', color: !selfMode && crossMode ? '#fff' : '#6b7280' }}>🤝 Giao / phối hợp phòng ban khác</button>
+            <button type="button" onClick={() => { setSelfMode(false); setCrossMode(false); setCrossTeamId(''); patchForm({ assignedTo: [], fromBod: false }) }} className="flex-1 py-2 rounded-lg text-xs font-semibold"
+              style={{ background: !selfMode && !form.fromBod ? '#7c3aed' : 'transparent', color: !selfMode && !form.fromBod ? '#fff' : '#6b7280' }}>📋 Giao nhân viên / phòng ban khác</button>
           )}
           {currentUser.isBodAssistant && !currentUser.isDirector && (
             <button type="button" onClick={() => { setSelfMode(false); setCrossMode(false); patchForm({ assignedTo: [], fromBod: true }) }} className="flex-1 py-2 rounded-lg text-xs font-semibold"
@@ -2571,20 +2573,24 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
           <b className="shrink-0 w-24">Giao cho:</b>
           <div className="flex-1">
             {assigning
-              ? (crossMode && !currentUser.isDirector ? (
+              ? ((!currentUser.isDirector && !currentUser.isBodAssistant && (!editingTask || !!editingTask.crossDeptRejected)) ? (
                   <div className="space-y-2">
-                    <select value={crossTeamId} onChange={e => { setCrossTeamId(e.target.value); patchForm({ assignedTo: [] }) }}
+                    <select value={crossMode ? crossTeamId : ''} onChange={e => { const v = e.target.value; setCrossMode(!!v); setCrossTeamId(v); patchForm({ assignedTo: [] }) }}
                       className="w-full border-b border-dashed border-gray-300 bg-transparent outline-none font-semibold" style={ink}>
-                      <option value="">-- chọn phòng ban cần giao / phối hợp --</option>
+                      <option value="">Phòng ban của tôi ({currentUser.department || 'cùng phòng'})</option>
                       {TEAMS.filter(t => t.id !== currentUser.teamId).map(t => <option key={t.id} value={t.id}>{t.emoji} {t.name}</option>)}
                     </select>
-                    {crossTeamId && (
+                    {crossMode && crossTeamId ? (
                       <DocPeoplePicker options={users.filter(u => u.teamId === crossTeamId)} value={form.assignedTo}
                         onChange={v => patchForm({ assignedTo: v })} empty="Để quản lý phòng ban đó tự làm hoặc phân công" />
+                    ) : (
+                      <DocPeoplePicker options={employees} value={form.assignedTo} onChange={v => patchForm({ assignedTo: v })} empty="Chưa giao (mỗi người nhận đủ 100% EXP)" />
                     )}
-                    <p className="text-[11px] leading-relaxed" style={{ color: '#b45309' }}>
-                      ⚠️ Quản lý phòng ban đó phải <b>duyệt</b> thì task mới được làm. Họ có thể tự làm hoặc phân công lại cho bất kỳ ai trong phòng. Người (nhân viên hoặc quản lý) bạn chọn ở trên chỉ là đề xuất.
-                    </p>
+                    {crossMode && crossTeamId && (
+                      <p className="text-[11px] leading-relaxed" style={{ color: '#b45309' }}>
+                        ⚠️ Quản lý phòng ban đó phải <b>duyệt</b> thì task mới được làm. Họ có thể tự làm hoặc phân công lại cho bất kỳ ai trong phòng. Người (nhân viên hoặc quản lý) bạn chọn ở trên chỉ là đề xuất.
+                      </p>
+                    )}
                   </div>
                 )
                 : <DocPeoplePicker options={employees} value={form.assignedTo} onChange={v => patchForm({ assignedTo: v })} empty="Chưa giao (mỗi người nhận đủ 100% EXP)" />)
@@ -2594,8 +2600,8 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
         {assigning && (
           <>
             <div className="flex gap-3 mb-3">
-              <b className="shrink-0 w-24">Quản lý (PM):</b>
-              <div className="flex-1"><DocPeoplePicker options={users.filter(u => u.role === 'manager')} value={form.projectManager} onChange={v => patchForm({ projectManager: v })} empty="Chưa chọn PM (nhận đủ 100% EXP)" /></div>
+              <b className="shrink-0 w-24">Người theo dõi:</b>
+              <div className="flex-1"><DocPeoplePicker options={users.filter(u => u.id !== currentUser.id)} value={form.followers ?? []} onChange={v => patchForm({ followers: v })} empty={`Chưa chọn (mỗi người nhận ${Math.round(SUPPORTER_EXP_PERCENT * 100)}% EXP khi task Close)`} /></div>
             </div>
             <div className="flex gap-3 mb-3">
               <b className="shrink-0 w-24">Hỗ trợ:</b>
@@ -2763,6 +2769,11 @@ const hoursMs = (SLA_LEVELS as any)[form.slaLevel].hours * 3600000
           </div>
           <div>
             <p className="font-bold">Quản lý (PM)</p><p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+            {assigning ? (
+              <p className="mt-10 text-xs text-gray-500">
+                {crossMode && crossTeamId ? `Quản lý ${TEAMS.find(t => t.id === crossTeamId)?.name ?? 'phòng ban nhận'} (tự gán khi duyệt)` : currentUser.name}
+              </p>
+            ) : (<>
             <div className="mt-4 flex flex-wrap justify-center gap-1.5">
               {teamManagers.map(m => {
                 const on = form.projectManager.includes(m.id)
@@ -2782,6 +2793,7 @@ const hoursMs = (SLA_LEVELS as any)[form.slaLevel].hours * 3600000
               </div>
             )}
             <p className="mt-2 text-xs text-gray-500">{form.projectManager.map(nameOf).join(', ') || '—'}</p>
+            </>)}
           </div>
         </div>
       </div>
@@ -3079,7 +3091,7 @@ function CrossDeptApproveModal({ task, currentUser, users, onClose }: { task: Ta
     if (assignedTo.length === 0) { setError('Vui lòng chọn ít nhất 1 người thực hiện.'); return }
     setError(''); setSaving(true)
     const { error: upErr } = await supabase.from('tasks').update({
-      cross_dept_pending: false, assigned_to: assignedTo,
+      cross_dept_pending: false, assigned_to: assignedTo, project_manager: [currentUser.id],
       // SLA chỉ tính từ lúc quản lý phòng ban duyệt (BOD giao cũng vậy); nếu ngày bắt đầu ở tương lai thì tính từ ngày đó
       sla_start_at: task.slaLevel ? new Date(Math.max(Date.now(), startMs(task.startDate, taskStartTime(task)))).toISOString() : null,
       form_data: { ...(task.formData ?? {}), _meta: { ...taskMeta(task), crossApprovedBy: currentUser.id, crossApprovedAt: new Date().toISOString(), transfer: null,
@@ -3299,7 +3311,7 @@ type TaskChange = { label: string; from: string; to: string }
 // So sánh task trước và sau khi sửa, ghi lại từng thông tin đã đổi để hiện trong Lịch sử
 function diffTaskEdit(old: Task, f: {
   title: string; company: string; description: string; expReward: number
-  assignedTo: string[]; projectManager: string[]; supporters: string[]
+  assignedTo: string[]; projectManager: string[]; supporters: string[]; followers?: string[]
   startDate: string; startTime?: string; dueDate: string; category: string; priority: TaskPriority
   important: boolean; urgent: boolean; isTeamProject: boolean; slaLevel: string
   doc: any
@@ -3317,7 +3329,10 @@ function diffTaskEdit(old: Task, f: {
   pushText('Mô tả', old.description, f.description)
   pushVal('EXP thưởng', String(old.expReward), String(f.expReward))
   if (!sameIds(old.assignedTo, f.assignedTo)) out.push({ label: 'Người phụ trách', from: names(old.assignedTo), to: names(f.assignedTo) })
-  if (!sameIds(old.supporters, f.supporters)) out.push({ label: 'Người hỗ trợ', from: names(old.supporters), to: names(f.supporters) })
+  const oldFollowers = followerIdsOf(old)
+  const oldSupporters = old.supporters.filter(id => !oldFollowers.includes(id))
+  if (!sameIds(oldSupporters, f.supporters)) out.push({ label: 'Người hỗ trợ', from: names(oldSupporters), to: names(f.supporters) })
+  if (!sameIds(oldFollowers, f.followers ?? [])) out.push({ label: 'Người theo dõi', from: names(oldFollowers), to: names(f.followers ?? []) })
   if (!sameIds(old.projectManager, f.projectManager)) out.push({ label: 'Quản lý (PM)', from: names(old.projectManager), to: names(f.projectManager) })
   pushVal('Ngày bắt đầu', date(old.startDate), date(f.startDate))
   pushVal('Giờ bắt đầu', taskStartTime(old) || '—', f.startTime || '—')
@@ -3610,7 +3625,8 @@ function TaskDetailPage({ task, users, currentUser, canApprove, canEdit, canSend
               {info('Công ty', task.company ? `${COMPANY_CODES[task.company] ? `${COMPANY_CODES[task.company]} · ` : ''}${task.company}` : '')}
               {info('Người tạo', `${nameOf(task.createdBy)}${task.selfCreated ? ' (tự tạo)' : ''}`)}
               {info('Người phụ trách', names(task.assignedTo))}
-              {info('Hỗ trợ', names(task.supporters))}
+              {info('Hỗ trợ', names(task.supporters.filter(id => !followerIdsOf(task).includes(id))))}
+              {info('Người theo dõi', names(followerIdsOf(task)))}
               {info('Quản lý (PM)', names(task.projectManager))}
               {info('Ngày bắt đầu', `${fmtD(task.startDate)}${taskStartTime(task) ? ` · ${taskStartTime(task)}` : ''}`)}
               {info('Hạn hoàn thành', `${fmtD(task.dueDate)}${slaDueClock(task) ? ` · ${slaDueClock(task)}` : ''}`)}
@@ -3835,7 +3851,8 @@ function TaskDetailModal({ task, users, currentUser, canApprove, canEdit, canSen
 
           <div className="flex gap-3 mb-1"><b className="shrink-0 w-24">Giao cho:</b><span>{names(task.assignedTo)}</span></div>
           <div className="flex gap-3 mb-1"><b className="shrink-0 w-24">Quản lý (PM):</b><span>{names(task.projectManager)}</span></div>
-          <div className="flex gap-3 mb-3"><b className="shrink-0 w-24">Hỗ trợ:</b><span>{names(task.supporters)}</span></div>
+          <div className="flex gap-3 mb-1"><b className="shrink-0 w-24">Hỗ trợ:</b><span>{names(task.supporters.filter(id => !followerIdsOf(task).includes(id)))}</span></div>
+          <div className="flex gap-3 mb-3"><b className="shrink-0 w-24">Theo dõi:</b><span>{names(followerIdsOf(task))}</span></div>
 
           {Array.isArray(f.canCu) && f.canCu.length > 0 && (
             <div className="mb-3"><b>Căn cứ:</b><ul className="italic mt-1 space-y-1">{f.canCu.map((c: string, i: number) => <li key={i}>• {c}</li>)}</ul></div>
@@ -4722,7 +4739,6 @@ async function closeTask(
     // Điểm thực nhận: theo mức SLA, nộp trễ thì giảm (≤1 ngày còn 75%, ≤2 ngày còn 50%, từ 3 ngày không có điểm)
   task = { ...task, expReward: taskEarnedExp(task) }
 
-  const isTeamwork = task.isTeamProject || task.assignedTo.length > 1 || task.supporters.length > 0
   const supportExp = Math.round(task.expReward * SUPPORTER_EXP_PERCENT)
 
   const bodUsers = users.filter(u => u.isDirector && u.id !== currentUser.id)
@@ -4759,14 +4775,11 @@ async function closeTask(
     })
   }
 
+  // PM khác không đóng task thì chỉ nhận thông báo (không cộng điểm)
   const pmIds = task.projectManager.filter(uid => uid && uid !== currentUser.id)
   for (const uid of pmIds) {
-    const pm = users.find(u => u.id === uid)
-    const eligibleForExp = pm?.role === 'employee' || task.selfCreated || isTeamwork
     await supabase.from('notifications').insert({
-      message: eligibleForExp
-        ? `✅ ${currentUser.name} đã ${closeLabel} task: "${task.title}" — bạn nhận được +${task.expReward} EXP`
-        : `✅ ${currentUser.name} đã duyệt task: "${task.title}" (task cá nhân, không cộng EXP cho PM)`,
+      message: `✅ ${currentUser.name} đã ${closeLabel} task: "${task.title}"`,
       target_user_id: uid,
       link_task_id: task.id,
     })
@@ -4779,13 +4792,14 @@ async function closeTask(
     }
   }
 
-  for (const uid of task.projectManager) {
-    const pm = users.find(u => u.id === uid)
-    if (!pm) continue
-    const eligibleForExp = pm.role === 'employee' || task.selfCreated || isTeamwork
-    if (eligibleForExp) {
-      await supabase.from('profiles').update({ exp: pm.exp + task.expReward }).eq('id', pm.id)
-    }
+  // Quản lý đóng task của nhân viên thì nhận 30% điểm của người nhận
+  const closerGetsExp = currentUser.role === 'manager' && !currentUser.isDirector
+    && [task.createdBy, ...task.projectManager].includes(currentUser.id)
+    && !task.assignedTo.includes(currentUser.id)
+    && task.assignedTo.some(uid => users.find(u => u.id === uid)?.role === 'employee')
+  if (closerGetsExp) {
+    const closer = users.find(u => u.id === currentUser.id)
+    await supabase.from('profiles').update({ exp: (closer?.exp ?? currentUser.exp) + supportExp }).eq('id', currentUser.id)
   }
 
   for (const uid of task.supporters) {
@@ -6863,7 +6877,7 @@ function TasksView({ currentUser, tasks, users, setTasks, setCurrentUser, collab
     title: '', description: '', expReward: 80, startDate: todayStr, startTime: '', dueDate: '',
     category: 'operations', priority: 'medium' as TaskPriority,
     important: false, urgent: false, isTeamProject: false,
-    assignedTo: [] as string[], projectManager: [] as string[], supporters: [] as string[],
+    assignedTo: [] as string[], projectManager: [] as string[], supporters: [] as string[], followers: [] as string[],
     driveFolderCreated: false, driveFolderName: '',
     slaLevel: '' as '' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5',
     fromBod: !!(currentUser.isBodAssistant && !currentUser.isDirector),   // trợ lý BOD mặc định "Giao task từ BOD"
@@ -7074,7 +7088,8 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       startDate: task.startDate || todayStr, startTime: taskStartTime(task), dueDate: task.dueDate,
       category: task.category, priority: task.priority,
       important: task.important, urgent: task.urgent, isTeamProject: task.isTeamProject ?? false,
-      assignedTo: task.assignedTo, projectManager: task.projectManager, supporters: task.supporters,
+      assignedTo: task.assignedTo, projectManager: task.projectManager,
+      supporters: task.supporters.filter(id => !followerIdsOf(task).includes(id)), followers: followerIdsOf(task),
           driveFolderCreated: task.driveFolderCreated ?? false,
     driveFolderName: task.driveFolderName ?? '',
     slaLevel: task.slaLevel ?? '',
@@ -7118,7 +7133,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       }
       const { error: updateError } = await supabase.from('tasks').update({
         title: finalTitle, company: form.company || null, description: form.description, exp_reward: slaExpRange(form.slaLevel).suggested,
-        assigned_to: reCrossAssigned, ...(reCross ? { target_team_id: crossTeamId } : {}), project_manager: form.projectManager, supporters: form.supporters,
+        assigned_to: reCrossAssigned, ...(reCross ? { target_team_id: crossTeamId } : {}), project_manager: form.projectManager, supporters: Array.from(new Set([...form.supporters, ...(form.followers ?? [])])),
         start_date: form.startDate, due_date: form.dueDate,
         ...(resubmit ? { creation_approval: 'pending', creation_rejected_reason: null } : {}),
         category: form.category, priority: form.priority,
@@ -7130,7 +7145,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
       // Đổi giữa các mức SLA (VD P3 → P1) thì giữ nguyên mốc cũ.
       ...(slaStartsNow ? { sla_start_at: new Date(Math.max(Date.now(), startMs(form.startDate, form.startTime))).toISOString() } : {}),
       ...(!form.slaLevel ? { sla_start_at: null } : {}),
-      form_data: withMeta(cleanTaskDoc(form.doc), { ...taskMeta(editingTask), startTime: form.startTime || undefined }),
+      form_data: withMeta(cleanTaskDoc(form.doc), { ...taskMeta(editingTask), startTime: form.startTime || undefined, followers: form.followers ?? [] }),
     }).eq('id', editingTask.id)
     if (updateError) {
       alert('Không lưu được thay đổi: ' + updateError.message)
@@ -7207,6 +7222,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
           ...(form.startTime ? { startTime: form.startTime } : {}),
           ...((currentUser.isBodAssistant && !currentUser.isDirector && form.fromBod && !creatingForSelf) ? { fromBod: true } : {}),
           ...(bodGate ? { bodGate: true } : {}),
+          ...((!creatingForSelf && (form.followers ?? []).length > 0) ? { followers: form.followers } : {}),
         }),
         // Task tự tạo chạy ngay, trừ khi ngày bắt đầu ở tương lai: lúc đó chờ tới ngày (hoặc bấm "Bắt đầu sớm")
         work_status: (creatingForSelf && !needsApproval && !(form.startDate > localToday())) ? 'processing' : 'received',
@@ -7214,7 +7230,9 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
         started_at: (creatingForSelf && !needsApproval && !(form.startDate > localToday())) ? new Date().toISOString() : null,
         processing_started_at: (creatingForSelf && !needsApproval && !(form.startDate > localToday())) ? new Date().toISOString() : null,
         assigned_to: creatingForSelf ? [currentUser.id] : finalAssigned,
-        project_manager: form.projectManager, supporters: form.supporters,
+        // PM tự gán: giao task thì PM là chính quản lý giao (giao phòng khác thì đổi thành quản lý phòng đó khi họ duyệt)
+        project_manager: creatingForSelf ? form.projectManager : [currentUser.id],
+        supporters: Array.from(new Set([...form.supporters, ...(creatingForSelf ? [] : (form.followers ?? []))])),
         created_by: currentUser.id,
         start_date: form.startDate,
         due_date: form.dueDate || localDateStr(new Date(Date.now() + 7 * 86400000)),
@@ -7256,6 +7274,15 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
           })
         }
 
+        for (const uid of (form.followers ?? [])) {
+          if (uid === currentUser.id) continue
+          await supabase.from('notifications').insert({
+            message: `👁️ ${currentUser.name} vừa thêm bạn làm người theo dõi task [${taskCode}]: ${taskContent}`,
+            target_user_id: uid,
+            link_task_id: newTaskId,
+          })
+        }
+
         if (isCrossDept && targetTeamId) {
           const targetManagers = users.filter(u => u.role === 'manager' && u.teamId === targetTeamId)
           const assigneeNames = crossRequested && form.assignedTo.length === 0 ? '' : outsideAssignees.map(u => u.name).join(', ')
@@ -7292,7 +7319,7 @@ const toggleBucket = (b: TaskBucket) => setFilter(f => (f === b ? 'all' : b))
     // Tạo task từ dự án xong thì quay lại chi tiết dự án
     if (projectCtx) { const pid = projectCtx.id; setProjectCtx(null); onCreateForProjectDone?.(pid) }
     if (returnProjectId) { const pid = returnProjectId; setReturnProjectId(null); onCreateForProjectDone?.(pid, editingTask?.id) }
-    setForm({ title: '', description: '', expReward: 80, startDate: todayStr, startTime: '', dueDate: '', category: 'operations', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], driveFolderCreated: false, driveFolderName: '', slaLevel: '', company: '', fromBod: !!(currentUser.isBodAssistant && !currentUser.isDirector), doc: emptyTaskDoc() })
+    setForm({ title: '', description: '', expReward: 80, startDate: todayStr, startTime: '', dueDate: '', category: 'operations', priority: 'medium', important: false, urgent: false, isTeamProject: false, assignedTo: [], projectManager: [], supporters: [], followers: [], driveFolderCreated: false, driveFolderName: '', slaLevel: '', company: '', fromBod: !!(currentUser.isBodAssistant && !currentUser.isDirector), doc: emptyTaskDoc() })
   }
 
   const toggleFormArray = (field: 'assignedTo' | 'projectManager' | 'supporters', uid: string) => {
