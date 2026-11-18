@@ -14061,7 +14061,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
                 </div>
               )}
             </section>
-            <ProposalSupplementSection p={p} currentUser={currentUser} flow={flow} noDrive={relBelow || isFormDoc(p)} />
+            <ProposalSupplementSection p={p} currentUser={currentUser} flow={flow} noDrive />
             {relBelow && renderRelated()}
             <ProposalCostSection p={p} canEdit={canEdit} />
             <ProposalCommentsSection p={p} users={users} currentUser={currentUser} />
