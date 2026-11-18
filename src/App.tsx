@@ -13877,6 +13877,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
 
   const events = [
     { at: p.createdAt, text: `${userOf(p.submittedBy)?.name ?? ''} đã gửi đề xuất` },
+    ...comments.map(c => ({ at: c.createdAt, text: `💬 ${userOf(c.userId)?.name ?? ''} đã trao đổi: ${c.content}` })),
     ...wnotes.map(n => ({ at: n.createdAt, text: `📝 ${userOf(n.userId)?.name ?? ''} ghi Work Note: ${n.note}` })),
     ...approvals.filter(a => a.proposalId === p.id).map(a => ({
       at: a.createdAt,
@@ -15034,6 +15035,7 @@ function ProposalListTable({ proposals, users, currentUser, isMyTurn, onOpen }: 
                     className="relative px-2 py-1.5 rounded-lg text-[11px] font-bold leading-tight"
                     style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: '#6d5ae6' }}>
                     📝 Work Note
+                    <WorkNoteBadge count={noteBadges[p.id] ?? 0} />
                   </button>
                 </td>
               </tr>
