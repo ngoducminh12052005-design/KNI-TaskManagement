@@ -9556,8 +9556,8 @@ function LinkifyCodes({ text }: { text: string }) {
   const parts = text.split(PROPOSAL_CODE_SPLIT)
   return <>{parts.map((s, i) => (i % 2 === 1 ? <ProposalCodeLink key={i} code={s.toUpperCase()} /> : <span key={i}>{s}</span>))}</>
 }
-function ProposalSupplementSection({ p, currentUser, flow }: {
-  p: Proposal; currentUser: User; flow: { id: string; approverId: string; status: string }[]
+function ProposalSupplementSection({ p, currentUser, flow, noDrive = false }: {
+  p: Proposal; currentUser: User; flow: { id: string; approverId: string; status: string }[]; noDrive?: boolean
 }) {
   const [files, setFiles] = useState<File[]>([])
   const [note, setNote] = useState('')
@@ -9581,7 +9581,7 @@ function ProposalSupplementSection({ p, currentUser, flow }: {
   const submit = async () => {
     const link = driveLink.trim()
 if (link && !/^https?:\/\//i.test(link)) { setMsg('Link Drive không hợp lệ (phải bắt đầu bằng http:// hoặc https://).'); return }
-if (!note.trim() && files.length === 0 && !link) { setMsg('Hãy nhập nội dung bổ sung, chọn file hoặc dán link Drive.'); return }
+if (!note.trim() && files.length === 0 && !link) { setMsg(noDrive ? 'Hãy nhập nội dung bổ sung hoặc chọn file.' : 'Hãy nhập nội dung bổ sung, chọn file hoặc dán link Drive.'); return }
     setSaving(true); setMsg('')
     let uploaded: { name: string; path: string; size: number; type: string }[] = []
     try { uploaded = await uploadProposalFiles(currentUser.id, files) }
@@ -9640,9 +9640,11 @@ if (!note.trim() && files.length === 0 && !link) { setMsg('Hãy nhập nội dun
       <textarea value={note} onChange={e => setNote(e.target.value)} rows={2}
         placeholder="Đã bổ sung / chỉnh sửa gì? VD: đã bổ sung báo giá và bảng so sánh nhà cung cấp"
         className="w-full px-2 py-1.5 rounded-lg text-xs outline-none resize-none mb-2" style={inputStyle} />
-      <input value={driveLink} onChange={e => setDriveLink(e.target.value)}
-        placeholder="Link Drive chứa báo giá / tài liệu (https://drive.google.com/...)"
-        className="w-full px-2 py-1.5 rounded-lg text-xs outline-none mb-2" style={inputStyle} />
+      {!noDrive && (
+        <input value={driveLink} onChange={e => setDriveLink(e.target.value)}
+          placeholder="Link Drive chứa báo giá / tài liệu (https://drive.google.com/...)"
+          className="w-full px-2 py-1.5 rounded-lg text-xs outline-none mb-2" style={inputStyle} />
+      )}
         <AttachBox dark files={files} setFiles={setFiles} />
       {msg && <p className="text-xs mt-2" style={{ color: msg.startsWith('✅') ? '#059669' : '#dc2626' }}>{msg}</p>}
       <button type="button" onClick={submit} disabled={saving}
@@ -10748,7 +10750,7 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: {
     const formData = {
       dept, payMethod, dateText, rows: cleanRows,
       bank: payMethod === 'bank' ? { owner: owner.trim(), account: account.trim(), bankName: bankName.trim(), branch: branch.trim() } : null,
-      bangChu: vnMoneyWords(total), total, relatedCodes,
+      bangChu: vnMoneyWords(total), total, relatedCodes, payDeadline: payDeadline || null,
     }
 
     let data: any = null
@@ -13645,18 +13647,41 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
   const fmt = (d?: string) => (d ? new Date(d).toLocaleString('vi-VN') : '')
     // Tờ trình liên quan (của Đề nghị thanh toán / hợp đồng): hiện mã, tên, trạng thái; bấm vào để xem popup
   const openRelated = useContext(ProposalLinkContext)
-  const relatedCodes: string[] = Array.isArray(p.formData?.relatedCodes) ? p.formData!.relatedCodes : []
+  const isCongTacPay = p.formData?.tpl === 'congtacpay'
+  // DNTT: các tờ trình liên quan. Thanh toán công tác phí: phiếu đề xuất đi công tác (srcCode)
+  const relatedCodes: string[] = Array.isArray(p.formData?.relatedCodes) ? p.formData!.relatedCodes
+    : (isCongTacPay && p.formData?.srcCode ? [String(p.formData.srcCode)] : [])
+  const relBelow = p.kind === 'dntt' || isCongTacPay   // 2 loại này: khối "liên quan" nằm dưới "Bổ sung hồ sơ"
   const relatedKey = relatedCodes.join(',')
-  const [relRows, setRelRows] = useState<{ code: string; title: string; status: string }[]>([])
+  const [relRows, setRelRows] = useState<{ code: string; title: string; status: string; kind?: string }[]>([])
   useEffect(() => {
     if (relatedCodes.length === 0) { setRelRows([]); return }
     let alive = true
-    supabase.from('proposals').select('code, title, status').in('code', relatedCodes).then(({ data }) => {
-      if (alive) setRelRows((data ?? []) as { code: string; title: string; status: string }[])
+    supabase.from('proposals').select('code, title, status, kind').in('code', relatedCodes).then(({ data }) => {
+      if (alive) setRelRows((data ?? []) as { code: string; title: string; status: string; kind?: string }[])
     })
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [relatedKey])
+  const renderRelated = () => relatedCodes.length === 0 ? null : (
+    <section className="rounded-xl p-4" style={card}>
+      <h3 className="text-sm font-bold mb-2" style={{ color: 'var(--text-primary)' }}>Tờ trình / đề xuất liên quan</h3>
+      <div className="space-y-1.5">
+        {relatedCodes.map(c => {
+          const r = relRows.find(x => x.code === c)
+          return (
+            <button key={c} type="button" onClick={() => openRelated(c)} title="Bấm để xem"
+              className="w-full text-left flex items-center gap-2 flex-wrap rounded-lg px-2.5 py-1.5 hover:opacity-80 text-xs"
+              style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+              <span className="font-mono font-semibold underline" style={{ color: '#2563eb' }}>{c}</span>
+              <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{r ? `${r.kind === 'totrinh' ? 'Tờ trình' : 'Đề xuất'}: ${r.title}` : 'Đang tải…'}</span>
+              {r && <Badge s={r.status} />}
+            </button>
+          )
+        })}
+      </div>
+    </section>
+  )
   useEffect(() => {
     let alive = true
     supabase.from('proposal_steps').select('*').eq('proposal_id', p.id).order('step_order').then(({ data }) => {
@@ -13864,12 +13889,15 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
               <Row k="Nhóm đề xuất" v={p.groupName} />
               <Row k="Phòng ban" v={p.department} />
               <Row k="Công ty" v={p.company} />
-              <Row k="Thời gian cần" v={p.days ? `${p.days} ngày` : undefined} />
-              <Row k="Hạn kết thúc" v={p.dueDate} />
-              {p.kind === 'dntt' && p.formData?.payDeadline && (
-              <Row k="Thời hạn thanh toán" v={new Date(p.formData.payDeadline + 'T00:00:00').toLocaleDateString('vi-VN')} />
+              {p.kind === 'dntt' ? (
+                <Row k="Thời hạn thanh toán" v={p.formData?.payDeadline ? new Date(p.formData.payDeadline + 'T00:00:00').toLocaleDateString('vi-VN') : undefined} />
+              ) : (
+                <>
+                  <Row k="Thời gian cần" v={p.days ? `${p.days} ngày` : undefined} />
+                  <Row k="Hạn kết thúc" v={p.dueDate} />
+                </>
               )}
-              {relatedCodes.length > 0 && (
+              {!relBelow && relatedCodes.length > 0 && (
                 <div className="grid grid-cols-3 gap-2 text-xs py-1">
                   <span style={{ color: 'var(--text-muted)' }}>Tờ trình liên quan</span>
                   <div className="col-span-2 space-y-1.5">
@@ -13901,7 +13929,8 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
                 </div>
               )}
             </section>
-            <ProposalSupplementSection p={p} currentUser={currentUser} flow={flow} />
+            <ProposalSupplementSection p={p} currentUser={currentUser} flow={flow} noDrive={relBelow} />
+            {relBelow && renderRelated()}
             <ProposalCostSection p={p} canEdit={canEdit} />
             <ProposalCommentsSection p={p} users={users} currentUser={currentUser} />
           </div>
