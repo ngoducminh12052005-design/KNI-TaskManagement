@@ -18780,7 +18780,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
   tasks: Task[]; setTasks: (t: Task[]) => void
   messages: Message[]; setMessages: (m: Message[]) => void
   redemptions: { id: string; userId: string; rewardId: string; cost: number }[]
-  notifications: { id: string; message: string; createdAt: string }[]
+  notifications: { id: string; message: string; createdAt: string; linkChannel?: string; linkDmUserId?: string; linkTaskId?: string; linkProposalId?: string }[]
   collaborations: Collaboration[]
   proposals: Proposal[]
   proposalApprovals: ProposalApproval[]
@@ -18929,6 +18929,49 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
     parseMentions(m.content, users).some(x => x.user.id === currentUser.id) &&
     m.timestamp > lastSeenMention
   ).length  
+    // ===== Số đỏ trên menu: Task / Tờ trình / Hợp đồng / Social =====
+  const [navSeen, setNavSeen] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(localStorage.getItem('navLastSeen') || '{}') } catch { return {} }
+  })
+  const markNavSeen = (id: string) => {
+    const now = new Date().toISOString()
+    const latest = notifications.reduce((m, n) => (n.createdAt > m ? n.createdAt : m), '')
+    const stamp = latest > now ? latest : now
+    setNavSeen(prev => {
+      const next = { ...prev, [id]: stamp }
+      try { localStorage.setItem('navLastSeen', JSON.stringify(next)) } catch {}
+      return next
+    })
+  }
+  // Đang mở trang nào thì coi như đã xem trang đó
+  useEffect(() => {
+    if (view === 'tasks' || view === 'proposals' || view === 'contracts') markNavSeen(view)
+  }, [view, notifications.length])
+
+  const isContractProposal = (pid?: string) => proposals.find(x => x.id === pid)?.formData?.tpl === 'hopdong'
+  const navBadge = (id: string): number => {
+    const seen = navSeen[id] || ''
+    if (id === 'tasks') return notifications.filter(n => n.linkTaskId && n.createdAt > seen).length
+    if (id === 'proposals') return notifications.filter(n => n.linkProposalId && !isContractProposal(n.linkProposalId) && n.createdAt > seen).length
+    if (id === 'contracts') return notifications.filter(n => n.linkProposalId && isContractProposal(n.linkProposalId) && n.createdAt > seen).length
+    if (id === 'social') {
+      // Social = tin @tag mình + tin nhắn riêng (DM) chưa đọc, mỗi tin đếm 1 lần
+      const ids = new Set<string>()
+      messages.forEach(m => {
+        if (m.userId !== currentUser.id && isMessageVisibleTo(m, currentUser, users) &&
+            parseMentions(m.content, users).some(x => x.user.id === currentUser.id) && m.timestamp > lastSeenMention) ids.add(m.id)
+      })
+      if (view !== 'social') {
+        let chatSeen: Record<string, string> = {}
+        try { chatSeen = JSON.parse(localStorage.getItem('chatLastSeen') || '{}') } catch {}
+        messages.forEach(m => {
+          if (m.channel === 'dm' && m.toUserId === currentUser.id && m.timestamp > (chatSeen[`dm:${m.userId}`] || '')) ids.add(m.id)
+        })
+      }
+      return ids.size
+    }
+    return 0
+  }
 
   const sharedProps = { currentUser, tasks, users, setTasks, setCurrentUser, redemptions, setView }
 
@@ -19022,9 +19065,9 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
                       }}>
                       <span className="text-base w-5 text-center">{item.icon}</span>
                       <span className="flex-1">{item.label}</span>
-                      {item.id === 'social' && mentionCount > 0 && (
+                      {navBadge(item.id) > 0 && (
                         <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center font-bold">
-                          {mentionCount > 9 ? '9+' : mentionCount}
+                          {navBadge(item.id) > 9 ? '9+' : navBadge(item.id)}
                         </span>
                       )}
                     </button>
@@ -19064,9 +19107,9 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
             style={{ color: view === item.id ? '#6d5ae6' : 'var(--text-muted)' }}>
             <span className="text-lg">{item.icon}</span>
             <span className="text-[9px] text-center leading-tight">{item.label === 'Quản lý người dùng' ? 'Người dùng' : item.label}</span>
-            {item.id === 'social' && mentionCount > 0 && (
-              <span className="absolute top-0 right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center font-bold">
-                {mentionCount > 9 ? '9+' : mentionCount}
+            {navBadge(item.id) > 0 && (
+              <span className="absolute top-0 right-1 min-w-[16px] h-4 px-0.5 rounded-full bg-red-500 text-white text-[9px] flex items-center justify-center font-bold">
+                {navBadge(item.id) > 9 ? '9+' : navBadge(item.id)}
               </span>
             )}
           </button>
