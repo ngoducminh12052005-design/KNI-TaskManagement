@@ -10983,8 +10983,8 @@ const FORM_TPL: Record<FormTpl, { group: string; icon: string; title: string; en
   },
   congtac: {
     group: 'Đi công tác', icon: '✈️', title: 'GIẤY ĐỀ XUẤT ĐI CÔNG TÁC', en: '(Business Trip Proposal & Requisition Form)', formNo: 'BM-HR-02',
-    roles: ['Trưởng bộ phận', 'Phòng Tài chính Kế toán', 'Ban Giám đốc / BOD'],
-    hint: 'chọn phòng ban rồi chọn lần lượt <b>Phòng Tài chính Kế toán</b>, <b>Ban Giám đốc / BOD</b>',
+    roles: ['Trưởng bộ phận', 'Các bên liên quan', 'Ban Giám đốc Tập đoàn'],
+    hint: 'Trưởng bộ phận → Các bên liên quan (nếu có) → Ban Giám đốc Tập đoàn',
     noun: 'giấy đề xuất đi công tác',
   },
   muasam: {
@@ -11621,7 +11621,13 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
         { role: 'Xác nhận của Nhân sự', id: hrConfirmId },
         ...bgdIds.map(id => ({ role: 'Ban Tổng Giám đốc', id })),
       ].filter((s, i, arr) => s.id && arr.findIndex(x => x.id === s.id) === i)
-    : [recipientId, ...extraApprovers.filter(id => id !== recipientId)].filter(Boolean).map((id, i) => ({ role: cfg.roles[i] ?? `Người duyệt ${i + 1}`, id }))
+          : tpl === 'congtac'
+    ? [
+        { role: 'Trưởng bộ phận', id: recipientId },
+        { role: 'Các bên liên quan', id: gdId },
+        ...bgdIds.map(id => ({ role: 'Ban Giám đốc Tập đoàn', id })),
+      ].filter((s, i, arr) => s.id && arr.findIndex(x => x.id === s.id) === i)
+      : [recipientId, ...extraApprovers.filter(id => id !== recipientId)].filter(Boolean).map((id, i) => ({ role: cfg.roles[i] ?? `Người duyệt ${i + 1}`, id }))
   const approverIds = slots.map(s => s.id)
   const signRoles = slots.map(s => s.role)
   const roleOf = (i: number) => signRoles[i] ?? `Người duyệt ${i + 1}`
@@ -11725,7 +11731,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
     try { uploaded = await uploadProposalFiles(currentUser.id, files) }
     catch (err: any) { setSaving(false); setError('Tải file thất bại: ' + (err?.message ?? '')); return }
 
-    const formData = { ...cleaned, tpl, dateText, total, bangChu: vnMoneyWords(total), ...(tpl === 'nghiphep' ? { gdCompany, bgdIds } : {}) }
+    const formData = { ...cleaned, tpl, dateText, total, bangChu: vnMoneyWords(total), signRoles, ...(tpl === 'nghiphep' ? { gdCompany, bgdIds } : {}) }
     const participants = Array.from(new Set([currentUser.id, ...approverIds, ...(tpl === 'nghiphep' && f.handoverId ? [f.handoverId] : []), ...(tpl === 'nghiphep' ? bgdIds : [])]))
 
     let data: any = null
@@ -11790,13 +11796,13 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
               <AttachBox files={files} setFiles={setFiles} accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" />
           </div>
 
-          {(isMua || tpl === 'nghiphep' || tpl === 'congtacpay') ? (
+          {(isMua || tpl === 'nghiphep' || tpl === 'congtacpay' || tpl === 'congtac') ? (
             <>
               <p className="mt-8 mb-1 font-bold text-center">XÁC NHẬN & PHÊ DUYỆT</p>
-              <div className={tpl === 'congtacpay' ? 'grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-center text-xs' : 'grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4 text-center text-xs'}>
+              <div className={(tpl === 'congtacpay' || tpl === 'congtac') ? 'grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-center text-xs' : 'grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4 text-center text-xs'}>
                 <div className="flex flex-col">
                   <div style={{ minHeight: 96 }}>
-                    <p className="font-bold text-[13px]">{tpl === 'nghiphep' ? 'Người làm đơn' : 'Người lập'}</p>
+                    <p className="font-bold text-[13px]">{tpl === 'nghiphep' ? 'Người làm đơn' : tpl === 'congtac' ? 'Người đề nghị' : 'Người lập'}</p>
                     <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
                   </div>
                   <p className="mt-2 text-xs text-gray-500">{currentUser.name}</p>
@@ -11829,6 +11835,15 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
                     <DeptUserSelect users={users} excludeId={currentUser.id} value={gdId} onChange={setGdId} />
                   </div>
                 )}
+                {tpl === 'congtac' && (
+                  <div className="flex flex-col">
+                    <div style={{ minHeight: 96 }}>
+                      <p className="font-bold text-[13px]">Các bên liên quan <span className="font-normal">(nếu có)</span></p>
+                      <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+                    </div>
+                    <DeptUserSelect users={users} excludeId={currentUser.id} value={gdId} onChange={setGdId} />
+                  </div>
+                )}
                 {tpl === 'nghiphep' ? (
                   <div className="flex flex-col">
                     <div style={{ minHeight: 96 }}>
@@ -11845,7 +11860,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
                     </div>
                     <DeptUserSelect users={users} excludeId={currentUser.id} value={hrConfirmId} onChange={setHrConfirmId} />
                   </div>
-                ) : (
+                ) : tpl === 'congtac' ? null : (
                   <div className="flex flex-col">
                     <div style={{ minHeight: 96 }}>
                       <p className="font-bold text-[13px]">Kế toán trưởng</p>
@@ -11854,7 +11869,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
                     <DeptUserSelect users={users} excludeId={currentUser.id} value={kttId} onChange={setKttId} />
                   </div>
                 )}
-                {!isMua && tpl !== 'congtacpay' && (
+                {!isMua && tpl !== 'congtacpay' && tpl !== 'congtac' && (
                   <div className="flex flex-col">
                     <div style={{ minHeight: 96 }}>
                       <p className="font-bold text-[13px]">Giám đốc công ty</p>
@@ -11937,7 +11952,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
               </p>
             </div>
           </div>
-        ) : (tpl === 'nghiphep' || tpl === 'congtacpay') ? null : (
+        ) : (tpl === 'nghiphep' || tpl === 'congtacpay' || tpl === 'congtac') ? null : (
           <div className="max-w-[860px] mx-auto mb-4 bg-white shadow-xl p-6 text-[13px] space-y-4" style={ink}>
             <p className="font-bold">Luồng phê duyệt</p>
             <div>
@@ -13604,7 +13619,20 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
   const userOf = (id?: string) => users.find(u => u.id === id)
   const initials = (name?: string) => (name ?? '?').split(' ').slice(-2).map(w => w[0]).join('').toUpperCase()
   const fmt = (d?: string) => (d ? new Date(d).toLocaleString('vi-VN') : '')
-
+    // Tờ trình liên quan (của Đề nghị thanh toán / hợp đồng): hiện mã, tên, trạng thái; bấm vào để xem popup
+  const openRelated = useContext(ProposalLinkContext)
+  const relatedCodes: string[] = Array.isArray(p.formData?.relatedCodes) ? p.formData!.relatedCodes : []
+  const relatedKey = relatedCodes.join(',')
+  const [relRows, setRelRows] = useState<{ code: string; title: string; status: string }[]>([])
+  useEffect(() => {
+    if (relatedCodes.length === 0) { setRelRows([]); return }
+    let alive = true
+    supabase.from('proposals').select('code, title, status').in('code', relatedCodes).then(({ data }) => {
+      if (alive) setRelRows((data ?? []) as { code: string; title: string; status: string }[])
+    })
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relatedKey])
   useEffect(() => {
     let alive = true
     supabase.from('proposal_steps').select('*').eq('proposal_id', p.id).order('step_order').then(({ data }) => {
@@ -13814,6 +13842,28 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
               <Row k="Công ty" v={p.company} />
               <Row k="Thời gian cần" v={p.days ? `${p.days} ngày` : undefined} />
               <Row k="Hạn kết thúc" v={p.dueDate} />
+              {p.kind === 'dntt' && p.formData?.payDeadline && (
+              <Row k="Thời hạn thanh toán" v={new Date(p.formData.payDeadline + 'T00:00:00').toLocaleDateString('vi-VN')} />
+              )}
+              {relatedCodes.length > 0 && (
+                <div className="grid grid-cols-3 gap-2 text-xs py-1">
+                  <span style={{ color: 'var(--text-muted)' }}>Tờ trình liên quan</span>
+                  <div className="col-span-2 space-y-1.5">
+                    {relatedCodes.map(c => {
+                      const r = relRows.find(x => x.code === c)
+                      return (
+                        <button key={c} type="button" onClick={() => openRelated(c)} title="Bấm để xem tờ trình"
+                          className="w-full text-left flex items-center gap-2 flex-wrap rounded-lg px-2.5 py-1.5 hover:opacity-80"
+                          style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)' }}>
+                          <span className="font-mono font-semibold underline" style={{ color: '#2563eb' }}>{c}</span>
+                          <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{r ? `Tờ trình: ${r.title}` : 'Đang tải…'}</span>
+                          {r && <Badge s={r.status} />}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
               <Row k="Mô tả ngắn" v={p.brief} />
               <div className="grid grid-cols-3 gap-2 text-xs py-1">
                 <span style={{ color: 'var(--text-muted)' }}>Mô tả dài</span>
