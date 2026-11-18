@@ -11055,6 +11055,24 @@ function congTacPayPrefill(code: string, sf: Record<string, any>): Record<string
     travelers: staff.length > 0 ? staff.map(mk) : [mk()],
   }
 }
+// Chip "MÃ — Đề xuất: tên". Bấm vào mở popup xem trước (dùng cho phiếu / tờ trình liên quan)
+function ProposalRefChip({ code }: { code: string }) {
+  const open = useContext(ProposalLinkContext)
+  const [info, setInfo] = useState<{ title: string; kind?: string } | null>(null)
+  useEffect(() => {
+    let alive = true
+    supabase.from('proposals').select('title, kind').eq('code', code).maybeSingle().then(({ data }) => {
+      if (alive) setInfo(data ? { title: (data as any).title ?? '', kind: (data as any).kind } : null)
+    })
+    return () => { alive = false }
+  }, [code])
+  return (
+    <button type="button" onClick={() => open(code)} title="Bấm để xem trước"
+      className="text-left text-xs underline" style={{ color: '#2563eb' }}>
+      <b className="font-mono">{code}</b>{info?.title ? ` — ${info.kind === 'totrinh' ? 'Tờ trình' : 'Đề xuất'}: ${info.title}` : ''}
+    </button>
+  )
+}
 // ===== Chọn "Phiếu đề xuất đi công tác" đã duyệt, cho Bảng thanh toán công tác phí =====
 type CongTacSrcRow = { id: string; code: string; title: string; createdAt: string; formData: Record<string, any> }
 function CongTacSourcePicker({ value, onPick }: { value: string; onPick: (p: { code: string; formData: Record<string, any> }) => void }) {
@@ -11079,10 +11097,11 @@ function CongTacSourcePicker({ value, onPick }: { value: string; onPick: (p: { c
   const pickRow = (r: CongTacSrcRow) => { onPick({ code: r.code, formData: r.formData }); setOpen(false) }
   return (
     <div className="flex-1 min-w-0">
+      {value && <ProposalRefChip code={value} />}
       <button type="button" onClick={() => { setQ(''); setOpen(true) }}
-        className="text-left text-xs py-0.5 border-b border-dashed border-gray-300 hover:text-blue-600"
-        style={{ color: value ? '#2563eb' : '#9ca3af' }}>
-        {value ? `📜 ${value} — bấm để đổi` : 'Bấm để chọn phiếu đề xuất đi công tác đã duyệt...'}
+        className={`text-left text-xs py-0.5 border-b border-dashed border-gray-300 hover:text-blue-600${value ? ' ml-2' : ''}`}
+        style={{ color: value ? '#6b7280' : '#9ca3af' }}>
+        {value ? '(đổi phiếu khác)' : 'Bấm để chọn phiếu đề xuất đi công tác đã duyệt...'}
       </button>
       {open && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={() => setOpen(false)}>
@@ -11398,7 +11417,7 @@ function FormDocBody({ tpl, f, set, ro, users, requester, code, dateText }: {
           <p className="flex flex-wrap items-center gap-2">
             <span className="shrink-0">Theo phiếu đề xuất đi công tác:</span>
             {ro
-              ? (f.srcCode ? <b className="text-blue-600">{f.srcCode}</b> : <span className="text-gray-400">—</span>)
+              ? (f.srcCode ? <ProposalRefChip code={String(f.srcCode)} /> : <span className="text-gray-400">—</span>)
               : <CongTacSourcePicker value={f.srcCode ?? ''} onPick={({ code, formData }) => set(congTacPayPrefill(code, formData))} />}
           </p>
         </div>
