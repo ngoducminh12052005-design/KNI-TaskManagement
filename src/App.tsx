@@ -10972,7 +10972,7 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: {
   )
 }
 // ===== 3 biểu mẫu Word dưới dạng văn bản: Nghỉ phép, Đi công tác, Mua sắm =====
-type FormTpl = 'nghiphep' | 'congtac' | 'muasam'
+type FormTpl = 'nghiphep' | 'congtac' | 'muasam' | 'congtacpay'
 
 const FORM_TPL: Record<FormTpl, { group: string; icon: string; title: string; en: string; formNo: string; roles: string[]; hint: string; noun: string }> = {
   nghiphep: {
@@ -10992,6 +10992,12 @@ const FORM_TPL: Record<FormTpl, { group: string; icon: string; title: string; en
     roles: ['Trưởng bộ phận', 'Bộ phận Tài chính / Kế toán', 'Ban Giám đốc / BOD'],
     hint: 'chọn phòng ban rồi chọn lần lượt <b>Bộ phận Tài chính / Kế toán</b>, <b>Ban Giám đốc / BOD</b>',
     noun: 'phiếu đề xuất mua sắm',
+  },
+  congtacpay: {
+    group: 'Thanh toán công tác phí', icon: '💵', title: 'BẢNG THANH TOÁN CÔNG TÁC PHÍ', en: '(Business Trip Expense Settlement)', formNo: 'BM-HR-03',
+    roles: ['Trưởng bộ phận', 'Xác nhận của Nhân sự', 'Ban Tổng Giám đốc'],
+    hint: 'tự động theo luồng cố định: Trưởng bộ phận → Xác nhận của Nhân sự → Ban Tổng Giám đốc',
+    noun: 'bảng thanh toán công tác phí',
   },
 }
 const FORM_TPL_BY_GROUP: Record<string, FormTpl> = { 'Nghỉ phép': 'nghiphep', 'Đi công tác': 'congtac', 'Mua sắm': 'muasam' }
@@ -11018,7 +11024,6 @@ const calcDays = (from?: string, to?: string) => {
   const n = Math.round((new Date(to + 'T00:00:00').getTime() - new Date(from + 'T00:00:00').getTime()) / 864e5) + 1
   return n > 0 ? String(n) : ''
 }
-const moneyVN = (n: number) => Number(n || 0).toLocaleString('vi-VN')
 
 // Ô nhập tiền dùng chung: gõ tới đâu tự hiện dấu chấm ngăn cách hàng nghìn tới đó (gõ 1000 → hiện 1.000), giá trị gốc (không dấu chấm) vẫn được lưu lại như cũ
 function MoneyInput({ value, onChange, className, style, placeholder }: { value: string | number; onChange: (v: string) => void; className?: string; style?: React.CSSProperties; placeholder?: string }) {
@@ -11030,7 +11035,25 @@ function MoneyInput({ value, onChange, className, style, placeholder }: { value:
       className={className} style={style} />
   )
 }
+const moneyVN = (n: number) => Number(n || 0).toLocaleString('vi-VN')
 const rowAmt = (r: any) => (Number(r.qty) || 0) * (Number(r.price) || 0)
+const dailyAllowance = (company?: string) => (company && COMPANIES.includes(company)) ? 50000 : 100000
+function congTacPayPrefill(src: Proposal): Record<string, any> {
+  const sf: Record<string, any> = src.formData ?? {}
+  const staff: any[] = Array.isArray(sf.staff) ? sf.staff : []
+  const rate = String(dailyAllowance(sf.company))
+  const mk = (s: any = {}) => ({
+    name: s.name ?? '', position: s.position ?? '', dept: s.dept ?? '',
+    actualFrom: sf.fromDate ?? '', actualTo: sf.toDate ?? '',
+    days: calcDays(sf.fromDate, sf.toDate), rate, note: '',
+  })
+  return {
+    destination: sf.destination ?? '', purpose: sf.purpose ?? '',
+    fromDate: sf.fromDate ?? '', toDate: sf.toDate ?? '',
+    srcCode: src.code ?? '',
+    travelers: staff.length > 0 ? staff.map(mk) : [mk()],
+  }
+}
 
 function initFormData(tpl: FormTpl, u: User): Record<string, any> {
   const base = { tpl, dept: u.department ?? '', company: u.company ?? '', position: '', empCode: '' }
@@ -11049,6 +11072,10 @@ function initFormData(tpl: FormTpl, u: User): Record<string, any> {
         { cat: 'Chi phí phát sinh khác', unit: '', qty: '', price: '', note: '' },
       ],
       advance: 'no', advanceAmount: '' }
+  }
+  if (tpl === 'congtacpay') {
+    return { ...base, destination: '', purpose: '', fromDate: '', toDate: '', srcCode: '',
+      travelers: [{ name: u.name, position: '', dept: u.department ?? '', actualFrom: '', actualTo: '', days: '', rate: String(dailyAllowance(u.company)), note: '' }] }
   }
   return { ...base, priority: 'normal', purposeType: 'new', purposeOther: '', reason: '',
     items: [{ name: '', spec: '', unit: '', qty: '1', price: '', need: '' }],
@@ -11299,6 +11326,71 @@ function FormDocBody({ tpl, f, set, ro, users, requester, code, dateText }: {
     )
   }
 
+  if (tpl === 'congtacpay') {
+    const travelers: any[] = f.travelers ?? []
+    const dayCalc = (r: any) => calcDays(r.actualFrom, r.actualTo) || r.days || ''
+    const rowTotal = (r: any) => (Number(dayCalc(r)) || 0) * (Number(r.rate) || 0)
+    const total = travelers.reduce((s, r) => s + rowTotal(r), 0)
+    return (
+      <>
+        {head}
+        <div className="space-y-1.5 mb-3">
+          <p>Ngày lập: {dateText}</p>
+          <p>Người lập: <b>{requester?.name}</b></p>
+          {f.srcCode && <p className="text-xs text-gray-500">Theo giấy đề xuất đi công tác: <b className="text-blue-600">{f.srcCode}</b></p>}
+        </div>
+        {sec('I. THÔNG TIN CHI TIẾT')}
+        <div className="space-y-1.5 pl-4">
+          <div className="flex items-center gap-2"><span className="shrink-0">1. Nơi công tác:</span>{txt('destination')}</div>
+          <p className="flex flex-wrap items-center gap-2">2. Thời gian công tác (dự kiến): từ {date('fromDate')} đến {date('toDate')}</p>
+          <div><p>3. Mục đích công tác:</p>{area('purpose', 2)}</div>
+        </div>
+        {sec('II. CHI PHÍ CÔNG TÁC')}
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse" style={{ minWidth: 760 }}>
+            <thead><tr>
+              <th className={th} style={{ width: 34 }}>STT</th><th className={th}>Họ tên</th><th className={th}>Chức vụ</th><th className={th}>Đơn vị</th>
+              <th className={th} style={{ width: 160 }}>Thời gian công tác thực tế</th><th className={th} style={{ width: 60 }}>Số ngày</th>
+              <th className={th} style={{ width: 95 }}>Trợ cấp/ngày (VNĐ)</th><th className={th} style={{ width: 100 }}>Thành tiền (VNĐ)</th>
+              <th className={th}>Ghi chú</th>{!ro && <th style={{ width: 22 }}></th>}
+            </tr></thead>
+            <tbody>
+              {travelers.map((r, i) => (
+                <tr key={i}>
+                  <td className={`${td} text-center`}>{i + 1}</td>
+                  <td className={td}>{cellIn('travelers', i, 'name')}</td>
+                  <td className={td}>{cellIn('travelers', i, 'position')}</td>
+                  <td className={td}>{cellIn('travelers', i, 'dept')}</td>
+                  <td className={td}>
+                    {ro ? <span>{fmtD(r.actualFrom)} - {fmtD(r.actualTo)}</span> : (
+                      <div className="flex items-center gap-1">
+                        <input type="date" value={r.actualFrom ?? ''} onChange={e => setRow('travelers', i, { actualFrom: e.target.value })} className="bg-transparent outline-none text-xs" style={ink} />
+                        <span>-</span>
+                        <input type="date" value={r.actualTo ?? ''} onChange={e => setRow('travelers', i, { actualTo: e.target.value })} className="bg-transparent outline-none text-xs" style={ink} />
+                      </div>
+                    )}
+                  </td>
+                  <td className={`${td} text-center`}>{dayCalc(r)}</td>
+                  <td className={`${td} ${ro ? 'text-right' : ''}`}>{ro ? moneyVN(Number(r.rate)) : cellIn('travelers', i, 'rate', { type: 'number', min: '0' })}</td>
+                  <td className={`${td} text-right`}>{moneyVN(rowTotal(r))}</td>
+                  <td className={td}>{cellIn('travelers', i, 'note')}</td>
+                  {!ro && <td className="text-center">{delBtn('travelers', i)}</td>}
+                </tr>
+              ))}
+              <tr>
+                <td className={`${td} font-bold text-center`} colSpan={7}>Tổng cộng</td>
+                <td className={`${td} font-bold text-right`}>{moneyVN(total)}</td>
+                <td className={td}></td>{!ro && <td></td>}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        {addBtn('travelers', { name: '', position: '', dept: '', actualFrom: '', actualTo: '', days: '', rate: '', note: '' }, '+ Thêm người')}
+        <p className="text-right font-bold mt-2">{vnMoneyWords(total)}</p>
+      </>
+    )
+  }
+
   // muasam
   const items: any[] = f.items ?? []
   const olds: any[] = f.old ?? []
@@ -11393,7 +11485,7 @@ function FormDocBody({ tpl, f, set, ro, users, requester, code, dateText }: {
 }
 
 // ---------- Form tạo mới ----------
-function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draftId }: { draftId?: string; tpl: FormTpl; currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void }) {
+function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draftId, prefill }: { draftId?: string; tpl: FormTpl; currentUser: User; users: User[]; onClose: () => void; onCreated?: (id: string) => void; prefill?: Record<string, any> }) {
   useBackToClose(onClose)
   const cfg = FORM_TPL[tpl]
   const now = new Date()
@@ -11401,7 +11493,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
   const myManagers = users.filter(u => u.role === 'manager' && u.teamId === currentUser.teamId)   // gồm cả chính người tạo nếu là quản lý (có thể tự là Trưởng bộ phận)
 
   const draft = useDraftScope('bieumau', currentUser.id, draftId, true, s => { const fx = s.f ?? {}; const t = String(fx.reason || fx.purpose || fx.destination || fx.items?.[0]?.name || '').trim(); return t ? `${FORM_TPL[tpl].title}: ${t}`.slice(0, 90) : '' }, { tpl })
-  const [f, setF] = draft.useS<Record<string, any>>('f', () => initFormData(tpl, currentUser))
+  const [f, setF] = draft.useS<Record<string, any>>('f', () => ({ ...initFormData(tpl, currentUser), ...(prefill ?? {}) }))
   const set = (patch: Record<string, any>) => setF(prev => ({ ...prev, ...patch }))
   const [files, setFiles] = useState<File[]>([])
   const [driveUrl, setDriveUrl] = draft.useS('driveUrl', '')
@@ -11439,6 +11531,12 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
     setHrHeadId(prev => prev || (hrTeamMembers.find(u => u.role === 'manager') ?? hrTeamMembers[0])?.id || '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [users.length, currentUser.id, tpl])
+  const [hrConfirmId, setHrConfirmId] = draft.useS('hrConfirmId', '')
+  useEffect(() => {
+    if (tpl !== 'congtacpay') return
+    setHrConfirmId(prev => prev || (hrTeamMembers.find(u => u.role === 'manager') ?? hrTeamMembers[0])?.id || '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [users.length, currentUser.id, tpl])
   const [priority, setPriority] = draft.useS('priority', 'P3')
   const approvalMode = isMua ? docModeOf(priority) : approvalModeSel   // mua sắm: P1/P2 song song, P3/P4 nối tiếp
 
@@ -11455,6 +11553,12 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
         { role: 'Trưởng bộ phận', id: recipientId },
         { role: 'Trưởng phòng Nhân sự', id: hrHeadId },
         { role: gdCompany.trim() ? `Giám đốc công ty ${gdCompany.trim()}` : 'Giám đốc công ty', id: gdId },
+      ].filter((s, i, arr) => s.id && arr.findIndex(x => x.id === s.id) === i)
+    : tpl === 'congtacpay'
+    ? [
+        { role: 'Trưởng bộ phận', id: recipientId },
+        { role: 'Xác nhận của Nhân sự', id: hrConfirmId },
+        ...bgdIds.map(id => ({ role: 'Ban Tổng Giám đốc', id })),
       ].filter((s, i, arr) => s.id && arr.findIndex(x => x.id === s.id) === i)
     : [recipientId, ...extraApprovers.filter(id => id !== recipientId)].filter(Boolean).map((id, i) => ({ role: cfg.roles[i] ?? `Người duyệt ${i + 1}`, id }))
   const approverIds = slots.map(s => s.id)
@@ -11522,6 +11626,18 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
       brief = String(f.purpose).trim().slice(0, 200)
       dueDate = f.toDate
       cleaned = { ...f, staff, costs, totalDays: days }
+    } else if (tpl === 'congtacpay') {
+      const travelers = (f.travelers as any[]).filter(r => String(r.name).trim() && r.actualFrom && r.actualTo)
+      if (travelers.length === 0) { setError('Vui lòng nhập tên người đi công tác và thời gian thực tế.'); return }
+      if (!String(f.destination).trim()) { setError('Vui lòng nhập nơi công tác.'); return }
+      const rowTotal = (r: any) => (Number(calcDays(r.actualFrom, r.actualTo)) || 0) * (Number(r.rate) || 0)
+      total = travelers.reduce((s, r) => s + rowTotal(r), 0)
+      if (total <= 0) { setError('Vui lòng nhập mức trợ cấp/ngày hợp lệ.'); return }
+      items = travelers.map(r => ({ item: String(r.name).trim(), cost: `${calcDays(r.actualFrom, r.actualTo) || ''} ngày × ${moneyVN(Number(r.rate) || 0)}`, amount: rowTotal(r) }))
+      title = `Thanh toán công tác phí: ${String(f.destination).trim()}`
+      brief = String(f.purpose || '').trim().slice(0, 200)
+      dueDate = f.toDate || null
+      cleaned = { ...f, travelers }
     } else {
       const rows = (f.items as any[]).filter(r => String(r.name).trim())
       total = rows.reduce((s, r) => s + rowAmt(r), 0)
@@ -11538,6 +11654,9 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
       if (!recipientId) { setError('Không xác định được Trưởng bộ phận duyệt. Vui lòng chọn thủ công.'); return }
       if (!hrHeadId) { setError('Không xác định được Trưởng phòng Nhân sự duyệt.'); return }
       if (!gdId) { setError('Vui lòng chọn Giám đốc công ty duyệt.'); return }
+    } else if (tpl === 'congtacpay') {
+      if (!recipientId) { setError('Vui lòng chọn Trưởng bộ phận duyệt.'); return }
+      if (!hrConfirmId) { setError('Vui lòng chọn người Xác nhận của Nhân sự.'); return }
     } else if (!recipientId) { setError('Vui lòng chọn người duyệt đầu tiên.'); return }
 
     setSaving(true); setError('')
@@ -11610,7 +11729,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
               <AttachBox files={files} setFiles={setFiles} accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" />
           </div>
 
-          {(isMua || tpl === 'nghiphep') ? (
+          {(isMua || tpl === 'nghiphep' || tpl === 'congtacpay') ? (
             <>
               <p className="mt-8 mb-1 font-bold text-center">XÁC NHẬN & PHÊ DUYỆT</p>
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4 text-center text-xs">
@@ -11657,6 +11776,14 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
                     </div>
                     <DeptUserSelect users={users} excludeId={currentUser.id} value={hrHeadId} onChange={setHrHeadId} />
                   </div>
+                ) : tpl === 'congtacpay' ? (
+                  <div className="flex flex-col">
+                    <div style={{ minHeight: 96 }}>
+                      <p className="font-bold text-[13px]">Xác nhận của Nhân sự</p>
+                      <p className="font-bold text-xs">(Ký, ghi rõ họ tên)</p>
+                    </div>
+                    <DeptUserSelect users={users} excludeId={currentUser.id} value={hrConfirmId} onChange={setHrConfirmId} />
+                  </div>
                 ) : (
                   <div className="flex flex-col">
                     <div style={{ minHeight: 96 }}>
@@ -11666,7 +11793,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
                     <DeptUserSelect users={users} excludeId={currentUser.id} value={kttId} onChange={setKttId} />
                   </div>
                 )}
-                {!isMua && (
+                {!isMua && tpl !== 'congtacpay' && (
                   <div className="flex flex-col">
                     <div style={{ minHeight: 96 }}>
                       <p className="font-bold text-[13px]">Giám đốc công ty</p>
@@ -11683,7 +11810,7 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
                 )}
                 <div className="flex flex-col">
                   <div style={{ minHeight: 96 }}>
-                    <p className="font-bold text-[13px]">Ban Giám đốc Tập đoàn</p>
+                    <p className="font-bold text-[13px]">{tpl === 'congtacpay' ? 'Ban Tổng Giám đốc' : 'Ban Giám đốc Tập đoàn'}</p>
                     <p className="font-bold text-xs">{tpl === 'nghiphep' ? '(Nhận thông báo, không cần ký)' : '(Ký, ghi rõ họ tên)'}</p>
                   </div>
                   <div className="space-y-1.5">
@@ -11801,9 +11928,9 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
 }
 
 // ---------- Bản xem / duyệt ----------
-function ProposalFormDocView({ p, users, currentUserId, onClose, canAct, onApprove, onReject, onRequestReview }: {
+function ProposalFormDocView({ p, users, currentUserId, onClose, canAct, onApprove, onReject, onRequestReview, onCreatePay }: {
   p: Proposal; users: User[]; currentUserId: string; onClose: () => void; canAct: boolean
-  onApprove: (note: string) => Promise<void>; onReject: (note: string) => Promise<void>; onRequestReview: (note: string) => Promise<void>
+  onApprove: (note: string) => Promise<void>; onReject: (note: string) => Promise<void>; onRequestReview: (note: string) => Promise<void>; onCreatePay?: () => void
 }) {
   useBackToClose(onClose)
   const f: Record<string, any> = p.formData ?? {}
@@ -11917,6 +12044,9 @@ function ProposalFormDocView({ p, users, currentUserId, onClose, canAct, onAppro
       <div className="shrink-0 px-4 py-3 flex items-center justify-end gap-3" style={{ background: '#f9fafb', borderTop: '1px solid #d1d5db' }}>
         {warn && <span className="text-xs text-red-600 mr-auto">{warn}</span>}
         <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600">Đóng</button>
+        {tpl === 'congtac' && p.status === 'approved' && p.submittedBy === currentUserId && onCreatePay && (
+          <button type="button" onClick={onCreatePay} className="px-4 py-2 rounded-lg text-sm font-bold" style={{ background: '#eff6ff', color: '#2563eb' }}>📋 Lập thanh toán công tác phí</button>
+        )}
         {canAct && (
           <>
             <button type="button" disabled={busy} onClick={() => act(async n => { await onReject(n) })}
@@ -14657,6 +14787,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   // Mở một tờ trình từ link RTASK trong trang khác: nhớ trang đang xem để đóng xong thì quay lại đúng trang đó
   const [backTo, setBackTo] = useState<{ p: Proposal; mode: 'detail' | 'doc' } | null>(null)
   const [popupDoc, setPopupDoc] = useState<Proposal | null>(null)   // tờ trình / phiếu mở dạng popup ngay trên phiếu đang xem
+  const [payFromProposal, setPayFromProposal] = useState<Proposal | null>(null)   // đang lập bảng thanh toán công tác phí từ 1 phiếu đề nghị đã duyệt
   const goBack = () => {
     if (!backTo) return
     const b = backTo
@@ -15282,7 +15413,7 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
           onReject: async (note: string) => { await handleReject(cur, note) },
           onRequestReview: async (note: string) => { await handleRequestReview(cur, note) },
         }
-        return cur.kind === 'dntt' ? <ProposalDnttView {...common} /> : isFormDoc(cur) ? (cur.formData?.tpl === 'hopdong' ? <ProposalHopDongView {...common} /> : <ProposalFormDocView {...common} />) : <ProposalDocView {...common} onEdit={cur.kind === 'totrinh' ? () => { setDocProposal(null); setEditingDoc(cur) } : undefined} />
+        return cur.kind === 'dntt' ? <ProposalDnttView {...common} /> : isFormDoc(cur) ? (cur.formData?.tpl === 'hopdong' ? <ProposalHopDongView {...common} /> : <ProposalFormDocView {...common} onCreatePay={cur.formData?.tpl === 'congtac' ? () => { setDocProposal(null); setPayFromProposal(cur) } : undefined} />) : <ProposalDocView {...common} onEdit={cur.kind === 'totrinh' ? () => { setDocProposal(null); setEditingDoc(cur) } : undefined} />
       })()}
             {popupDoc && (() => {
         const cur = proposals.find(x => x.id === popupDoc.id) ?? popupDoc
@@ -15297,12 +15428,16 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
           <div className="kni-popup-doc">
             <style>{'.kni-popup-doc > .fixed:not(.kni-backdrop){top:4vh!important;bottom:4vh!important;left:50%!important;right:auto!important;width:min(1000px,94vw)!important;transform:translateX(-50%);border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.5);z-index:301!important}.kni-popup-doc > .kni-backdrop{z-index:300!important}'}</style>
             <div className="kni-backdrop fixed inset-0 z-50" style={{ background: 'rgba(0,0,0,0.55)' }} onClick={() => setPopupDoc(null)} />
-            {cur.kind === 'dntt' ? <ProposalDnttView {...common} /> : isFormDoc(cur) ? (cur.formData?.tpl === 'hopdong' ? <ProposalHopDongView {...common} /> : <ProposalFormDocView {...common} />) : <ProposalDocView {...common} />}
+            {cur.kind === 'dntt' ? <ProposalDnttView {...common} /> : isFormDoc(cur) ? (cur.formData?.tpl === 'hopdong' ? <ProposalHopDongView {...common} /> : <ProposalFormDocView {...common} onCreatePay={cur.formData?.tpl === 'congtac' ? () => { setPopupDoc(null); setPayFromProposal(cur) } : undefined} />) : <ProposalDocView {...common} />}
           </div>
         )
       })()}
       {editingDoc && (
         <ProposalDocForm currentUser={currentUser} users={users} editing={editingDoc} onClose={() => { const id = editingDoc.id; setEditingDoc(null); setOpenNewId(id) }} />
+      )}
+      {payFromProposal && (
+        <ProposalFormDocForm tpl="congtacpay" currentUser={currentUser} users={users} onCreated={setOpenNewId}
+          prefill={congTacPayPrefill(payFromProposal)} onClose={() => setPayFromProposal(null)} />
       )}
       {editingContract && (
         <ProposalHopDongForm currentUser={currentUser} users={users} proposals={proposals} editing={editingContract}
