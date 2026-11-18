@@ -11446,8 +11446,8 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
     const slots: { role: string; id: string }[] = isMua
     ? [
         { role: 'Trưởng bộ phận', id: recipientId },
+        { role: gdCompany.trim() ? `Bên liên quan ${gdCompany.trim()}` : 'Bên liên quan', id: gdId },
         { role: 'Kế toán trưởng', id: kttId },
-        { role: gdCompany.trim() ? `Giám đốc công ty ${gdCompany.trim()}` : 'Giám đốc công ty', id: gdId },
         ...bgdIds.map(id => ({ role: 'Ban Giám đốc Tập đoàn', id })),
       ].filter((s, i, arr) => s.id && arr.findIndex(x => x.id === s.id) === i)
     : tpl === 'nghiphep'
@@ -11634,6 +11634,21 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
                     ))}
                   </select>
                 </div>
+                {isMua && (
+                  <div className="flex flex-col">
+                    <div style={{ minHeight: 96 }}>
+                      <p className="font-bold text-[13px]">Bên liên quan</p>
+                      <input list="gd-companies-ms" value={gdCompany} onChange={e => setGdCompany(e.target.value)}
+                        placeholder="Nhập / chọn tên bên liên quan"
+                        className="mt-1 w-full border-b border-dashed border-gray-300 bg-transparent outline-none text-center text-xs" style={ink} />
+                      <datalist id="gd-companies-ms">
+                        {COMPANIES.map(c => <option key={c} value={c} />)}
+                      </datalist>
+                      <p className="font-bold text-xs mt-1">(Ký, ghi rõ họ tên)</p>
+                    </div>
+                    <DeptUserSelect users={users} excludeId={currentUser.id} value={gdId} onChange={setGdId} />
+                  </div>
+                )}
                 {tpl === 'nghiphep' ? (
                   <div className="flex flex-col">
                     <div style={{ minHeight: 96 }}>
@@ -11651,19 +11666,21 @@ function ProposalFormDocForm({ tpl, currentUser, users, onClose, onCreated, draf
                     <DeptUserSelect users={users} excludeId={currentUser.id} value={kttId} onChange={setKttId} />
                   </div>
                 )}
-                <div className="flex flex-col">
-                  <div style={{ minHeight: 96 }}>
-                    <p className="font-bold text-[13px]">Giám đốc công ty</p>
-                    <input list="gd-companies-ms" value={gdCompany} onChange={e => setGdCompany(e.target.value)}
-                      placeholder="Chọn tên công ty"
-                      className="mt-1 w-full border-b border-dashed border-gray-300 bg-transparent outline-none text-center text-xs" style={ink} />
-                    <datalist id="gd-companies-ms">
-                      {COMPANIES.map(c => <option key={c} value={c} />)}
-                    </datalist>
-                    <p className="font-bold text-xs mt-1">(Ký, ghi rõ họ tên)</p>
+                {!isMua && (
+                  <div className="flex flex-col">
+                    <div style={{ minHeight: 96 }}>
+                      <p className="font-bold text-[13px]">Giám đốc công ty</p>
+                      <input list="gd-companies-ms" value={gdCompany} onChange={e => setGdCompany(e.target.value)}
+                        placeholder="Chọn tên công ty"
+                        className="mt-1 w-full border-b border-dashed border-gray-300 bg-transparent outline-none text-center text-xs" style={ink} />
+                      <datalist id="gd-companies-ms">
+                        {COMPANIES.map(c => <option key={c} value={c} />)}
+                      </datalist>
+                      <p className="font-bold text-xs mt-1">(Ký, ghi rõ họ tên)</p>
+                    </div>
+                    <DeptUserSelect users={users} excludeId={currentUser.id} value={gdId} onChange={setGdId} />
                   </div>
-                  <DeptUserSelect users={users} excludeId={currentUser.id} value={gdId} onChange={setGdId} />
-                </div>
+                )}
                 <div className="flex flex-col">
                   <div style={{ minHeight: 96 }}>
                     <p className="font-bold text-[13px]">Ban Giám đốc Tập đoàn</p>
