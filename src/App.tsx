@@ -2744,15 +2744,7 @@ const hoursMs = (SLA_LEVELS as any)[form.slaLevel].hours * 3600000
           </tbody>
         </table>
         <p className="text-[11px] mb-1" style={{ color: '#6b7280' }}>💡 Điểm theo mức SLA ({form.slaLevel || 'không áp dụng SLA'}): {range.suggested} điểm. Nộp trễ tới 1 ngày trừ 50%, tới 2 ngày trừ 75%, từ 3 ngày trở lên không có điểm. Đồng hồ SLA tính từ lúc giao task.</p>
-        {assigning && (
-          <div className="space-y-1 mb-4 text-xs">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={form.isTeamProject} onChange={e => patchForm({ isTeamProject: e.target.checked })} />
-              <span>👥 Đây là dự án nhóm (Teamwork) — PM luôn nhận EXP dù chỉ giao cho 1 người.</span>
-            </label>
-          </div>
-        )}
-        {!assigning && <div className="mb-4" />}
+        <div className="mb-4" />
 
         <p className="font-bold mb-1">THÔNG TIN KHÁC</p>
         <textarea value={doc.thongTinKhac} onChange={e => setDoc({ thongTinKhac: e.target.value })} rows={3}
@@ -13975,7 +13967,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
                 </div>
               )}
             </section>
-            <ProposalSupplementSection p={p} currentUser={currentUser} flow={flow} noDrive={relBelow} />
+            <ProposalSupplementSection p={p} currentUser={currentUser} flow={flow} noDrive={relBelow || isFormDoc(p)} />
             {relBelow && renderRelated()}
             <ProposalCostSection p={p} canEdit={canEdit} />
             <ProposalCommentsSection p={p} users={users} currentUser={currentUser} />
