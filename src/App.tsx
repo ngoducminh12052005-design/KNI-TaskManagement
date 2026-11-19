@@ -14190,6 +14190,7 @@ function FilePreviewHost() {
   const [sheetIdx, setSheetIdx] = useState(0)
   const [err, setErr] = useState('')
   const [docxBlob, setDocxBlob] = useState<Blob | null>(null)
+  const [stampedUrl, setStampedUrl] = useState('')
   const docxRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -14208,7 +14209,7 @@ function FilePreviewHost() {
     if (!src) return
     let alive = true
     let objUrl = ''
-    setLoading(true); setErr(''); setKind('none'); setText(''); setHtml(''); setSheets([]); setSheetIdx(0); setUrl(''); setDocxBlob(null)
+    setLoading(true); setErr(''); setKind('none'); setText(''); setHtml(''); setSheets([]); setSheetIdx(0); setUrl(''); setDocxBlob(null); setStampedUrl('')
     ;(async () => {
       try {
         let blob: Blob
@@ -14269,6 +14270,13 @@ function FilePreviewHost() {
       document.body.appendChild(a); a.click(); a.remove()
       return
     }
+    // Đã tạo PDF đóng dấu rồi: tải lại chính file PDF đó (không tạo lại nữa)
+    if (stampedUrl) {
+      const a = document.createElement('a')
+      a.href = stampedUrl; a.download = src.name.replace(/\.[^.]+$/, '') + '.pdf'
+      document.body.appendChild(a); a.click(); a.remove()
+      return
+    }
     setExporting(true)
     try {
       const stamp = `Đã duyệt · ${src.code ?? ''}`.trim()
@@ -14276,7 +14284,10 @@ function FilePreviewHost() {
       if (kind === 'pdf' && url) bytes = await stampPdfBytes(await (await fetch(url)).arrayBuffer(), stamp)
       else if (kind === 'docx' && docxBlob) bytes = await docxToStampedPdf(docxBlob, stamp)
       else { alert('Định dạng file này chưa xuất PDF được trong app. Vui lòng đính kèm file PDF hoặc Word khi gửi phiếu hợp đồng.'); return }
-      downloadBlob(new Blob([new Uint8Array(bytes)], { type: 'application/pdf' }), src.name.replace(/\.[^.]+$/, '') + '.pdf')
+      const su = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'application/pdf' }))
+      setStampedUrl(su)
+      setKind('pdf')
+      setUrl(su)
     } catch (e: any) {
       alert('Không xuất được PDF: ' + (e?.message ?? ''))
     } finally {
@@ -14290,7 +14301,7 @@ function FilePreviewHost() {
         <div className="flex items-center gap-2 px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
           <span className="flex-1 truncate text-sm font-bold" style={{ color: '#111827' }}>📄 {src.name}</span>
           <button type="button" onClick={download} disabled={(!url && !src.forcePdfOnly) || exporting} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white disabled:opacity-40" style={{ background: '#2563eb' }}>
-            {exporting ? 'Đang xuất PDF...' : (src.forcePdfOnly ? '📄 Tải PDF' : '⬇ Tải về')}
+            {exporting ? 'Đang tạo PDF...' : (src.forcePdfOnly ? (stampedUrl ? '⬇ Tải file PDF' : '📄 Tạo PDF để in') : '⬇ Tải về')}
           </button>
           <button type="button" onClick={() => setSrc(null)} className="text-lg px-2" style={{ color: '#6b7280' }}>✕</button>
         </div>
