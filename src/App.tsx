@@ -15087,7 +15087,9 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   const [signingProposal, setSigningProposal] = useState<Proposal | null>(null)
   const [pendingMine, setPendingMine] = useState<string[]>([])
   // Nhớ tờ trình đang mở chi tiết: tải lại trang vẫn ở đúng chỗ (sessionStorage = theo từng tab)
-  const [restoreId, setRestoreId] = useState<string | null>(() => { try { return sessionStorage.getItem('proposalDetailId') } catch { return null } })
+  const ssDetailKey = contractsMode ? 'proposalDetailId:hd' : 'proposalDetailId'   // mỗi menu (Tờ trình / Hợp đồng) nhớ riêng
+  const ssDocKey = contractsMode ? 'proposalDocId:hd' : 'proposalDocId'
+  const [restoreId, setRestoreId] = useState<string | null>(() => { try { return sessionStorage.getItem(ssDetailKey) } catch { return null } })
   useEffect(() => {
     if (!restoreId) return
     const target = proposals.find(x => x.id === restoreId)
@@ -15097,13 +15099,13 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   useEffect(() => {
     if (restoreId) return   // đang chờ khôi phục, chưa ghi đè
     try {
-      if (detailProposal) sessionStorage.setItem('proposalDetailId', detailProposal.id)
-      else sessionStorage.removeItem('proposalDetailId')
+      if (detailProposal) sessionStorage.setItem(ssDetailKey, detailProposal.id)
+      else sessionStorage.removeItem(ssDetailKey)
     } catch {}
   }, [detailProposal, restoreId])
 
   // Nhớ cả màn XEM GIẤY (tờ trình, văn bản mẫu, đề nghị thanh toán): tải lại trang vẫn ở đúng tờ trình đó
-  const [restoreDocId, setRestoreDocId] = useState<string | null>(() => { try { return sessionStorage.getItem('proposalDocId') } catch { return null } })
+  const [restoreDocId, setRestoreDocId] = useState<string | null>(() => { try { return sessionStorage.getItem(ssDocKey) } catch { return null } })
   useEffect(() => {
     if (!restoreDocId) return
     const target = proposals.find(x => x.id === restoreDocId)
@@ -15113,13 +15115,13 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
   useEffect(() => {
     if (restoreDocId) return   // đang chờ khôi phục, chưa ghi đè
     try {
-      if (docProposal) sessionStorage.setItem('proposalDocId', docProposal.id)
-      else sessionStorage.removeItem('proposalDocId')
+      if (docProposal) sessionStorage.setItem(ssDocKey, docProposal.id)
+      else sessionStorage.removeItem(ssDocKey)
     } catch {}
   }, [docProposal, restoreDocId])
   // Chuyển sang mục khác (không phải tải lại trang) thì thôi nhớ khung đang mở; chỉ F5 mới khôi phục
   useEffect(() => () => {
-    try { sessionStorage.removeItem('proposalDetailId'); sessionStorage.removeItem('proposalDocId') } catch {}
+    try { sessionStorage.removeItem(ssDetailKey); sessionStorage.removeItem(ssDocKey) } catch {}
   }, [])
   const loadPendingMine = async () => {
     const { data } = await supabase.from('proposal_steps').select('proposal_id').eq('approver_id', currentUser.id).eq('status', 'pending')
