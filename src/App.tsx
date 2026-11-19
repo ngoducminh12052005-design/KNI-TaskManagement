@@ -14154,18 +14154,20 @@ async function stampPdfBytes(bytes: ArrayBuffer, stamp: string): Promise<Uint8Ar
 // Chuyển file Word đã duyệt thành PDF (đóng dấu số RTASK ở chân mỗi trang)
 async function docxToStampedPdf(blob: Blob, stamp: string): Promise<Uint8Array> {
   const box = document.createElement('div')
-  box.style.cssText = 'position:fixed;left:-99999px;top:0;width:794px'
+  // Không để ngoài màn hình (left:-99999px) vì html2canvas sẽ chụp ra trang trắng. Đặt ở góc trái, nằm dưới nền app, người dùng không thấy
+  box.style.cssText = 'position:fixed;left:0;top:0;width:794px;z-index:-1;pointer-events:none;background:#fff'
   document.body.appendChild(box)
   try {
     const docxPreview = await import('docx-preview')
     await docxPreview.renderAsync(blob, box, undefined, { className: 'docx', inWrapper: true, breakPages: true, useBase64URL: true } as any)
+    await new Promise(r => setTimeout(r, 400))   // chờ trình duyệt dàn trang xong rồi mới chụp
     const html2canvas = (await import('html2canvas')).default
     const { jsPDF } = await import('jspdf')
     const pages = Array.from(box.querySelectorAll('.docx-wrapper > section.docx')) as HTMLElement[]
     const list = pages.length > 0 ? pages : [box]
     let pdf: any = null
     for (const el of list) {
-      const canvas = await html2canvas(el, { scale: 2, useCORS: true })
+      const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: '#ffffff', scrollX: 0, scrollY: 0 })
       const img = canvas.toDataURL('image/jpeg', 0.92)
       const w = 210, h = (canvas.height * w) / canvas.width
       if (!pdf) pdf = new jsPDF({ unit: 'mm', format: [w, h] })
@@ -14191,6 +14193,7 @@ function FilePreviewHost() {
   const [err, setErr] = useState('')
   const [docxBlob, setDocxBlob] = useState<Blob | null>(null)
   const [stampedUrl, setStampedUrl] = useState('')
+  const [exporting, setExporting] = useState(false)
   const docxRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -14261,7 +14264,6 @@ function FilePreviewHost() {
   }, [kind, docxBlob, loading])
 
   if (!src) return null
-  const [exporting, setExporting] = useState(false)
   const download = async () => {
     if (!src.forcePdfOnly) {
       if (!url) return
