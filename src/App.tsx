@@ -15117,6 +15117,10 @@ function ProposalsView({ currentUser, users, proposals, proposalApprovals, propo
       else sessionStorage.removeItem('proposalDocId')
     } catch {}
   }, [docProposal, restoreDocId])
+  // Chuyển sang mục khác (không phải tải lại trang) thì thôi nhớ khung đang mở; chỉ F5 mới khôi phục
+  useEffect(() => () => {
+    try { sessionStorage.removeItem('proposalDetailId'); sessionStorage.removeItem('proposalDocId') } catch {}
+  }, [])
   const loadPendingMine = async () => {
     const { data } = await supabase.from('proposal_steps').select('proposal_id').eq('approver_id', currentUser.id).eq('status', 'pending')
     setPendingMine((data ?? []).map((s: any) => s.proposal_id))
@@ -19080,10 +19084,10 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
           proposals={proposals} />
       )
       case 'profile': return <ProfileView currentUser={currentUser} setCurrentUser={setCurrentUser} tasks={tasks} />
-      case 'contracts': return <ProposalsView contractsMode currentUser={currentUser} users={users} proposals={proposals} proposalApprovals={proposalApprovals} proposalRevisions={proposalRevisions} onJoinDiscussion={handleJoinProposal}
+      case 'contracts': return <ProposalsView key="contracts" contractsMode currentUser={currentUser} users={users} proposals={proposals} proposalApprovals={proposalApprovals} proposalRevisions={proposalRevisions} onJoinDiscussion={handleJoinProposal}
           highlightProposalId={highlightProposalId} clearHighlightProposalId={() => setHighlightProposalId(null)}
           openProposalId={openProposalId} clearOpenProposalId={() => setOpenProposalId(null)} />
-      case 'proposals': return <ProposalsView currentUser={currentUser} users={users} proposals={proposals} proposalApprovals={proposalApprovals} proposalRevisions={proposalRevisions} onJoinDiscussion={handleJoinProposal}
+      case 'proposals': return <ProposalsView key="proposals" currentUser={currentUser} users={users} proposals={proposals} proposalApprovals={proposalApprovals} proposalRevisions={proposalRevisions} onJoinDiscussion={handleJoinProposal}
           highlightProposalId={highlightProposalId} clearHighlightProposalId={() => setHighlightProposalId(null)}
           openProposalId={openProposalId} clearOpenProposalId={() => setOpenProposalId(null)} />
           case 'useradmin': return currentUser.isItAdmin ? <UserAdminView currentUser={currentUser} users={mergedUsers} /> : <DashboardView {...sharedProps} proposals={proposals} />
