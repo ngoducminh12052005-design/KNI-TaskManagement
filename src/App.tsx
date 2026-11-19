@@ -14139,15 +14139,32 @@ function downloadBlob(blob: Blob, filename: string) {
   document.body.appendChild(el); el.click(); el.remove()
   setTimeout(() => URL.revokeObjectURL(url), 2000)
 }
-// Đóng dấu số RTASK vào chân mỗi trang PDF (file PDF gốc)
+// Vẽ dòng chữ đóng dấu thành ảnh PNG bằng font của trình duyệt, nên hiện đủ dấu tiếng Việt
+// (font có sẵn của PDF như Helvetica không có chữ Đ, ệ, ... nên bị lỗi font)
+function makeStampImage(text: string): { dataUrl: string; ratio: number } {
+  const scale = 4, fontPx = 11
+  const font = `${fontPx * scale}px Arial, "Segoe UI", Roboto, sans-serif`
+  const probe = document.createElement('canvas').getContext('2d')!
+  probe.font = font
+  const wPx = Math.ceil(probe.measureText(text).width) + 4 * scale
+  const hPx = Math.ceil(fontPx * scale * 1.5)
+  const c = document.createElement('canvas')
+  c.width = wPx; c.height = hPx
+  const g = c.getContext('2d')!
+  g.font = font; g.fillStyle = '#737373'; g.textBaseline = 'middle'; g.textAlign = 'right'
+  g.fillText(text, wPx - 2 * scale, hPx / 2)
+  return { dataUrl: c.toDataURL('image/png'), ratio: wPx / hPx }
+}
+// Đóng dấu số RTASK vào chân mỗi trang PDF (file PDF gốc), nằm ở góc phải dưới
 async function stampPdfBytes(bytes: ArrayBuffer, stamp: string): Promise<Uint8Array> {
-  const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib')
+  const { PDFDocument } = await import('pdf-lib')
   const doc = await PDFDocument.load(bytes)
-  const font = await doc.embedFont(StandardFonts.Helvetica)
+  const img = makeStampImage(stamp)
+  const png = await doc.embedPng(await (await fetch(img.dataUrl)).arrayBuffer())
+  const drawH = 7.5 * 1.5, drawW = drawH * img.ratio
   for (const page of doc.getPages()) {
     const { width } = page.getSize()
-    const w = font.widthOfTextAtSize(stamp, 7.5)
-    page.drawText(stamp, { x: Math.max(8, width / 2 - w / 2), y: 12, size: 7.5, font, color: rgb(0.45, 0.45, 0.45) })
+    page.drawImage(png, { x: Math.max(8, width - drawW - 14), y: 8, width: drawW, height: drawH })
   }
   return doc.save()
 }
@@ -14173,8 +14190,9 @@ async function docxToStampedPdf(blob: Blob, stamp: string): Promise<Uint8Array> 
       if (!pdf) pdf = new jsPDF({ unit: 'mm', format: [w, h] })
       else pdf.addPage([w, h])
       pdf.addImage(img, 'JPEG', 0, 0, w, h)
-      pdf.setFontSize(7); pdf.setTextColor(120)
-      pdf.text(stamp, w / 2, h - 5, { align: 'center' })
+      const sImg = makeStampImage(stamp)
+      const sH = 3.2, sW = sH * sImg.ratio
+      pdf.addImage(sImg.dataUrl, 'PNG', w - sW - 8, h - sH - 3, sW, sH)   // góc phải dưới
     }
     return pdf.output('arraybuffer')
   } finally {
