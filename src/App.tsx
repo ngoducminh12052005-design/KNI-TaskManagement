@@ -18094,8 +18094,13 @@ setProjects((p.data ?? []).map((x: any) => mapDbProject(x, byProject[x.id] ?? []
 // ==================== DANH BẠ NHÂN SỰ ====================
 interface StaffRow {
   id: number; company: string; dept: string; deptOrder: number; stt: number
-  empCode: string; fullName: string; position?: string; line?: string; email?: string
+  empCode: string; fullName: string; position?: string; group?: string; email?: string
 }
+
+// BOD: ẩn email trong danh bạ (hệ thống vẫn lưu email). Nhận diện theo bộ phận "BOD" hoặc mã NV bắt đầu bằng BOD-
+const isBodRow = (r: StaffRow) => /^bod$/i.test(r.dept.trim()) || /^(KNI-)?BOD-/i.test(r.empCode)
+// Mã hiển thị: KNI-BOD-01, FS-01. Không lặp tiền tố nếu mã đã bắt đầu bằng tên công ty (VD FSM-01)
+const staffCodeOf = (r: StaffRow) => !r.empCode ? '—' : r.empCode.toUpperCase().startsWith(r.company.toUpperCase()) ? r.empCode : `${r.company}-${r.empCode}`
 
 function StaffDirectoryView() {
   const [rows, setRows] = useState<StaffRow[]>([])
@@ -18112,21 +18117,23 @@ function StaffDirectoryView() {
       if (d.error) setErr(d.error.message)
       const dir: StaffRow[] = (d.data ?? []).map((r: any) => ({
         id: r.id, company: r.company, dept: r.dept, deptOrder: r.dept_order, stt: r.stt, empCode: r.emp_code,
-        fullName: r.full_name, position: r.position ?? undefined, line: r.internal_line ?? undefined, email: r.email ?? undefined,
+        fullName: r.full_name, position: r.position ?? undefined, group: r.internal_line ?? undefined, email: r.email ?? undefined,
       }))
       // Người tạo trong "Quản lý người dùng" chưa có trong danh bạ Excel: gộp thêm (so theo email hoặc mã NV)
       const emails = new Set(dir.map(r => (r.email ?? '').toLowerCase()).filter(Boolean))
       const codes = new Set(dir.map(r => `${r.company}-${r.empCode}`.toUpperCase()))
+      const names = new Set(dir.map(r => r.fullName.toLowerCase().replace(/\s+/g, ' ').trim()))
       const extra: StaffRow[] = (p.data ?? [])
         .filter((u: any) => u.is_active !== false
           && !emails.has(String(u.email ?? '').toLowerCase())
+          && !names.has(String(u.name ?? '').toLowerCase().replace(/\s+/g, ' ').trim())
           && !(u.emp_code && codes.has(`${u.company ?? 'KNI'}-${u.emp_code}`.toUpperCase())))
         .map((u: any, i: number) => {
           const dept = u.department ?? 'Chưa phân bộ phận'
           const known = dir.find(r => r.dept === dept && (!u.company || r.company === u.company))
           return {
             id: -(i + 1), company: u.company ?? 'KNI', dept: known?.dept ?? dept, deptOrder: known?.deptOrder ?? 900, stt: 900 + i,
-            empCode: u.emp_code ?? '', fullName: u.name, position: u.position ?? undefined, line: u.internal_line ?? undefined, email: u.email ?? undefined,
+            empCode: u.emp_code ?? '', fullName: u.name, position: u.position ?? undefined, group: u.internal_line ?? undefined, email: u.email ?? undefined,
           }
         })
       setRows([...dir, ...extra].sort((a, b) => a.deptOrder - b.deptOrder || a.stt - b.stt))
@@ -18138,7 +18145,7 @@ function StaffDirectoryView() {
   const query = q.trim().toLowerCase()
   const shown = rows
     .filter(r => !company || r.company === company)
-    .filter(r => !query || `${r.company}-${r.empCode} ${r.fullName} ${r.position ?? ''} ${r.email ?? ''} ${r.dept}`.toLowerCase().includes(query))
+    .filter(r => !query || `${staffCodeOf(r)} ${r.fullName} ${r.position ?? ''} ${r.group ?? ''} ${isBodRow(r) ? '' : (r.email ?? '')} ${r.dept}`.toLowerCase().includes(query))
   const groupKey = (r: StaffRow) => `${r.company}|${r.dept}`
   const groupOrder = new Map<string, number>()
   shown.forEach(r => { const k = groupKey(r); const cur = groupOrder.get(k); if (cur === undefined || r.deptOrder < cur) groupOrder.set(k, r.deptOrder) })
@@ -18191,14 +18198,20 @@ function StaffDirectoryView() {
                     {list.map((r, i) => (
                       <tr key={r.id} style={{ borderTop: '1px solid var(--border)', color: 'var(--text-primary)' }}>
                         <td className={td} style={{ color: 'var(--text-muted)' }}>{i + 1}</td>
-                        <td className={`${td} font-mono font-bold whitespace-nowrap`}>{r.empCode ? `${r.company}-${r.empCode}` : '—'}</td>
+                        <td className={`${td} font-mono font-bold whitespace-nowrap`}>{staffCodeOf(r)}</td>
                         <td className={`${td} font-semibold`}>
                           {r.fullName}
                           {isLeadCode(r.empCode) && <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#a78bfa22', color: '#8b5cf6' }}>QUẢN LÝ</span>}
                         </td>
                         <td className={td}>{r.position ?? '—'}</td>
-                        <td className={td}>{r.line ?? '—'}</td>
-                        <td className={td}>{r.email ? <a href={`mailto:${r.email}`} style={{ color: '#2563eb' }}>{r.email}</a> : '—'}</td>
+                        <td className={td}>
+                          {r.group
+                            ? <div className="flex flex-wrap gap-1">{r.group.split(',').map(g => g.trim()).filter(Boolean).map(g => (
+                                <span key={g} className="text-[10px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#6366f122', color: '#4f46e5' }}>{g}</span>
+                              ))}</div>
+                            : '—'}
+                        </td>
+                        <td className={td}>{isBodRow(r) ? '' : (r.email ? <a href={`mailto:${r.email}`} style={{ color: '#2563eb' }}>{r.email}</a> : '—')}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -18211,6 +18224,7 @@ function StaffDirectoryView() {
     </div>
   )
 }
+
 
 // ==================== QUẢN LÝ NGƯỜI DÙNG & PHÒNG BAN (chỉ phòng IT) ====================
 // Phòng ban lấy từ bảng `departments`; TEAMS được nạp lại mỗi khi bảng đổi.
