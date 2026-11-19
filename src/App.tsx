@@ -9734,6 +9734,7 @@ if (!note.trim() && files.length === 0 && !link) { setMsg(noDrive ? 'Hãy nhập
 function ProposalAttachments({ p, users }: { p: Proposal; users: User[] }) {
   const list = p.attachments ?? []
   if (list.length === 0) return null
+  const locked = p.formData?.tpl === 'hopdong' && p.status === 'approved'
   const fmt = (d?: string) => (d ? new Date(d).toLocaleString('vi-VN') : '')
   const rounds = Array.from(new Set(list.map(a => a.round ?? 0))).sort((a, b) => a - b)
   return (
@@ -9751,8 +9752,8 @@ function ProposalAttachments({ p, users }: { p: Proposal; users: User[] }) {
             {first.note && <p className="text-[11px] mb-1" style={{ color: 'var(--text-muted)' }}>"<LinkifyCodes text={first.note} />"</p>}
             <div className="flex flex-wrap gap-3">
               {files.map(a => (
-                <button key={a.path} type="button" onClick={() => openProposalFile(a.path)}
-                  className="text-xs underline" style={{ color: '#3b82f6' }}>📎 {a.name}</button>
+                <button key={a.path} type="button" onClick={() => openProposalFile(a.path, a.name, locked ? { forcePdfOnly: true, code: p.code } : undefined)}
+                  className="text-xs underline" style={{ color: '#3b82f6' }}>📎 {a.name}{locked ? ' (chỉ xuất PDF)' : ''}</button>
               ))}
             </div>
           </div>
@@ -10544,7 +10545,9 @@ function ProposalDocView({ p, users, currentUserId, onClose, canAct, onApprove, 
             {heading('Tài liệu đính kèm theo Tờ trình:')}
             <div className="flex flex-col gap-1 items-start">
               {(p.attachments ?? []).map(a => (
-                <button key={a.path} type="button" onClick={() => openProposalFile(a.path)} className="text-xs underline text-blue-600">📎 {a.name}</button>
+                <button key={a.path} type="button"
+                  onClick={() => openProposalFile(a.path, a.name, p.status === 'approved' ? { forcePdfOnly: true, code: p.code } : undefined)}
+                  className="text-xs underline text-blue-600">📎 {a.name}{p.status === 'approved' ? ' (chỉ xuất PDF)' : ''}</button>
               ))}
               {p.driveUrl && <a href={p.driveUrl} target="_blank" rel="noopener noreferrer" className="text-xs underline text-blue-600">📁 Xem tài liệu đính kèm trên Drive</a>}
             </div>
@@ -12878,7 +12881,7 @@ function HopDongDetailLeft({ p, users, currentUser, flow, canAct, onApprove, onR
   const head = { color: 'var(--text-primary)' }
   const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? ''
   const fmtDay = (d?: string) => (d ? new Date(d).toLocaleDateString('vi-VN') : '')
-  const canEditAttach = currentUser.id === p.submittedBy || !!currentUser.isDirector
+  const canEditAttach = (currentUser.id === p.submittedBy || !!currentUser.isDirector) && p.status !== 'approved'
 
   // ----- Tờ trình đính kèm: gắn mã có sẵn hoặc tạo tờ trình mới -----
   const [codes, setCodes] = useState<string[]>(Array.isArray(f.relatedCodes) ? f.relatedCodes : [])
@@ -14120,7 +14123,7 @@ async function uploadProposalFiles(userId: string, files: File[]) {
 }
 
 // ===== Xem file ngay trong cửa sổ popup (không tải về), có nút "Tải về" =====
-type PreviewSrc = { name: string; file?: File; path?: string }
+type PreviewSrc = { name: string; file?: File; path?: string; forcePdfOnly?: boolean; code?: string }
 const PREVIEW_EVENT = 'kni-file-preview'
 function openFilePreview(src: PreviewSrc) {
   window.dispatchEvent(new CustomEvent(PREVIEW_EVENT, { detail: src }))
@@ -14128,6 +14131,53 @@ function openFilePreview(src: PreviewSrc) {
 const PREVIEW_MIME: Record<string, string> = {
   pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
   txt: 'text/plain', csv: 'text/csv', json: 'application/json',
+}
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const el = document.createElement('a')
+  el.href = url; el.download = filename
+  document.body.appendChild(el); el.click(); el.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 2000)
+}
+// Đóng dấu số RTASK vào chân mỗi trang PDF (file PDF gốc)
+async function stampPdfBytes(bytes: ArrayBuffer, stamp: string): Promise<Uint8Array> {
+  const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib')
+  const doc = await PDFDocument.load(bytes)
+  const font = await doc.embedFont(StandardFonts.Helvetica)
+  for (const page of doc.getPages()) {
+    const { width } = page.getSize()
+    const w = font.widthOfTextAtSize(stamp, 7.5)
+    page.drawText(stamp, { x: Math.max(8, width / 2 - w / 2), y: 12, size: 7.5, font, color: rgb(0.45, 0.45, 0.45) })
+  }
+  return doc.save()
+}
+// Chuyển file Word đã duyệt thành PDF (đóng dấu số RTASK ở chân mỗi trang)
+async function docxToStampedPdf(blob: Blob, stamp: string): Promise<Uint8Array> {
+  const box = document.createElement('div')
+  box.style.cssText = 'position:fixed;left:-99999px;top:0;width:794px'
+  document.body.appendChild(box)
+  try {
+    const docxPreview = await import('docx-preview')
+    await docxPreview.renderAsync(blob, box, undefined, { className: 'docx', inWrapper: true, breakPages: true, useBase64URL: true } as any)
+    const html2canvas = (await import('html2canvas')).default
+    const { jsPDF } = await import('jspdf')
+    const pages = Array.from(box.querySelectorAll('.docx-wrapper > section.docx')) as HTMLElement[]
+    const list = pages.length > 0 ? pages : [box]
+    let pdf: any = null
+    for (const el of list) {
+      const canvas = await html2canvas(el, { scale: 2, useCORS: true })
+      const img = canvas.toDataURL('image/jpeg', 0.92)
+      const w = 210, h = (canvas.height * w) / canvas.width
+      if (!pdf) pdf = new jsPDF({ unit: 'mm', format: [w, h] })
+      else pdf.addPage([w, h])
+      pdf.addImage(img, 'JPEG', 0, 0, w, h)
+      pdf.setFontSize(7); pdf.setTextColor(120)
+      pdf.text(stamp, w / 2, h - 5, { align: 'center' })
+    }
+    return pdf.output('arraybuffer')
+  } finally {
+    document.body.removeChild(box)
+  }
 }
 function FilePreviewHost() {
   const [src, setSrc] = useState<PreviewSrc | null>(null)
@@ -14210,11 +14260,28 @@ function FilePreviewHost() {
   }, [kind, docxBlob, loading])
 
   if (!src) return null
-  const download = () => {
-    if (!url) return
-    const a = document.createElement('a')
-    a.href = url; a.download = src.name
-    document.body.appendChild(a); a.click(); a.remove()
+  const [exporting, setExporting] = useState(false)
+  const download = async () => {
+    if (!src.forcePdfOnly) {
+      if (!url) return
+      const a = document.createElement('a')
+      a.href = url; a.download = src.name
+      document.body.appendChild(a); a.click(); a.remove()
+      return
+    }
+    setExporting(true)
+    try {
+      const stamp = `Đã duyệt · ${src.code ?? ''}`.trim()
+      let bytes: Uint8Array
+      if (kind === 'pdf' && url) bytes = await stampPdfBytes(await (await fetch(url)).arrayBuffer(), stamp)
+      else if (kind === 'docx' && docxBlob) bytes = await docxToStampedPdf(docxBlob, stamp)
+      else { alert('Định dạng file này chưa xuất PDF được trong app. Vui lòng đính kèm file PDF hoặc Word khi gửi phiếu hợp đồng.'); return }
+      downloadBlob(new Blob([new Uint8Array(bytes)], { type: 'application/pdf' }), src.name.replace(/\.[^.]+$/, '') + '.pdf')
+    } catch (e: any) {
+      alert('Không xuất được PDF: ' + (e?.message ?? ''))
+    } finally {
+      setExporting(false)
+    }
   }
   const shownHtml = sheets.length > 0 ? (sheets[sheetIdx]?.html ?? '') : html
   return (
@@ -14222,7 +14289,9 @@ function FilePreviewHost() {
       <div className="flex flex-col w-full max-w-5xl rounded-xl overflow-hidden" style={{ background: '#fff', height: '88vh' }} onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-2 px-4 py-2.5" style={{ background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
           <span className="flex-1 truncate text-sm font-bold" style={{ color: '#111827' }}>📄 {src.name}</span>
-          <button type="button" onClick={download} disabled={!url} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white disabled:opacity-40" style={{ background: '#2563eb' }}>⬇ Tải về</button>
+          <button type="button" onClick={download} disabled={(!url && !src.forcePdfOnly) || exporting} className="px-3 py-1.5 rounded-lg text-xs font-bold text-white disabled:opacity-40" style={{ background: '#2563eb' }}>
+            {exporting ? 'Đang xuất PDF...' : (src.forcePdfOnly ? '📄 Tải PDF' : '⬇ Tải về')}
+          </button>
           <button type="button" onClick={() => setSrc(null)} className="text-lg px-2" style={{ color: '#6b7280' }}>✕</button>
         </div>
         <div className="flex-1 overflow-auto" style={{ background: '#e5e7eb' }}>
@@ -14259,9 +14328,9 @@ function previewLocalFile(f: File) {
   openFilePreview({ name: f.name, file: f })
 }
 // Xem file đã tải lên: cũng mở popup. Link http(s) (Google Drive...) thì mở tab mới như cũ
-async function openProposalFile(path: string, name?: string) {
+async function openProposalFile(path: string, name?: string, opts?: { forcePdfOnly?: boolean; code?: string }) {
   if (/^https?:\/\//i.test(path)) { window.open(path, '_blank', 'noopener'); return }
-  openFilePreview({ name: name ?? ((path.split('/').pop() ?? 'file').replace(/^\d{10,}_/, '')), path })
+  openFilePreview({ name: name ?? ((path.split('/').pop() ?? 'file').replace(/^\d{10,}_/, '')), path, forcePdfOnly: opts?.forcePdfOnly, code: opts?.code })
 }
 
 const PROPOSAL_GROUPS = ['Mua sắm', 'Nghỉ phép', 'Đi công tác', 'Đề nghị thanh toán', 'Khác']
