@@ -10976,7 +10976,7 @@ function ProposalDnttForm({ currentUser, users, onClose, onCreated, draftId }: {
 
           <div className="mt-4">
             <p className="font-bold text-xs mb-1">Chứng từ đính kèm (hóa đơn, báo giá, ủy nhiệm chi...):</p>
-              <AttachBox files={files} setFiles={setFiles} accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" driveUrl={driveUrl} setDriveUrl={setDriveUrl} />
+              <AttachBox files={files} setFiles={setFiles} accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" />
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-8 text-center text-xs">
