@@ -18207,6 +18207,9 @@ function ForcePinScreen({ user, onDone }: { user: User; onDone: () => void }) {
   )
 }
 
+const GROUP_OPTIONS = ['BOD', 'BODA', 'ACCM', 'ACC', 'HRLEM', 'HRLE', 'ITM', 'PRM', 'PR', 'FSM', 'FS', 'ACVN', 'GEN']
+const groupsOf = (s: string) => s.split(',').map(g => g.trim()).filter(Boolean)
+
 type UserFormState = {
   userId?: string; name: string; email: string; password: string; company: string; empCode: string
   position: string; line: string; role: Role; teamId: string; extra: string[]
@@ -18221,6 +18224,7 @@ function UserAdminForm({ initial, onClose, onSaved }: { initial: UserFormState; 
   const set = (patch: Partial<UserFormState>) => setF(prev => ({ ...prev, ...patch }))
     const [hint, setHint] = useState('')
       const [codeTouched, setCodeTouched] = useState(false)
+  const [newGroup, setNewGroup] = useState('')
   // Tự sinh Mã NV theo phòng ban: IT-01, IT-02... (quản lý thêm chữ M: ITM-01)
   const genCode = async () => {
     if (!f.teamId) return
@@ -18345,7 +18349,25 @@ function UserAdminForm({ initial, onClose, onSaved }: { initial: UserFormState; 
                 </select></div>
               <div><label className={label}>Mã NV (tự sinh theo phòng ban, có thể sửa) <button type="button" onClick={() => { setCodeTouched(false); genCode() }} className="text-blue-600 font-normal ml-1">Sinh lại</button></label><input value={f.empCode} onChange={e => { setCodeTouched(true); set({ empCode: e.target.value }) }} className={box} style={ink} /></div>
               <div><label className={label}>Chức vụ</label><input value={f.position} onChange={e => set({ position: e.target.value })} className={box} style={ink} /></div>
-              <div><label className={label}>Line nội bộ</label><input value={f.line} onChange={e => set({ line: e.target.value })} className={box} style={ink} /></div>
+              <div className="sm:col-span-2"><label className={label}>Nhóm (Group): bấm để chọn một hoặc nhiều nhóm</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {Array.from(new Set([...GROUP_OPTIONS, ...groupsOf(f.line)])).map(g => {
+                    const on = groupsOf(f.line).includes(g)
+                    return (
+                      <button key={g} type="button"
+                        onClick={() => set({ line: (on ? groupsOf(f.line).filter(x => x !== g) : [...groupsOf(f.line), g]).join(', ') })}
+                        className="px-2.5 py-1 rounded-full text-[11px] font-bold border"
+                        style={{ background: on ? '#6366f1' : '#fff', color: on ? '#fff' : '#4b5563', borderColor: on ? '#6366f1' : '#d1d5db' }}>{g}</button>
+                    )
+                  })}
+                </div>
+                <div className="flex gap-2 mt-2">
+                  <input value={newGroup} onChange={e => setNewGroup(e.target.value.toUpperCase())} placeholder="Thêm nhóm khác (VD: GEN)" className={box} style={ink}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); const g = newGroup.trim(); if (g && !groupsOf(f.line).includes(g)) set({ line: [...groupsOf(f.line), g].join(', ') }); setNewGroup('') } }} />
+                  <button type="button" className="px-3 rounded border border-gray-300 text-xs whitespace-nowrap"
+                    onClick={() => { const g = newGroup.trim(); if (g && !groupsOf(f.line).includes(g)) set({ line: [...groupsOf(f.line), g].join(', ') }); setNewGroup('') }}>Thêm</button>
+                </div>
+              </div>
               <div><label className={label}>Vai trò</label>
                 <select value={f.role} onChange={e => set({ role: e.target.value as Role })} className={box} style={ink}>
                   <option value="employee">Nhân viên</option>
@@ -18382,6 +18404,7 @@ function UserAdminForm({ initial, onClose, onSaved }: { initial: UserFormState; 
     </div>
   )
 }
+
 
 function UserAdminView({ currentUser, users }: { currentUser: User; users: User[] }) {
   const [tab, setTab] = useState<'users' | 'depts'>('users')
