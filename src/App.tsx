@@ -18039,7 +18039,10 @@ function StaffDirectoryView() {
   const shown = rows
     .filter(r => !company || r.company === company)
     .filter(r => !query || `${r.company}-${r.empCode} ${r.fullName} ${r.position ?? ''} ${r.email ?? ''} ${r.dept}`.toLowerCase().includes(query))
-  const depts = Array.from(new Set(shown.map(r => `${r.company}|${r.deptOrder}|${r.dept}`)))
+  const groupKey = (r: StaffRow) => `${r.company}|${r.dept}`
+  const groupOrder = new Map<string, number>()
+  shown.forEach(r => { const k = groupKey(r); const cur = groupOrder.get(k); if (cur === undefined || r.deptOrder < cur) groupOrder.set(k, r.deptOrder) })
+  const depts = Array.from(new Set(shown.map(groupKey))).sort((a, b) => (groupOrder.get(a)! - groupOrder.get(b)!) || a.localeCompare(b))
   const isLeadCode = (c: string) => /^[A-Z]+M-\d+$/.test(c)
   const sel = { background: 'var(--bg-panel)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
   const th = 'px-3 py-2.5 text-[10px] font-bold uppercase tracking-wide text-left'
@@ -18069,8 +18072,8 @@ function StaffDirectoryView() {
       {!loading && !err && shown.length === 0 && <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Không có nhân sự nào.</p>}
       <div className="space-y-5">
         {depts.map(key => {
-          const [co, , name] = key.split('|')
-          const list = shown.filter(r => `${r.company}|${r.deptOrder}|${r.dept}` === key)
+          const [co, name] = key.split('|')
+          const list = shown.filter(r => groupKey(r) === key)
           return (
             <div key={key} className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
               <div className="px-4 py-2.5 flex items-center justify-between" style={{ background: 'var(--bg-card-alt)' }}>
@@ -18081,7 +18084,7 @@ function StaffDirectoryView() {
                 <table className="w-full border-collapse" style={{ minWidth: 720 }}>
                   <thead>
                     <tr style={{ color: 'var(--text-muted)' }}>
-                      {['STT', 'Mã NV', 'Họ tên', 'Chức vụ', 'Line', 'Email'].map(h => <th key={h} className={th}>{h}</th>)}
+                      {['STT', 'Mã NV', 'Họ tên', 'Chức vụ', 'Group', 'Email'].map(h => <th key={h} className={th}>{h}</th>)}
                     </tr>
                   </thead>
                   <tbody>
