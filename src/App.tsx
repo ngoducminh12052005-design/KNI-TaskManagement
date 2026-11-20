@@ -14050,7 +14050,7 @@ function ProposalDetailModal({ proposal: p, users, currentUser, approvals, revis
             </section>
             <ProposalSupplementSection p={p} currentUser={currentUser} flow={flow} noDrive />
             {relBelow && renderRelated()}
-            <ProposalCostSection p={p} canEdit={canEdit} />
+            <ProposalCostSection p={p} canEdit={canEdit && p.status !== 'approved'} />
             <ProposalCommentsSection p={p} users={users} currentUser={currentUser} />
           </div>
 
@@ -19007,12 +19007,13 @@ function VerifyDocumentView({ users }: { users: User[] }) {
     const done = (res?.steps ?? []).filter(x => x.status === 'approved')
     const approvedAt = done.reduce((m: string, x: any) => (x.decided_at && x.decided_at > m ? x.decided_at : m), '') || null
     const ok = p.status === 'approved'
-    const banner = ok ? ['✅ Phiếu đã được duyệt', '#34d39922', '#059669']
+    const banner = ok ? ['✅ Phiếu đã được duyệt trong hệ thống', '#34d39922', '#059669']
       : p.status === 'rejected' ? ['❌ Phiếu đã bị từ chối, KHÔNG phải bản đã duyệt', '#ef444422', '#dc2626']
       : ['⚠ Phiếu CHƯA duyệt xong. Nếu tờ giấy ghi đã duyệt thì không đúng', '#f59e0b22', '#b45309']
     return (
       <div className="mt-3 rounded-lg p-3" style={{ background: banner[1] }}>
         <p className="text-sm font-bold" style={{ color: banner[2] }}>{banner[0]}</p>
+        <p className="text-xs mt-1" style={{ color: 'var(--text-primary)' }}>⚠ Trang này không đọc nội dung tờ giấy / file. Hãy so <b>Số tiền, Tên, Người duyệt</b> bên dưới với tờ giấy: khác nhau là tờ giấy đã bị sửa.</p>
         <div className="mt-3">
           {line('Số phiếu', <span className="font-mono">{p.code}</span>)}
           {line('Loại', kindText)}
