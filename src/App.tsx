@@ -23,6 +23,14 @@ function updateAppBadge(count: number) {
   } catch {}
 }
 import * as XLSX from 'xlsx'
+// Quét QR trên giấy / file đã duyệt sẽ mở web với ?verify=SỐ_PHIẾU. Nhớ lại để sau khi đăng nhập mở thẳng trang "Kiểm tra tài liệu"
+try {
+  const vp = new URLSearchParams(window.location.search).get('verify')
+  if (vp) {
+    sessionStorage.setItem('pendingVerify', vp.trim().toUpperCase())
+    window.history.replaceState(null, '', window.location.pathname + window.location.hash)
+  }
+} catch {}
 // ===== Nút Back của trình duyệt: đóng cửa sổ / chi tiết đang mở thay vì thoát khỏi web =====
 const openOverlays = new Set<string>()
 let currentAppView = ''   // trang (view) đang hiển thị, App cập nhật mỗi lần render
@@ -58,7 +66,7 @@ function useBackToClose(onClose?: () => void) {
 // ==================== TYPES ====================
 
 type Role = 'manager' | 'employee'
-type View = 'dashboard' | 'tasks' | 'projects' | 'directory' | 'useradmin' | 'leaderboard' | 'rewards' | 'social' | 'profile' | 'proposals' | 'contracts' | 'bodlog'
+type View = 'dashboard' | 'tasks' | 'projects' | 'directory' | 'useradmin' | 'leaderboard' | 'rewards' | 'social' | 'profile' | 'proposals' | 'contracts' | 'bodlog' | 'verify'
 type TaskStatus = 'open' | 'in-progress' | 'submitted' | 'completed'
 type TaskPriority = 'low' | 'medium' | 'high'
 type ChatChannel = 'general' | 'team' | 'announcements' | 'dm' | 'proposal' | 'leaders' | 'room'
@@ -14140,6 +14148,16 @@ function downloadBlob(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 2000)
 }
 // Vẽ dòng chữ đóng dấu thành ảnh PNG bằng font của trình duyệt, nên hiện đủ dấu tiếng Việt
+// ===== Mã QR trên tài liệu đã duyệt: quét ra trang "Kiểm tra tài liệu" của đúng số phiếu =====
+function verifyUrlFor(code: string) {
+  return `${window.location.origin}${window.location.pathname}?verify=${encodeURIComponent(code)}`
+}
+async function makeQrDataUrl(text: string): Promise<string> {
+  // @ts-ignore  (cần: npm install qrcode)
+  const mod: any = await import('qrcode')
+  const QR = mod.default ?? mod
+  return QR.toDataURL(text, { margin: 1, width: 300, errorCorrectionLevel: 'M' })
+}
 // (font có sẵn của PDF như Helvetica không có chữ Đ, ệ, ... nên bị lỗi font)
 function makeStampImage(text: string): { dataUrl: string; ratio: number } {
   const scale = 4, fontPx = 11
@@ -14155,21 +14173,29 @@ function makeStampImage(text: string): { dataUrl: string; ratio: number } {
   g.fillText(text, wPx - 2 * scale, hPx / 2)
   return { dataUrl: c.toDataURL('image/png'), ratio: wPx / hPx }
 }
-// Đóng dấu số RTASK vào chân mỗi trang PDF (file PDF gốc), nằm ở góc phải dưới
-async function stampPdfBytes(bytes: ArrayBuffer, stamp: string): Promise<Uint8Array> {
+// Đóng dấu số RTASK vào chân mỗi trang PDF (file PDF gốc), nằm ở góc phải dưới. Có qrText thì thêm mã QR bên cạnh dòng chữ.
+async function stampPdfBytes(bytes: ArrayBuffer, stamp: string, qrText?: string): Promise<Uint8Array> {
   const { PDFDocument } = await import('pdf-lib')
   const doc = await PDFDocument.load(bytes)
   const img = makeStampImage(stamp)
   const png = await doc.embedPng(await (await fetch(img.dataUrl)).arrayBuffer())
+  const qrPng = qrText ? await doc.embedPng(await (await fetch(await makeQrDataUrl(qrText))).arrayBuffer()) : null
+  const QR_PT = 42   // cạnh mã QR (pt), ~15mm
   const drawH = 7.5 * 1.5, drawW = drawH * img.ratio
   for (const page of doc.getPages()) {
     const { width } = page.getSize()
-    page.drawImage(png, { x: Math.max(8, width - drawW - 14), y: 8, width: drawW, height: drawH })
+    if (qrPng) {
+      const qx = width - QR_PT - 10
+      page.drawImage(qrPng, { x: qx, y: 8, width: QR_PT, height: QR_PT })
+      page.drawImage(png, { x: Math.max(8, qx - drawW - 4), y: 8 + (QR_PT - drawH) / 2, width: drawW, height: drawH })
+    } else {
+      page.drawImage(png, { x: Math.max(8, width - drawW - 14), y: 8, width: drawW, height: drawH })
+    }
   }
   return doc.save()
 }
-// Chuyển file Word đã duyệt thành PDF (đóng dấu số RTASK ở chân mỗi trang)
-async function docxToStampedPdf(blob: Blob, stamp: string): Promise<Uint8Array> {
+// Chuyển file Word đã duyệt thành PDF (đóng dấu số RTASK + mã QR ở chân mỗi trang)
+async function docxToStampedPdf(blob: Blob, stamp: string, qrText?: string): Promise<Uint8Array> {
   const box = document.createElement('div')
   // Không để ngoài màn hình (left:-99999px) vì html2canvas sẽ chụp ra trang trắng. Đặt ở góc trái, nằm dưới nền app, người dùng không thấy
   box.style.cssText = 'position:fixed;left:0;top:0;width:794px;z-index:-1;pointer-events:none;background:#fff'
@@ -14180,6 +14206,8 @@ async function docxToStampedPdf(blob: Blob, stamp: string): Promise<Uint8Array> 
     await new Promise(r => setTimeout(r, 400))   // chờ trình duyệt dàn trang xong rồi mới chụp
     const html2canvas = (await import('html2canvas')).default
     const { jsPDF } = await import('jspdf')
+    const qrUrl = qrText ? await makeQrDataUrl(qrText) : null
+    const QR_MM = 15
     const pages = Array.from(box.querySelectorAll('.docx-wrapper > section.docx')) as HTMLElement[]
     const list = pages.length > 0 ? pages : [box]
     let pdf: any = null
@@ -14192,7 +14220,13 @@ async function docxToStampedPdf(blob: Blob, stamp: string): Promise<Uint8Array> 
       pdf.addImage(img, 'JPEG', 0, 0, w, h)
       const sImg = makeStampImage(stamp)
       const sH = 3.2, sW = sH * sImg.ratio
-      pdf.addImage(sImg.dataUrl, 'PNG', w - sW - 8, h - sH - 3, sW, sH)   // góc phải dưới
+      if (qrUrl) {
+        const qx = w - QR_MM - 6, qy = h - QR_MM - 3
+        pdf.addImage(qrUrl, 'PNG', qx, qy, QR_MM, QR_MM)
+        pdf.addImage(sImg.dataUrl, 'PNG', qx - sW - 1.5, qy + (QR_MM - sH) / 2, sW, sH)
+      } else {
+        pdf.addImage(sImg.dataUrl, 'PNG', w - sW - 8, h - sH - 3, sW, sH)   // góc phải dưới
+      }
     }
     return pdf.output('arraybuffer')
   } finally {
@@ -14300,9 +14334,10 @@ function FilePreviewHost() {
     setExporting(true)
     try {
       const stamp = `Đã duyệt · ${src.code ?? ''}`.trim()
+      const qrText = src.code ? verifyUrlFor(src.code) : undefined
       let bytes: Uint8Array
-      if (kind === 'pdf' && url) bytes = await stampPdfBytes(await (await fetch(url)).arrayBuffer(), stamp)
-      else if (kind === 'docx' && docxBlob) bytes = await docxToStampedPdf(docxBlob, stamp)
+      if (kind === 'pdf' && url) bytes = await stampPdfBytes(await (await fetch(url)).arrayBuffer(), stamp, qrText)
+      else if (kind === 'docx' && docxBlob) bytes = await docxToStampedPdf(docxBlob, stamp, qrText)
       else { alert('Định dạng file này chưa xuất PDF được trong app. Vui lòng đính kèm file PDF hoặc Word khi gửi phiếu hợp đồng.'); return }
       const su = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'application/pdf' }))
       setStampedUrl(su)
@@ -18854,6 +18889,7 @@ const NAV = [
   { id: 'directory', label: 'Danh bạ', icon: '📇' },
   { id: 'proposals', label: 'Tờ trình', icon: '📜' },
   { id: 'contracts', label: 'Hợp đồng', icon: '📑' },
+  { id: 'verify', label: 'Kiểm tra tài liệu', icon: '🔎' },
   { id: 'leaderboard', label: 'Xếp hạng', icon: '🏆' },
   { id: 'rewards', label: 'Quà', icon: '🎁' },
   { id: 'social', label: 'Social', icon: '💬' },
@@ -18919,6 +18955,102 @@ function SidebarStaffMenu({ currentUser, users, onPick }: { currentUser: User; u
   )
 }
 
+// ===== Trang "Kiểm tra tài liệu" =====
+// Quét QR trên giấy / file (hoặc nhập số phiếu) -> hiện thông tin thật của phiếu trong hệ thống để đối chiếu với tờ giấy.
+function VerifyDocumentView({ users }: { users: User[] }) {
+  const [codeInput, setCodeInput] = useState('')
+  const [looking, setLooking] = useState(false)
+  const [res, setRes] = useState<{ code: string; p: any | null; steps: any[] } | null>(null)
+  const [err, setErr] = useState('')
+
+  const lookup = async (raw: string) => {
+    const c = raw.trim().toUpperCase().replace(/^R-TASK/, 'RTASK')
+    if (!c) return
+    setLooking(true); setErr(''); setRes(null)
+    try {
+      const { data: p, error } = await supabase.from('proposals')
+        .select('id, code, title, kind, status, form_data, items, submitted_by, department, created_at').eq('code', c).maybeSingle()
+      if (error) throw error
+      let steps: any[] = []
+      if (p) {
+        const { data } = await supabase.from('proposal_steps').select('approver_id, status, decided_at, step_order').eq('proposal_id', p.id).order('step_order')
+        steps = data ?? []
+      }
+      setRes({ code: c, p: p ?? null, steps })
+    } catch (e: any) { setErr('Không tra cứu được: ' + (e?.message ?? '')) }
+    finally { setLooking(false) }
+  }
+  // Vừa quét QR: tự tra cứu số phiếu đã nhớ
+  useEffect(() => {
+    let c = ''
+    try { c = sessionStorage.getItem('pendingVerify') || ''; if (c) sessionStorage.removeItem('pendingVerify') } catch {}
+    if (c) { setCodeInput(c); lookup(c) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const card = { background: 'var(--bg-card)', border: '1px solid var(--border)' } as const
+  const nameOf = (id?: string) => users.find(u => u.id === id)?.name ?? '—'
+  const when = (d?: string | null) => (d ? new Date(d).toLocaleString('vi-VN') : '—')
+  const line = (label: string, value: any) => (
+    <div className="flex gap-2 text-sm py-1" style={{ borderBottom: '1px solid var(--border)' }}>
+      <span className="w-36 shrink-0" style={{ color: 'var(--text-muted)' }}>{label}</span>
+      <span className="font-semibold break-words" style={{ color: 'var(--text-primary)' }}>{value}</span>
+    </div>
+  )
+  const view = (() => {
+    const p = res?.p
+    if (!p) return null
+    const fd: Record<string, any> = p.form_data ?? {}
+    const sum = (Array.isArray(p.items) ? p.items : []).reduce((t: number, x: any) => t + (Number(x?.amount) || 0), 0)
+    const amount = typeof fd.total === 'number' ? fd.total : (sum > 0 ? sum : (fd.value ? String(fd.value) : null))
+    const kindText = p.kind === 'totrinh' ? 'Tờ trình' : p.kind === 'dntt' ? 'Đề nghị thanh toán' : fd.tpl === 'hopdong' ? 'Hợp đồng' : 'Đề xuất'
+    const done = (res?.steps ?? []).filter(x => x.status === 'approved')
+    const approvedAt = done.reduce((m: string, x: any) => (x.decided_at && x.decided_at > m ? x.decided_at : m), '') || null
+    const ok = p.status === 'approved'
+    const banner = ok ? ['✅ Phiếu đã được duyệt', '#34d39922', '#059669']
+      : p.status === 'rejected' ? ['❌ Phiếu đã bị từ chối, KHÔNG phải bản đã duyệt', '#ef444422', '#dc2626']
+      : ['⚠ Phiếu CHƯA duyệt xong. Nếu tờ giấy ghi đã duyệt thì không đúng', '#f59e0b22', '#b45309']
+    return (
+      <div className="mt-3 rounded-lg p-3" style={{ background: banner[1] }}>
+        <p className="text-sm font-bold" style={{ color: banner[2] }}>{banner[0]}</p>
+        <div className="mt-3">
+          {line('Số phiếu', <span className="font-mono">{p.code}</span>)}
+          {line('Loại', kindText)}
+          {line('Tên', p.title || '—')}
+          {line('Số tiền', typeof amount === 'number' ? `${amount.toLocaleString('vi-VN')} đ` : (amount || '—'))}
+          {line('Người lập', nameOf(p.submitted_by))}
+          {line('Người duyệt', done.length === 0 ? '—' : (
+            <span className="flex flex-col">{done.map((x: any, i: number) => <span key={i}>{nameOf(x.approver_id)}{x.decided_at ? ` · ${when(x.decided_at)}` : ''}</span>)}</span>
+          ))}
+          {ok && line('Thời điểm duyệt', when(approvedAt))}
+        </div>
+      </div>
+    )
+  })()
+
+  return (
+    <div className="p-4 md:p-6 max-w-3xl mx-auto space-y-4">
+      <div>
+        <h1 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>🔎 Kiểm tra tài liệu</h1>
+        <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Quét mã QR trên giấy / file đã duyệt (hoặc nhập số phiếu), rồi so thông tin hiện ra với tờ giấy. Số tiền, tên hoặc người duyệt khác nhau nghĩa là tờ giấy đã bị sửa.</p>
+      </div>
+      {err && <p className="text-sm" style={{ color: '#dc2626' }}>{err}</p>}
+      <section className="rounded-xl p-4" style={card}>
+        <div className="flex gap-2">
+          <input value={codeInput} onChange={e => setCodeInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') lookup(codeInput) }}
+            placeholder="Số phiếu (VD: RTASK161126-02)" className="flex-1 min-w-0 px-3 py-2 rounded-lg text-sm outline-none"
+            style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+          <button type="button" onClick={() => lookup(codeInput)} disabled={!codeInput.trim() || looking}
+            className="px-4 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40" style={{ background: '#7c3aed' }}>{looking ? 'Đang tra...' : 'Tra cứu'}</button>
+        </div>
+        {view}
+        {res && !res.p && (
+          <p className="mt-3 text-sm font-bold" style={{ color: '#dc2626' }}>❌ Không tìm thấy phiếu {res.code} (hoặc bạn không có quyền xem phiếu này).</p>
+        )}
+      </section>
+    </div>
+  )
+}
 function NotificationBell({ notifications, onNotificationClick }: {
   notifications: { id: string; message: string; createdAt: string; linkChannel?: string; linkDmUserId?: string; linkTaskId?: string; linkProposalId?: string }[]
     onNotificationClick?: (n: { linkChannel?: string; linkDmUserId?: string; linkTaskId?: string; linkProposalId?: string; message?: string }) => void
@@ -19008,7 +19140,10 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
 }) {
   // Nhớ trang đang xem: reload vẫn ở đúng chỗ (sessionStorage = theo từng tab trình duyệt)
   const [view, setView] = useState<View>(() => {
-    try { return (sessionStorage.getItem('appView') as View) || 'dashboard' } catch { return 'dashboard' }
+    try {
+      if (sessionStorage.getItem('pendingVerify')) return 'verify'   // vừa quét QR: mở thẳng trang Kiểm tra tài liệu
+      return (sessionStorage.getItem('appView') as View) || 'dashboard'
+    } catch { return 'dashboard' }
   })
   useEffect(() => { try { sessionStorage.setItem('appView', view) } catch {} }, [view])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => { try { return localStorage.getItem('sidebarCollapsed') === '1' } catch { return false } })
@@ -19225,6 +19360,7 @@ function AppShell({ currentUser, setCurrentUser, allUsers, tasks, setTasks, mess
           navigateTarget={socialTarget} clearNavigateTarget={() => setSocialTarget(null)}
           proposals={proposals} />
       )
+      case 'verify': return <VerifyDocumentView users={users} />
       case 'profile': return <ProfileView currentUser={currentUser} setCurrentUser={setCurrentUser} tasks={tasks} />
       case 'contracts': return <ProposalsView key="contracts" contractsMode currentUser={currentUser} users={users} proposals={proposals} proposalApprovals={proposalApprovals} proposalRevisions={proposalRevisions} onJoinDiscussion={handleJoinProposal}
           highlightProposalId={highlightProposalId} clearHighlightProposalId={() => setHighlightProposalId(null)}
