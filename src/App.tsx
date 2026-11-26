@@ -835,7 +835,6 @@ const TEAMS = [
   { id: 't3d', name: 'Genki House - Hoạt động-Chăm sóc', emoji: '🧘' },
   { id: 't3e', name: 'Genki House - Kinh doanh-Lễ tân', emoji: '💼' },
   { id: 't3f', name: 'Genki House - Hỗ trợ', emoji: '🧹' },
-  { id: 't4', name: 'Genki Farm', emoji: '🌾' },
   { id: 't5', name: 'Les Sens', emoji: '🏝️' },
   { id: 't7', name: 'Amerys', emoji: '🏨' },
   { id: 't6', name: 'ACVN', emoji: '🎓' },
@@ -894,13 +893,13 @@ const SLA_LEVELS: Record<string, { label: string; hours: number; color: string }
 }
 
 // ===== SLA chỉ tính trong giờ hành chính 8:00–17:00 (Thứ 2 → Thứ 6) =====
-// Genki (Genki House/Genki Farm) có thêm sáng Thứ 7 (8:00–12:00); các công ty còn lại nghỉ Thứ 7 + Chủ nhật hoàn toàn.
+// Genki House có thêm sáng Thứ 7 (8:00–12:00); các công ty còn lại nghỉ Thứ 7 + Chủ nhật hoàn toàn.
 // Thêm ngày nghỉ lễ chung của công ty vào đây, định dạng 'YYYY-MM-DD' (giờ Việt Nam) — ngày lễ thì cả tuần vẫn nghỉ như Chủ nhật.
 const SLA_HOLIDAYS = new Set<string>([
   // '2026-01-01', '2026-04-30', '2026-05-01', '2026-09-02',
 ])
 // Công ty nào có thêm sáng Thứ 7 (8:00–12:00) — các công ty còn lại nghỉ hẳn Thứ 7. Thêm từ khoá (không dấu, chữ thường) nếu có công ty khác cũng làm Thứ 7.
-const SLA_SAT_WORKING_KEYWORDS = ['genki']
+const SLA_SAT_WORKING_KEYWORDS = ['genki house']
 const worksOnSaturday = (company?: string) => SLA_SAT_WORKING_KEYWORDS.some(k => (company ?? '').toLowerCase().includes(k))
 const VN_OFFSET_MS = 7 * 3600000
 const vnDateKey = (ms: number) => new Date(ms + VN_OFFSET_MS).toISOString().slice(0, 10)
@@ -1006,7 +1005,6 @@ const COMPANY_CODES: Record<string, string> = {
   'KNI': 'KNI',
   'KNI Office': 'KNI',   // dữ liệu cũ
   'Genki House': 'GH',
-  'Genki Farm': 'GF',
   'First Steps': 'FS',
   'Les Sens': 'LS',
   'Amerys': 'AMR',
@@ -14400,7 +14398,7 @@ async function openProposalFile(path: string, name?: string, opts?: { forcePdfOn
 }
 
 const PROPOSAL_GROUPS = ['Mua sắm', 'Nghỉ phép', 'Đi công tác', 'Đề nghị thanh toán', 'Khác']
-const COMPANIES = ['KNI', 'Genki House', 'Genki Farm', 'First Steps', 'Les Sens', 'Amerys', 'ACVN']
+const COMPANIES = ['KNI', 'Genki House', 'First Steps', 'Les Sens', 'Amerys', 'ACVN']
 
 async function generateProposalCode(userId: string): Promise<string> {
   const d = new Date()
