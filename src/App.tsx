@@ -2767,9 +2767,6 @@ const hoursMs = (SLA_LEVELS as any)[form.slaLevel].hours * 3600000
                     </p>
                   )
                 })()}
-                {slaOffDayNote(form.startDate, form.company, form.startTime) && (
-                  <p className="text-[10px] mt-1" style={{ color: '#2563eb' }}>{slaOffDayNote(form.startDate, form.company, form.startTime)}</p>
-                )}
               </td>
               <td className={`${td} font-bold bg-gray-50`} style={{ width: '22%' }}>Hạn hoàn thành</td>
               <td className={td}>
@@ -2784,6 +2781,9 @@ const hoursMs = (SLA_LEVELS as any)[form.slaLevel].hours * 3600000
                         <tr>
               <td className={`${td} font-bold bg-gray-50`}>Mức độ SLA</td>
               <td className={td}>
+                {slaOffDayNote(form.startDate, form.company, form.startTime) && (
+                  <p className="text-[10px] leading-snug mb-1.5 opacity-60" style={{ color: '#64748b' }}>{slaOffDayNote(form.startDate, form.company, form.startTime)}</p>
+                )}
                 <select value={form.slaLevel} onChange={e => { const v = e.target.value; patchForm(editingTask ? { slaLevel: v } : { slaLevel: v, expReward: slaExpRange(v).suggested }) }} className={sel} style={ink}>
                   <option value="">-- Không áp dụng SLA --</option>
                   {Object.entries(SLA_LEVELS).map(([key, cfg]) => <option key={key} value={key}>{cfg.label}</option>)}
