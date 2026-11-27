@@ -2757,16 +2757,6 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
                   <input type="time" value={form.startTime ?? ''} onChange={e => patchForm({ startTime: e.target.value })} className={cell}
                     style={{ ...ink, maxWidth: 110 }} title="Giờ bắt đầu (để trống = tính ngay khi giao)" />
                 </div>
-                {form.slaLevel && (SLA_LEVELS as any)[form.slaLevel] && (() => {
-                  const from = slaStartAfterOffDays(Math.max(Date.now(), startMs(form.startDate, form.startTime)), form.company, !!form.startTime)
-const hoursMs = (SLA_LEVELS as any)[form.slaLevel].hours * 3600000
-                  const f = (ms: number) => new Date(ms).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })
-                  return (
-                    <p className="text-[10px] mt-1" style={{ color: '#b45309' }}>
-                      ⏱ SLA tính từ {f(from)} → hạn {f(addSlaSkipOffDays(from, hoursMs, form.company))} (cần quản lý phòng khác duyệt thì tính từ lúc được duyệt)
-                    </p>
-                  )
-                })()}
               </td>
               <td className={`${td} font-bold bg-gray-50`} style={{ width: '22%' }}>Hạn hoàn thành</td>
               <td className={td}>
@@ -2781,8 +2771,18 @@ const hoursMs = (SLA_LEVELS as any)[form.slaLevel].hours * 3600000
                         <tr>
               <td className={`${td} font-bold bg-gray-50`}>Mức độ SLA</td>
               <td className={td}>
+                {form.slaLevel && (SLA_LEVELS as any)[form.slaLevel] && (() => {
+                  const from = slaStartAfterOffDays(Math.max(Date.now(), startMs(form.startDate, form.startTime)), form.company, !!form.startTime)
+                  const hoursMs = (SLA_LEVELS as any)[form.slaLevel].hours * 3600000
+                  const f = (ms: number) => new Date(ms).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })
+                  return (
+                    <p className="text-[10px] mt-1" style={{ color: '#b45309' }}>
+                      ⏱ SLA tính từ {f(from)} → hạn {f(addSlaSkipOffDays(from, hoursMs, form.company))} (cần quản lý phòng khác duyệt thì tính từ lúc được duyệt)
+                    </p>
+                  )
+                })()}
                 {slaOffDayNote(form.startDate, form.company, form.startTime) && (
-                  <p className="text-[10px] leading-snug mb-1.5 opacity-60" style={{ color: '#64748b' }}>{slaOffDayNote(form.startDate, form.company, form.startTime)}</p>
+                  <p className="text-[10px] leading-snug mt-1.5 opacity-60" style={{ color: '#64748b' }}>{slaOffDayNote(form.startDate, form.company, form.startTime)}</p>
                 )}
                 <select value={form.slaLevel} onChange={e => { const v = e.target.value; patchForm(editingTask ? { slaLevel: v } : { slaLevel: v, expReward: slaExpRange(v).suggested }) }} className={sel} style={ink}>
                   <option value="">-- Không áp dụng SLA --</option>
