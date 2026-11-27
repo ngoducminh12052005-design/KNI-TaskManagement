@@ -2765,7 +2765,6 @@ function TaskDocForm({ form, setForm, isManager, selfMode, setSelfMode, crossMod
                   <input type="time" value={slaDue?.time ?? ''} readOnly disabled className={cell} style={{ ...ink, maxWidth: 110, opacity: slaDue ? 1 : 0.4 }}
                     title="Giờ hoàn thành = giờ bắt đầu + mức SLA (tự tính, chỉ có khi chọn mức SLA)" />
                 </div>
-                {slaDue && <p className="text-[10px] mt-1" style={{ color: '#b45309' }}>⏱ Tự tính theo SLA: hoàn thành lúc {slaDue.time} ngày {slaDue.date.split('-').reverse().join('/')}. Cần ngày khác thì sửa tay ô ngày.</p>}
               </td>
             </tr>
                         <tr>
